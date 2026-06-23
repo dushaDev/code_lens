@@ -2,21 +2,21 @@ import os
 import shutil
 import re
 from datetime import timezone
-
 from sqlalchemy.orm import Session
-from pydriller import Repository, Commit as PyDrillerCommit
-from src.domain.models import Project, Author, Commit, FileChange
+from pydriller import Repository
 
-class PyDrillerService:
+from src.domain.entities import ProjectEntity
+from src.use_cases.interfaces import IGitExtractorService
+from src.infrastructure.database.models import AuthorModel, CommitModel, FileChangeModel
+
+class PyDrillerService(IGitExtractorService):
     def __init__(self, db: Session):
         self.db = db
 
-    def extract_and_save(self, project: Project) -> dict:
+    def extract_and_save(self, project: ProjectEntity) -> dict:
         local_path = project.local_saved_path
         
-        # We will use pydriller to clone by providing the git_url and setting the clone_repo_to path
-        # But wait, pydriller.Repository(url) clones to a temp dir internally if it's a remote URL.
-        # However, to control the exact temp path as requested (e.g. ./temp_repos/{project_id}):
+        # Ensure parent directory exists for cloning
         os.makedirs(os.path.dirname(local_path), exist_ok=True)
         
         total_commits = 0
@@ -24,7 +24,7 @@ class PyDrillerService:
         new_authors_count = 0
 
         try:
-            # only_no_merge=True as per workflow rules
+            # Traversal uses only_no_merge=True to filter out standard merge commits
             repo = Repository(project.git_url, clone_repo_to=os.path.dirname(local_path), only_no_merge=True)
             
             for commit in repo.traverse_commits():
@@ -32,11 +32,11 @@ class PyDrillerService:
                 author_email = commit.author.email
                 author_name = commit.author.name
                 
-                author = self.db.query(Author).filter(Author.email == author_email).first()
+                author = self.db.query(AuthorModel).filter(AuthorModel.email == author_email).first()
                 if not author:
-                    author = Author(name=author_name, email=author_email)
+                    author = AuthorModel(name=author_name, email=author_email)
                     self.db.add(author)
-                    self.db.flush() # To get author.id
+                    self.db.flush()  # To obtain author.id
                     new_authors_count += 1
                 
                 # 2. Squash Heuristics
@@ -52,11 +52,9 @@ class PyDrillerService:
                     squash_warnings += 1
 
                 # 3. Save Commit
-                # PyDriller timestamps might be timezone aware, we convert to naive UTC or keep as is.
-                # SQLAlchemy DateTime expects naive if timezone=False, but it's better to ensure it's UTC
                 dt = commit.committer_date.astimezone(timezone.utc).replace(tzinfo=None) if commit.committer_date.tzinfo else commit.committer_date
 
-                db_commit = Commit(
+                db_commit = CommitModel(
                     hash=commit.hash,
                     project_id=project.id,
                     author_id=author.id,
@@ -71,7 +69,7 @@ class PyDrillerService:
 
                 # 4. Save File Changes
                 for mod in commit.modified_files:
-                    file_change = FileChange(
+                    file_change = FileChangeModel(
                         commit_hash=commit.hash,
                         filename=mod.new_path or mod.old_path or "unknown",
                         status=mod.change_type.name,
@@ -81,8 +79,6 @@ class PyDrillerService:
                     )
                     self.db.add(file_change)
                 
-                # Commit every X commits to avoid memory issues, or at the end. We'll do it at the end for this project scope
-                # but flushing helps keep things in order.
                 self.db.flush()
                 
             self.db.commit()
@@ -91,17 +87,13 @@ class PyDrillerService:
             self.db.rollback()
             raise e
         finally:
-            # Garbage collection: delete the cloned repo
-            # PyDriller might name the folder as the repo name. We need to find and delete it.
-            # PyDriller docs: when clone_repo_to is provided, it clones inside that folder.
-            # E.g. clone_repo_to='./temp_repos/1', it will clone into './temp_repos/1/repo_name'
-            # We just delete the whole './temp_repos/1' folder.
+            # Garbage collection: delete the cloned repo directory
             if os.path.exists(os.path.dirname(local_path)):
                 shutil.rmtree(os.path.dirname(local_path), ignore_errors=True)
 
         return {
             "status": "success",
             "total_commits": total_commits,
-            "total_authors": new_authors_count, # we can return new authors or count all distinct authors in this run
+            "total_authors": new_authors_count,
             "squash_warnings": squash_warnings
         }

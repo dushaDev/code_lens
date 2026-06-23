@@ -6,7 +6,7 @@ from sqlalchemy.orm import declarative_base, Mapped, mapped_column, relationship
 
 Base = declarative_base()
 
-class Project(Base):
+class ProjectModel(Base):
     __tablename__ = "projects"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -16,22 +16,22 @@ class Project(Base):
     local_saved_path: Mapped[str] = mapped_column(String, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
-    commits: Mapped[List["Commit"]] = relationship(
-        "Commit", back_populates="project", cascade="all, delete-orphan", passive_deletes=True
+    commits: Mapped[List["CommitModel"]] = relationship(
+        "CommitModel", back_populates="project", cascade="all, delete-orphan", passive_deletes=True
     )
 
 
-class Author(Base):
+class AuthorModel(Base):
     __tablename__ = "authors"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     name: Mapped[str] = mapped_column(String, nullable=False)
     email: Mapped[str] = mapped_column(String, unique=True, nullable=False)
 
-    commits: Mapped[List["Commit"]] = relationship("Commit", back_populates="author")
+    commits: Mapped[List["CommitModel"]] = relationship("CommitModel", back_populates="author")
 
 
-class Commit(Base):
+class CommitModel(Base):
     __tablename__ = "commits"
 
     hash: Mapped[str] = mapped_column(String, primary_key=True)
@@ -47,15 +47,15 @@ class Commit(Base):
     deletions: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     is_squash_suspected: Mapped[bool] = mapped_column(Boolean, default=False)
 
-    project: Mapped["Project"] = relationship("Project", back_populates="commits")
-    author: Mapped["Author"] = relationship("Author", back_populates="commits")
+    project: Mapped["ProjectModel"] = relationship("ProjectModel", back_populates="commits")
+    author: Mapped["AuthorModel"] = relationship("AuthorModel", back_populates="commits")
     
-    file_changes: Mapped[List["FileChange"]] = relationship(
-        "FileChange", back_populates="commit", cascade="all, delete-orphan", passive_deletes=True
+    file_changes: Mapped[List["FileChangeModel"]] = relationship(
+        "FileChangeModel", back_populates="commit", cascade="all, delete-orphan", passive_deletes=True
     )
 
 
-class FileChange(Base):
+class FileChangeModel(Base):
     __tablename__ = "file_changes"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -68,4 +68,4 @@ class FileChange(Base):
     lines_removed: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     raw_diff: Mapped[Optional[str]] = mapped_column(Text)
 
-    commit: Mapped["Commit"] = relationship("Commit", back_populates="file_changes")
+    commit: Mapped["CommitModel"] = relationship("CommitModel", back_populates="file_changes")
