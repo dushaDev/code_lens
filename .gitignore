@@ -27,17 +27,36 @@ share/python-wheels/
 
 # Virtual environments
 venv/
+.venv/
 ENV/
 env/
 .env
+.env.local
+.env.*.local
+
+# Temp and test directories
+temp_repos/
+temp_test_clone/
+*.db
+*.sqlite3
 
 # IDEs
 .vscode/
 .idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
 
-# Local databases
-*.db
-*.sqlite3
-
-# Temp repos
-temp_repos/
+# Node / Frontend
+node_modules/
+/frontend/dist/
+/frontend/build/
+/frontend/.next/
+/frontend/out/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnp*
+.yarn/
