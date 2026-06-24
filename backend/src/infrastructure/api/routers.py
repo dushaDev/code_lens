@@ -11,7 +11,7 @@ from src.infrastructure.api.schemas import (
     CommitResponse, AuthorFullProfileResponse, ProjectResponse, FileChangeResponse, CommitWithProjectAndFilesResponse,
     AuthorResponse, FileChangeProfileResponse, CommitProfileResponse,
     AuthorCommitsResponse, ProjectsListResponse, ProjectAuthorsResponse,
-    ProjectAnalyticsResponse, MergeAuthorsRequest
+    ProjectAnalyticsResponse, MergeAuthorsRequest, AuthorsListResponse, BranchesListResponse, BranchResponse
 )
 from src.use_cases.extract_git_history import ExtractGitHistoryUseCase
 from src.use_cases.get_author_commits import (
@@ -20,6 +20,12 @@ from src.use_cases.get_author_commits import (
     ResetDatabaseUseCase, MergeAuthorsUseCase
 )
 from src.use_cases.get_project_analytics import GetProjectAnalyticsUseCase
+from src.use_cases.get_project_details import (
+    GetProjectByIdUseCase, GetProjectBranchesUseCase, GetProjectCommitsUseCase
+)
+from src.use_cases.get_author_details import (
+    GetAllAuthorsUseCase, GetAuthorByIdUseCase
+)
 
 router = APIRouter(prefix="/api/v1")
 
@@ -75,12 +81,12 @@ def delete_project(project_id: int, db: Session = Depends(get_db)):
     response_model=AuthorCommitsResponse,
     responses={404: {"model": ErrorResponse}, 500: {"model": ErrorResponse}}
 )
-def get_author_commits(author_id: int, db: Session = Depends(get_db)):
+def get_author_commits(author_id: int, project_id: Optional[int] = None, branch: Optional[str] = None, db: Session = Depends(get_db)):
     author_repo = AuthorRepository(db)
     commit_repo = CommitRepository(db)
     use_case = GetAuthorCommitsUseCase(author_repo, commit_repo)
     try:
-        commits = use_case.execute(author_id)
+        commits = use_case.execute(author_id, project_id=project_id, branch=branch)
         commits_list = [
             CommitResponse(
                 hash=c.hash,
@@ -91,7 +97,7 @@ def get_author_commits(author_id: int, db: Session = Depends(get_db)):
                 insertions=c.insertions,
                 deletions=c.deletions,
                 is_squash_suspected=c.is_squash_suspected,
-                branches=c.branches
+                branches=",".join([b.short_name for b in c.branches]) if c.branches else None
             )
             for c in commits
         ]
@@ -130,7 +136,7 @@ def get_author_full_profile(author_id: int, project_id: Optional[int] = None, db
                     hash=c.hash,
                     timestamp=c.timestamp,
                     message=c.message,
-                    branches=c.branches,
+                    branches=",".join([b.short_name for b in c.branches]) if c.branches else None,
                     insertions=c.insertions,
                     deletions=c.deletions,
                     is_squash_suspected=c.is_squash_suspected,
@@ -209,12 +215,12 @@ def get_projects_by_author(author_id: int, db: Session = Depends(get_db)):
     response_model=ProjectAuthorsResponse,
     responses={404: {"model": ErrorResponse}, 500: {"model": ErrorResponse}}
 )
-def get_project_authors(project_id: int, db: Session = Depends(get_db)):
+def get_project_authors(project_id: int, branch: Optional[str] = None, db: Session = Depends(get_db)):
     project_repo = ProjectRepository(db)
     author_repo = AuthorRepository(db)
     use_case = GetProjectAuthorsUseCase(project_repo, author_repo)
     try:
-        authors = use_case.execute(project_id)
+        authors = use_case.execute(project_id, branch=branch)
         authors_list = [
             AuthorResponse(
                 id=a.id,
@@ -274,5 +280,137 @@ def merge_authors(request: MergeAuthorsRequest, db: Session = Depends(get_db)):
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=detail)
         else:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=detail)
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+@router.get(
+    "/projects/{project_id}",
+    response_model=ProjectResponse,
+    responses={404: {"model": ErrorResponse}, 500: {"model": ErrorResponse}}
+)
+def get_project_by_id(project_id: int, db: Session = Depends(get_db)):
+    project_repo = ProjectRepository(db)
+    use_case = GetProjectByIdUseCase(project_repo)
+    try:
+        p = use_case.execute(project_id)
+        return ProjectResponse(
+            id=p.id,
+            name=p.name,
+            description=p.description,
+            git_url=p.git_url,
+            local_saved_path=p.local_saved_path,
+            created_at=p.created_at
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+@router.get(
+    "/projects/{project_id}/branches",
+    response_model=BranchesListResponse,
+    responses={404: {"model": ErrorResponse}, 500: {"model": ErrorResponse}}
+)
+def get_project_branches(project_id: int, db: Session = Depends(get_db)):
+    project_repo = ProjectRepository(db)
+    commit_repo = CommitRepository(db)
+    use_case = GetProjectBranchesUseCase(project_repo, commit_repo)
+    try:
+        branches = use_case.execute(project_id)
+        branches_list = [
+            BranchResponse(
+                id=b.id,
+                project_id=b.project_id,
+                name=b.name,
+                short_name=b.short_name
+            )
+            for b in branches
+        ]
+        return BranchesListResponse(total_branches=len(branches_list), branches=branches_list)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+@router.get(
+    "/projects/{project_id}/commits",
+    response_model=AuthorCommitsResponse,
+    responses={404: {"model": ErrorResponse}, 500: {"model": ErrorResponse}}
+)
+def get_project_commits(
+    project_id: int,
+    branch: Optional[str] = None,
+    author_id: Optional[int] = None,
+    db: Session = Depends(get_db)
+):
+    project_repo = ProjectRepository(db)
+    commit_repo = CommitRepository(db)
+    use_case = GetProjectCommitsUseCase(project_repo, commit_repo)
+    try:
+        commits = use_case.execute(project_id, branch=branch, author_id=author_id)
+        commits_list = [
+            CommitResponse(
+                hash=c.hash,
+                project_id=c.project_id,
+                author_id=c.author_id,
+                timestamp=c.timestamp,
+                message=c.message,
+                insertions=c.insertions,
+                deletions=c.deletions,
+                is_squash_suspected=c.is_squash_suspected,
+                branches=",".join([b.short_name for b in c.branches]) if c.branches else None
+            )
+            for c in commits
+        ]
+        return AuthorCommitsResponse(total_commits=len(commits_list), commits=commits_list)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+@router.get(
+    "/authors",
+    response_model=AuthorsListResponse,
+    responses={500: {"model": ErrorResponse}}
+)
+def get_all_authors(db: Session = Depends(get_db)):
+    author_repo = AuthorRepository(db)
+    use_case = GetAllAuthorsUseCase(author_repo)
+    try:
+        authors = use_case.execute()
+        authors_list = [
+            AuthorResponse(
+                id=a.id,
+                name=a.name,
+                email=a.email
+            )
+            for a in authors
+        ]
+        return AuthorsListResponse(total_authors=len(authors_list), authors=authors_list)
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+@router.get(
+    "/authors/{author_id}",
+    response_model=AuthorResponse,
+    responses={404: {"model": ErrorResponse}, 500: {"model": ErrorResponse}}
+)
+def get_author_by_id(author_id: int, db: Session = Depends(get_db)):
+    author_repo = AuthorRepository(db)
+    use_case = GetAuthorByIdUseCase(author_repo)
+    try:
+        a = use_case.execute(author_id)
+        return AuthorResponse(
+            id=a.id,
+            name=a.name,
+            email=a.email
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))

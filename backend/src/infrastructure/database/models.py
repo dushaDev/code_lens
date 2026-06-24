@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import List, Optional
 
-from sqlalchemy import Integer, String, Text, Boolean, DateTime, ForeignKey
+from sqlalchemy import Integer, String, Text, Boolean, DateTime, ForeignKey, Table, Column
 from sqlalchemy.orm import declarative_base, Mapped, mapped_column, relationship
 
 Base = declarative_base()
@@ -18,6 +18,33 @@ class ProjectModel(Base):
 
     commits: Mapped[List["CommitModel"]] = relationship(
         "CommitModel", back_populates="project", cascade="all, delete-orphan", passive_deletes=True
+    )
+    branches: Mapped[List["BranchModel"]] = relationship(
+        "BranchModel", back_populates="project", cascade="all, delete-orphan", passive_deletes=True
+    )
+
+
+commit_branches = Table(
+    "commit_branches",
+    Base.metadata,
+    Column("commit_hash", String, ForeignKey("commits.hash", ondelete="CASCADE"), primary_key=True),
+    Column("branch_id", Integer, ForeignKey("branches.id", ondelete="CASCADE"), primary_key=True)
+)
+
+
+class BranchModel(Base):
+    __tablename__ = "branches"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    project_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
+    )
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    short_name: Mapped[str] = mapped_column(String, nullable=False)
+
+    project: Mapped["ProjectModel"] = relationship("ProjectModel", back_populates="branches")
+    commits: Mapped[List["CommitModel"]] = relationship(
+        "CommitModel", secondary=commit_branches, back_populates="branches"
     )
 
 
@@ -59,7 +86,9 @@ class CommitModel(Base):
     insertions: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     deletions: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     is_squash_suspected: Mapped[bool] = mapped_column(Boolean, default=False)
-    branches: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    branches: Mapped[List["BranchModel"]] = relationship(
+        "BranchModel", secondary=commit_branches, back_populates="commits"
+    )
 
     project: Mapped["ProjectModel"] = relationship("ProjectModel", back_populates="commits")
     author: Mapped["AuthorModel"] = relationship("AuthorModel", back_populates="commits")

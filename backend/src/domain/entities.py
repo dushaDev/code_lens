@@ -13,6 +13,13 @@ class FileChangeEntity:
     id: Optional[int] = None
 
 @dataclass
+class BranchEntity:
+    project_id: int
+    name: str
+    short_name: str
+    id: Optional[int] = None
+
+@dataclass
 class CommitEntity:
     hash: str
     project_id: int
@@ -22,7 +29,7 @@ class CommitEntity:
     insertions: int
     deletions: int
     is_squash_suspected: bool = False
-    branches: Optional[str] = None
+    branches: List[BranchEntity] = field(default_factory=list)
     project: Optional["ProjectEntity"] = None
     file_changes: List[FileChangeEntity] = field(default_factory=list)
 
