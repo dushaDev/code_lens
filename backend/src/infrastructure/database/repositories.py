@@ -1,8 +1,8 @@
 from typing import List, Optional
 from sqlalchemy.orm import Session, selectinload, joinedload, defer
-from src.domain.entities import ProjectEntity, AuthorEntity, CommitEntity, FileChangeEntity
+from src.domain.entities import ProjectEntity, AuthorEntity, CommitEntity, FileChangeEntity, BranchEntity
 from src.use_cases.interfaces import IProjectRepository, IAuthorRepository, ICommitRepository, IDatabaseService
-from src.infrastructure.database.models import ProjectModel, AuthorModel, CommitModel, FileChangeModel, Base
+from src.infrastructure.database.models import ProjectModel, AuthorModel, CommitModel, FileChangeModel, BranchModel, Base
 from src.infrastructure.database.session import engine
 
 class ProjectRepository(IProjectRepository):
@@ -90,6 +90,18 @@ class ProjectRepository(IProjectRepository):
             for m in project_models
         ]
 
+    def get_branches(self, project_id: int) -> List[BranchEntity]:
+        branch_models = self.db.query(BranchModel).filter(BranchModel.project_id == project_id).all()
+        return [
+            BranchEntity(
+                id=m.id,
+                project_id=m.project_id,
+                name=m.name,
+                short_name=m.short_name
+            )
+            for m in branch_models
+        ]
+
 
 class AuthorRepository(IAuthorRepository):
     def __init__(self, db: Session):
@@ -136,6 +148,7 @@ class AuthorRepository(IAuthorRepository):
             .filter(CommitModel.author_id.in_(author_ids))
             .options(
                 selectinload(CommitModel.file_changes).defer(FileChangeModel.raw_diff),
+                selectinload(CommitModel.branches),
                 joinedload(CommitModel.project)
             )
         )
@@ -179,7 +192,10 @@ class AuthorRepository(IAuthorRepository):
                     insertions=c.insertions,
                     deletions=c.deletions,
                     is_squash_suspected=c.is_squash_suspected,
-                    branches=c.branches,
+                    branches=[
+                        BranchEntity(id=b.id, project_id=b.project_id, name=b.name, short_name=b.short_name)
+                        for b in c.branches
+                    ],
                     file_changes=file_changes,
                     project=project
                 )
@@ -226,6 +242,56 @@ class AuthorRepository(IAuthorRepository):
             for r in resolved_authors.values()
         ]
 
+    def get_by_project_id_and_branch(self, project_id: int, branch: str) -> List[AuthorEntity]:
+        # Query all authors who have committed to the project on a specific branch
+        author_models = (
+            self.db.query(AuthorModel)
+            .join(CommitModel)
+            .join(CommitModel.branches)
+            .filter(
+                CommitModel.project_id == project_id,
+                (BranchModel.name == branch) | (BranchModel.short_name == branch)
+            )
+            .distinct()
+            .all()
+        )
+
+        # Map aliases to their canonical root authors
+        resolved_authors = {}
+        for m in author_models:
+            root = m
+            visited = {m.id}
+            while root.canonical_author_id is not None and root.canonical_author_id not in visited:
+                visited.add(root.canonical_author_id)
+                parent = self.db.query(AuthorModel).filter(AuthorModel.id == root.canonical_author_id).first()
+                if not parent:
+                    break
+                root = parent
+            resolved_authors[root.id] = root
+
+        return [
+            AuthorEntity(
+                id=r.id,
+                name=r.name,
+                email=r.email,
+                canonical_author_id=r.canonical_author_id
+            )
+            for r in resolved_authors.values()
+        ]
+
+    def get_all(self) -> List[AuthorEntity]:
+        # Get only root canonical authors to avoid duplicates in global list
+        author_models = self.db.query(AuthorModel).filter(AuthorModel.canonical_author_id.is_(None)).all()
+        return [
+            AuthorEntity(
+                id=m.id,
+                name=m.name,
+                email=m.email,
+                canonical_author_id=m.canonical_author_id
+            )
+            for m in author_models
+        ]
+
     def update_canonical_author_id(self, author_id: int, canonical_id: Optional[int]) -> None:
         author_model = self.db.query(AuthorModel).filter(AuthorModel.id == author_id).first()
         if author_model:
@@ -237,11 +303,34 @@ class CommitRepository(ICommitRepository):
     def __init__(self, db: Session):
         self.db = db
 
-    def get_by_author_id(self, author_id: int, project_id: Optional[int] = None) -> List[CommitEntity]:
-        query = self.db.query(CommitModel).filter(CommitModel.author_id == author_id)
+    def get_by_author_id(self, author_id: int, project_id: Optional[int] = None, branch: Optional[str] = None) -> List[CommitEntity]:
+        # Find root and all aliases of the author to include their commits
+        author = self.db.query(AuthorModel).filter(AuthorModel.id == author_id).first()
+        if author:
+            root = author
+            visited = {author.id}
+            while root.canonical_author_id is not None and root.canonical_author_id not in visited:
+                visited.add(root.canonical_author_id)
+                parent = self.db.query(AuthorModel).filter(AuthorModel.id == root.canonical_author_id).first()
+                if not parent:
+                    break
+                root = parent
+            
+            alias_ids = [alias.id for alias in root.aliases]
+            author_ids = [root.id] + alias_ids
+            query = self.db.query(CommitModel).filter(CommitModel.author_id.in_(author_ids))
+        else:
+            query = self.db.query(CommitModel).filter(CommitModel.author_id == author_id)
+
         if project_id is not None:
             query = query.filter(CommitModel.project_id == project_id)
-        commit_models = query.all()
+
+        if branch is not None:
+            query = query.join(CommitModel.branches).filter(
+                (BranchModel.name == branch) | (BranchModel.short_name == branch)
+            )
+
+        commit_models = query.options(selectinload(CommitModel.branches)).order_by(CommitModel.timestamp.desc()).all()
         return [
             CommitEntity(
                 hash=m.hash,
@@ -252,7 +341,10 @@ class CommitRepository(ICommitRepository):
                 insertions=m.insertions,
                 deletions=m.deletions,
                 is_squash_suspected=m.is_squash_suspected,
-                branches=m.branches
+                branches=[
+                    BranchEntity(id=b.id, project_id=b.project_id, name=b.name, short_name=b.short_name)
+                    for b in m.branches
+                ]
             )
             for m in commit_models
         ]
@@ -261,6 +353,7 @@ class CommitRepository(ICommitRepository):
         commit_models = (
             self.db.query(CommitModel)
             .filter(CommitModel.project_id == project_id)
+            .options(selectinload(CommitModel.branches))
             .all()
         )
         return [
@@ -273,7 +366,56 @@ class CommitRepository(ICommitRepository):
                 insertions=m.insertions,
                 deletions=m.deletions,
                 is_squash_suspected=m.is_squash_suspected,
-                branches=m.branches
+                branches=[
+                    BranchEntity(id=b.id, project_id=b.project_id, name=b.name, short_name=b.short_name)
+                    for b in m.branches
+                ]
+            )
+            for m in commit_models
+        ]
+
+    def get_project_commits(self, project_id: int, branch: Optional[str] = None, author_id: Optional[int] = None) -> List[CommitEntity]:
+        query = self.db.query(CommitModel).filter(CommitModel.project_id == project_id)
+
+        if author_id is not None:
+            # Find root and all aliases of the author to include their commits
+            author = self.db.query(AuthorModel).filter(AuthorModel.id == author_id).first()
+            if author:
+                root = author
+                visited = {author.id}
+                while root.canonical_author_id is not None and root.canonical_author_id not in visited:
+                    visited.add(root.canonical_author_id)
+                    parent = self.db.query(AuthorModel).filter(AuthorModel.id == root.canonical_author_id).first()
+                    if not parent:
+                        break
+                    root = parent
+                
+                alias_ids = [alias.id for alias in root.aliases]
+                author_ids = [root.id] + alias_ids
+                query = query.filter(CommitModel.author_id.in_(author_ids))
+            else:
+                query = query.filter(CommitModel.author_id == author_id)
+
+        if branch is not None:
+            query = query.join(CommitModel.branches).filter(
+                (BranchModel.name == branch) | (BranchModel.short_name == branch)
+            )
+
+        commit_models = query.options(selectinload(CommitModel.branches)).order_by(CommitModel.timestamp.desc()).all()
+        return [
+            CommitEntity(
+                hash=m.hash,
+                project_id=m.project_id,
+                author_id=m.author_id,
+                timestamp=m.timestamp,
+                message=m.message,
+                insertions=m.insertions,
+                deletions=m.deletions,
+                is_squash_suspected=m.is_squash_suspected,
+                branches=[
+                    BranchEntity(id=b.id, project_id=b.project_id, name=b.name, short_name=b.short_name)
+                    for b in m.branches
+                ]
             )
             for m in commit_models
         ]
@@ -290,7 +432,9 @@ class DatabaseService(IDatabaseService):
         try:
             # Delete/truncate data one by one in correct dependency order (leaves schema intact, resets PK sequences)
             session.execute(text("TRUNCATE TABLE file_changes RESTART IDENTITY CASCADE;"))
+            session.execute(text("TRUNCATE TABLE commit_branches CASCADE;"))
             session.execute(text("TRUNCATE TABLE commits RESTART IDENTITY CASCADE;"))
+            session.execute(text("TRUNCATE TABLE branches RESTART IDENTITY CASCADE;"))
             session.execute(text("TRUNCATE TABLE projects RESTART IDENTITY CASCADE;"))
             session.execute(text("TRUNCATE TABLE authors RESTART IDENTITY CASCADE;"))
             session.commit()

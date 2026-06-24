@@ -1,4 +1,4 @@
-from typing import List
+from typing import List, Optional
 from src.domain.entities import CommitEntity, AuthorEntity, ProjectEntity
 from src.use_cases.interfaces import IAuthorRepository, ICommitRepository, IProjectRepository, IDatabaseService
 
@@ -7,11 +7,11 @@ class GetAuthorCommitsUseCase:
         self.author_repo = author_repo
         self.commit_repo = commit_repo
 
-    def execute(self, author_id: int) -> List[CommitEntity]:
+    def execute(self, author_id: int, project_id: Optional[int] = None, branch: Optional[str] = None) -> List[CommitEntity]:
         author = self.author_repo.get_by_id(author_id)
         if not author:
             raise ValueError(f"Author with ID {author_id} not found.")
-        return self.commit_repo.get_by_author_id(author_id)
+        return self.commit_repo.get_by_author_id(author_id, project_id=project_id, branch=branch)
 
 class GetAuthorFullProfileUseCase:
     def __init__(self, author_repo: IAuthorRepository, project_repo: IProjectRepository = None):
@@ -47,10 +47,12 @@ class GetProjectAuthorsUseCase:
         self.project_repo = project_repo
         self.author_repo = author_repo
 
-    def execute(self, project_id: int) -> List[AuthorEntity]:
+    def execute(self, project_id: int, branch: Optional[str] = None) -> List[AuthorEntity]:
         project = self.project_repo.get_by_id(project_id)
         if not project:
             raise ValueError(f"Project with ID {project_id} not found.")
+        if branch:
+            return self.author_repo.get_by_project_id_and_branch(project_id, branch)
         return self.author_repo.get_by_project_id(project_id)
 
 class ResetDatabaseUseCase:

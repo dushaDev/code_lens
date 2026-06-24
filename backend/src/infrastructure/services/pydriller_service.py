@@ -7,7 +7,13 @@ from pydriller import Repository
 
 from src.domain.entities import ProjectEntity
 from src.use_cases.interfaces import IGitExtractorService
-from src.infrastructure.database.models import AuthorModel, CommitModel, FileChangeModel
+from src.infrastructure.database.models import AuthorModel, CommitModel, FileChangeModel, BranchModel
+
+def clean_branch_short_name(full_name: str) -> str:
+    parts = [p.strip() for p in full_name.split("/") if p.strip()]
+    if len(parts) >= 2:
+        return "/".join(parts[-2:])
+    return "/".join(parts)
 
 # Compiled regex for ignoring build, dependency, and cache directories/files
 IGNORE_RE = re.compile(
@@ -94,6 +100,7 @@ class PyDrillerService(IGitExtractorService):
             
             # Find and parse .mailmap if present in the cloned repository
             mailmap_data = {}
+            branch_cache = {}  # key: (project_id, branch_name) -> BranchModel
             if os.path.exists(temp_dir):
                 for item in os.listdir(temp_dir):
                     item_path = os.path.join(temp_dir, item)
@@ -151,8 +158,6 @@ class PyDrillerService(IGitExtractorService):
                 # 4. Save Commit
                 dt = commit.committer_date.astimezone(timezone.utc).replace(tzinfo=None) if commit.committer_date.tzinfo else commit.committer_date
 
-                branches_str = ",".join(sorted(commit.branches)) if commit.branches else None
-
                 db_commit = CommitModel(
                     hash=commit.hash,
                     project_id=project.id,
@@ -161,11 +166,33 @@ class PyDrillerService(IGitExtractorService):
                     message=commit.msg,
                     insertions=kept_insertions,
                     deletions=kept_deletions,
-                    is_squash_suspected=is_squash,
-                    branches=branches_str
+                    is_squash_suspected=is_squash
                 )
                 self.db.add(db_commit)
                 total_commits += 1
+
+                # Link branches
+                if commit.branches:
+                    for b_name in commit.branches:
+                        cache_key = (project.id, b_name)
+                        if cache_key not in branch_cache:
+                            # Check database to see if branch exists
+                            branch_model = self.db.query(BranchModel).filter(
+                                BranchModel.project_id == project.id,
+                                BranchModel.name == b_name
+                            ).first()
+                            if not branch_model:
+                                short = clean_branch_short_name(b_name)
+                                branch_model = BranchModel(
+                                    project_id=project.id,
+                                    name=b_name,
+                                    short_name=short
+                                )
+                                self.db.add(branch_model)
+                                self.db.flush()
+                            branch_cache[cache_key] = branch_model
+                        
+                        db_commit.branches.append(branch_cache[cache_key])
 
                 # 5. Save File Changes
                 for mod in kept_files:

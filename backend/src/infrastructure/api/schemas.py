@@ -128,3 +128,21 @@ class MergeAuthorsRequest(BaseModel):
     target_author_id: int
 
 
+class AuthorsListResponse(BaseModel):
+    total_authors: int
+    authors: List[AuthorResponse]
+
+
+class BranchResponse(BaseModel):
+    id: int
+    project_id: int
+    name: str
+    short_name: str
+
+
+class BranchesListResponse(BaseModel):
+    total_branches: int
+    branches: List[BranchResponse]
+
+
+
