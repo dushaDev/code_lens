@@ -111,4 +111,9 @@ class FileChangeModel(Base):
     lines_removed: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     raw_diff: Mapped[Optional[str]] = mapped_column(Text)
 
+    # AST Qualitative Metrics (Phase 3)
+    complexity_score: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    function_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    ast_fingerprint: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+
     commit: Mapped["CommitModel"] = relationship("CommitModel", back_populates="file_changes")

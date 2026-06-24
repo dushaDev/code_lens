@@ -8,6 +8,7 @@ from pydriller import Repository
 from src.domain.entities import ProjectEntity
 from src.use_cases.interfaces import IGitExtractorService
 from src.infrastructure.database.models import AuthorModel, CommitModel, FileChangeModel, BranchModel
+from src.infrastructure.services.ast_parser import parse_python
 
 def clean_branch_short_name(full_name: str) -> str:
     parts = [p.strip() for p in full_name.split("/") if p.strip()]
@@ -196,13 +197,29 @@ class PyDrillerService(IGitExtractorService):
 
                 # 5. Save File Changes
                 for mod in kept_files:
+                    filename = mod.new_path or mod.old_path or "unknown"
+
+                    # --- AST Analysis (Python files only) ---
+                    complexity_score = None
+                    function_count = None
+                    ast_fingerprint = None
+                    if filename.endswith(".py") and mod.source_code:
+                        metrics = parse_python(mod.source_code)
+                        if metrics:
+                            complexity_score = metrics.complexity_score
+                            function_count = metrics.function_count
+                            ast_fingerprint = metrics.ast_fingerprint
+
                     file_change = FileChangeModel(
                         commit_hash=commit.hash,
-                        filename=mod.new_path or mod.old_path or "unknown",
+                        filename=filename,
                         status=mod.change_type.name,
                         lines_added=mod.added_lines or 0,
                         lines_removed=mod.deleted_lines or 0,
-                        raw_diff=mod.diff
+                        raw_diff=mod.diff,
+                        complexity_score=complexity_score,
+                        function_count=function_count,
+                        ast_fingerprint=ast_fingerprint,
                     )
                     self.db.add(file_change)
                 

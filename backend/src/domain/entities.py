@@ -11,6 +11,9 @@ class FileChangeEntity:
     raw_diff: Optional[str] = None
     commit_hash: Optional[str] = None
     id: Optional[int] = None
+    complexity_score: Optional[int] = None
+    function_count: Optional[int] = None
+    ast_fingerprint: Optional[str] = None
 
 @dataclass
 class BranchEntity:

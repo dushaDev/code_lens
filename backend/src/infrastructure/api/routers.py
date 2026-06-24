@@ -11,7 +11,8 @@ from src.infrastructure.api.schemas import (
     CommitResponse, AuthorFullProfileResponse, ProjectResponse, FileChangeResponse, CommitWithProjectAndFilesResponse,
     AuthorResponse, FileChangeProfileResponse, CommitProfileResponse,
     AuthorCommitsResponse, ProjectsListResponse, ProjectAuthorsResponse,
-    ProjectAnalyticsResponse, MergeAuthorsRequest, AuthorsListResponse, BranchesListResponse, BranchResponse
+    ProjectAnalyticsResponse, MergeAuthorsRequest, AuthorsListResponse, BranchesListResponse, BranchResponse,
+    FileChangeMetricsResponse, FileChangeASTResponse, ASTNodeResponse
 )
 from src.use_cases.extract_git_history import ExtractGitHistoryUseCase
 from src.use_cases.get_author_commits import (
@@ -414,3 +415,92 @@ def get_author_by_id(author_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+@router.get(
+    "/files/{file_change_id}/metrics",
+    response_model=FileChangeMetricsResponse,
+    responses={404: {"model": ErrorResponse}},
+    summary="Get stored AST metrics for a file change"
+)
+def get_file_metrics(file_change_id: int, db: Session = Depends(get_db)):
+    """Returns the pre-computed AST metrics (complexity, function count, fingerprint)
+    that were stored during extraction. Fast — no live parsing."""
+    from src.infrastructure.database.models import FileChangeModel
+    fc = db.query(FileChangeModel).filter(FileChangeModel.id == file_change_id).first()
+    if not fc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File change not found")
+    return FileChangeMetricsResponse(
+        id=fc.id,
+        filename=fc.filename,
+        complexity_score=fc.complexity_score,
+        function_count=fc.function_count,
+        ast_fingerprint=fc.ast_fingerprint,
+    )
+
+
+@router.get(
+    "/files/{file_change_id}/ast",
+    response_model=FileChangeASTResponse,
+    responses={404: {"model": ErrorResponse}, 422: {"model": ErrorResponse}},
+    summary="Get real-time AST tree for a file change"
+)
+def get_file_ast(file_change_id: int, db: Session = Depends(get_db)):
+    """Parses the stored source code on-the-fly using tree-sitter and returns
+    a simplified, JSON-serialisable AST tree structure. The full AST is never
+    persisted — it is generated here and immediately discarded after serialisation."""
+    from src.infrastructure.database.models import FileChangeModel
+    from src.infrastructure.services.ast_parser import build_ast_tree
+
+    fc = db.query(FileChangeModel).filter(FileChangeModel.id == file_change_id).first()
+    if not fc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File change not found")
+
+    language = "unknown"
+    source_code: str | None = None
+
+    if fc.filename.endswith(".py"):
+        language = "python"
+        # Source code is reconstructed from the stored raw_diff if available
+        # (PyDriller stores the full post-state source_code inside the diff for new/modified files)
+        if fc.raw_diff:
+            # Extract only the added lines (+) from the diff to reconstruct source
+            lines = []
+            for line in fc.raw_diff.splitlines():
+                if line.startswith("+") and not line.startswith("+++"):
+                    lines.append(line[1:])
+            source_code = "\n".join(lines) if lines else None
+    else:
+        return FileChangeASTResponse(
+            file_change_id=file_change_id,
+            filename=fc.filename,
+            language=language,
+            ast=None,
+            error=f"AST parsing is not supported for this file type ({fc.filename.rsplit('.', 1)[-1] if '.' in fc.filename else 'unknown'}). Only .py files are currently supported."
+        )
+
+    if not source_code:
+        return FileChangeASTResponse(
+            file_change_id=file_change_id,
+            filename=fc.filename,
+            language=language,
+            ast=None,
+            error="No source code available for this file change record."
+        )
+
+    tree_dict = build_ast_tree(source_code)
+    if tree_dict is None:
+        return FileChangeASTResponse(
+            file_change_id=file_change_id,
+            filename=fc.filename,
+            language=language,
+            ast=None,
+            error="tree-sitter is unavailable or failed to parse the source code."
+        )
+
+    return FileChangeASTResponse(
+        file_change_id=file_change_id,
+        filename=fc.filename,
+        language=language,
+        ast=ASTNodeResponse(**tree_dict),
+    )
