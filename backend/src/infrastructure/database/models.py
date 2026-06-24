@@ -30,6 +30,19 @@ class AuthorModel(Base):
 
     commits: Mapped[List["CommitModel"]] = relationship("CommitModel", back_populates="author")
 
+    canonical_author_id: Mapped[Optional[int]] = mapped_column(
+        Integer, ForeignKey("authors.id", ondelete="SET NULL"), nullable=True
+    )
+    aliases: Mapped[List["AuthorModel"]] = relationship(
+        "AuthorModel",
+        back_populates="canonical_author"
+    )
+    canonical_author: Mapped[Optional["AuthorModel"]] = relationship(
+        "AuthorModel",
+        back_populates="aliases",
+        remote_side="AuthorModel.id"
+    )
+
 
 class CommitModel(Base):
     __tablename__ = "commits"
@@ -46,6 +59,7 @@ class CommitModel(Base):
     insertions: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     deletions: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     is_squash_suspected: Mapped[bool] = mapped_column(Boolean, default=False)
+    branches: Mapped[Optional[str]] = mapped_column(String, nullable=True)
 
     project: Mapped["ProjectModel"] = relationship("ProjectModel", back_populates="commits")
     author: Mapped["AuthorModel"] = relationship("AuthorModel", back_populates="commits")

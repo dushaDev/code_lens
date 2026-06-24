@@ -9,6 +9,59 @@ from src.domain.entities import ProjectEntity
 from src.use_cases.interfaces import IGitExtractorService
 from src.infrastructure.database.models import AuthorModel, CommitModel, FileChangeModel
 
+# Compiled regex for ignoring build, dependency, and cache directories/files
+IGNORE_RE = re.compile(
+    r'(?:^|[/\\])('
+    r'node_modules|dist|build|\.next|out|coverage|'
+    r'__pycache__|venv|\.venv|\.pytest_cache|'
+    r'\.gradle|\.cxx|target|'
+    r'bin|obj|'
+    r'\.idea|\.vscode|logs'
+    r')(?:[/\\]|$)|'
+    r'\.pyc$|'
+    r'(?:^|[/\\])\.DS_Store$'
+)
+
+def is_ignored_path(path: str) -> bool:
+    if not path:
+        return False
+    return bool(IGNORE_RE.search(path))
+
+def parse_mailmap(file_path: str) -> dict:
+    """
+    Parses a git .mailmap file.
+    Formats supported:
+    Proper Name <proper@email.com> Commit Name <commit@email.com>
+    Proper Name <proper@email.com> <commit@email.com>
+    <proper@email.com> <commit@email.com>
+    """
+    mapping = {}
+    try:
+        with open(file_path, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                # Extract all <email> parts using regex
+                emails = re.findall(r"<([^>]+)>", line)
+                if len(emails) >= 2:
+                    proper_email = emails[0].strip().lower()
+                    commit_email = emails[1].strip().lower()
+                    
+                    # Extract name before the first '<' if present
+                    proper_name = None
+                    name_match = re.match(r"^([^<]+)", line)
+                    if name_match:
+                        proper_name = name_match.group(1).strip()
+                    
+                    mapping[commit_email] = {
+                        "email": proper_email,
+                        "name": proper_name
+                    }
+    except Exception as e:
+        print(f"Error parsing .mailmap: {e}")
+    return mapping
+
 class PyDrillerService(IGitExtractorService):
     def __init__(self, db: Session):
         self.db = db
@@ -16,8 +69,20 @@ class PyDrillerService(IGitExtractorService):
     def extract_and_save(self, project: ProjectEntity) -> dict:
         local_path = project.local_saved_path
         
+        # Clean up any stale/incomplete repository clone directory from previous runs
+        temp_dir = os.path.dirname(local_path)
+        if os.path.exists(temp_dir):
+            import stat
+            def remove_readonly(func, path, excinfo):
+                try:
+                    os.chmod(path, stat.S_IWRITE)
+                    func(path)
+                except Exception:
+                    pass
+            shutil.rmtree(temp_dir, onerror=remove_readonly)
+
         # Ensure parent directory exists for cloning
-        os.makedirs(os.path.dirname(local_path), exist_ok=True)
+        os.makedirs(temp_dir, exist_ok=True)
         
         total_commits = 0
         squash_warnings = 0
@@ -25,13 +90,32 @@ class PyDrillerService(IGitExtractorService):
 
         try:
             # Traversal uses only_no_merge=True to filter out standard merge commits
-            repo = Repository(project.git_url, clone_repo_to=os.path.dirname(local_path), only_no_merge=True)
+            repo = Repository(project.git_url, clone_repo_to=os.path.dirname(local_path), only_no_merge=True, include_refs=True)
             
+            # Find and parse .mailmap if present in the cloned repository
+            mailmap_data = {}
+            if os.path.exists(temp_dir):
+                for item in os.listdir(temp_dir):
+                    item_path = os.path.join(temp_dir, item)
+                    if os.path.isdir(item_path):
+                        mailmap_file = os.path.join(item_path, ".mailmap")
+                        if os.path.isfile(mailmap_file):
+                            mailmap_data = parse_mailmap(mailmap_file)
+                            break
+
             for commit in repo.traverse_commits():
                 # 1. Author Resolution
                 author_email = commit.author.email
                 author_name = commit.author.name
                 
+                # Apply .mailmap mapping
+                email_lower = author_email.lower()
+                if email_lower in mailmap_data:
+                    mapped = mailmap_data[email_lower]
+                    author_email = mapped["email"]
+                    if mapped["name"]:
+                        author_name = mapped["name"]
+
                 author = self.db.query(AuthorModel).filter(AuthorModel.email == author_email).first()
                 if not author:
                     author = AuthorModel(name=author_name, email=author_email)
@@ -41,7 +125,7 @@ class PyDrillerService(IGitExtractorService):
                 
                 # 2. Squash Heuristics
                 is_squash = False
-                if commit.insertions > 500:
+                if commit.insertions > 1000:
                     is_squash = True
                 elif "Co-authored-by:" in commit.msg:
                     is_squash = True
@@ -51,8 +135,23 @@ class PyDrillerService(IGitExtractorService):
                 if is_squash:
                     squash_warnings += 1
 
-                # 3. Save Commit
+                # 3. Filter File Changes and calculate kept additions/deletions
+                kept_files = []
+                kept_insertions = 0
+                kept_deletions = 0
+                
+                for mod in commit.modified_files:
+                    path = mod.new_path or mod.old_path or "unknown"
+                    if is_ignored_path(path):
+                        continue
+                    kept_files.append(mod)
+                    kept_insertions += mod.added_lines or 0
+                    kept_deletions += mod.deleted_lines or 0
+
+                # 4. Save Commit
                 dt = commit.committer_date.astimezone(timezone.utc).replace(tzinfo=None) if commit.committer_date.tzinfo else commit.committer_date
+
+                branches_str = ",".join(sorted(commit.branches)) if commit.branches else None
 
                 db_commit = CommitModel(
                     hash=commit.hash,
@@ -60,21 +159,22 @@ class PyDrillerService(IGitExtractorService):
                     author_id=author.id,
                     timestamp=dt,
                     message=commit.msg,
-                    insertions=commit.insertions,
-                    deletions=commit.deletions,
-                    is_squash_suspected=is_squash
+                    insertions=kept_insertions,
+                    deletions=kept_deletions,
+                    is_squash_suspected=is_squash,
+                    branches=branches_str
                 )
                 self.db.add(db_commit)
                 total_commits += 1
 
-                # 4. Save File Changes
-                for mod in commit.modified_files:
+                # 5. Save File Changes
+                for mod in kept_files:
                     file_change = FileChangeModel(
                         commit_hash=commit.hash,
                         filename=mod.new_path or mod.old_path or "unknown",
                         status=mod.change_type.name,
-                        lines_added=mod.added_lines,
-                        lines_removed=mod.deleted_lines,
+                        lines_added=mod.added_lines or 0,
+                        lines_removed=mod.deleted_lines or 0,
                         raw_diff=mod.diff
                     )
                     self.db.add(file_change)
@@ -89,7 +189,14 @@ class PyDrillerService(IGitExtractorService):
         finally:
             # Garbage collection: delete the cloned repo directory
             if os.path.exists(os.path.dirname(local_path)):
-                shutil.rmtree(os.path.dirname(local_path), ignore_errors=True)
+                import stat
+                def remove_readonly(func, path, excinfo):
+                    try:
+                        os.chmod(path, stat.S_IWRITE)
+                        func(path)
+                    except Exception:
+                        pass
+                shutil.rmtree(os.path.dirname(local_path), onerror=remove_readonly)
 
         return {
             "status": "success",

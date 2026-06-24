@@ -22,6 +22,8 @@ class CommitEntity:
     insertions: int
     deletions: int
     is_squash_suspected: bool = False
+    branches: Optional[str] = None
+    project: Optional["ProjectEntity"] = None
     file_changes: List[FileChangeEntity] = field(default_factory=list)
 
 @dataclass
@@ -29,6 +31,9 @@ class AuthorEntity:
     name: str
     email: str
     id: Optional[int] = None
+    canonical_author_id: Optional[int] = None
+    commits: List[CommitEntity] = field(default_factory=list)
+    aliases: List["AuthorEntity"] = field(default_factory=list)
 
 @dataclass
 class ProjectEntity:
