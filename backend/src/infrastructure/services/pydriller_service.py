@@ -140,36 +140,29 @@ class PyDrillerService(IGitExtractorService):
                 ) from clone_err
 
             # ----------------------------------------------------------------
-            # Step 2: Find the actual cloned sub-directory (don't assume name)
-            # PyDriller names the clone after the repo basename, which may
-            # differ from what we stored in local_saved_path.
-            # ----------------------------------------------------------------
-            cloned_subdirs = [
-                os.path.join(temp_dir, d)
-                for d in os.listdir(temp_dir)
-                if os.path.isdir(os.path.join(temp_dir, d))
-            ]
-            if not cloned_subdirs:
-                raise RuntimeError(
-                    f"Clone succeeded but no directory was created inside '{temp_dir}'. "
-                    f"This is unexpected — check disk space and permissions."
-                )
-            actual_clone_path = cloned_subdirs[0]  # always exactly one clone
-
-            # ----------------------------------------------------------------
-            # Step 3: Parse .mailmap from the actual cloned directory
+            # Step 2 & 3: Traverse commits.
+            # PyDriller clones the repo LAZILY — the clone only happens when
+            # traverse_commits() starts iterating, NOT in the constructor.
+            # We detect the actual cloned directory and load .mailmap on the
+            # very first iteration, once the clone is guaranteed to exist.
             # ----------------------------------------------------------------
             mailmap_data = {}
-            mailmap_file = os.path.join(actual_clone_path, ".mailmap")
-            if os.path.isfile(mailmap_file):
-                mailmap_data = parse_mailmap(mailmap_file)
-
             branch_cache = {}  # key: (project_id, branch_name) -> BranchModel
+            mailmap_loaded = False
 
-            # ----------------------------------------------------------------
-            # Step 4: Traverse commits
-            # ----------------------------------------------------------------
             for commit in repo.traverse_commits():
+                # Load .mailmap on the very first iteration — by now the clone
+                # directory is guaranteed to exist on disk.
+                if not mailmap_loaded:
+                    mailmap_loaded = True
+                    for entry in os.listdir(temp_dir):
+                        candidate = os.path.join(temp_dir, entry)
+                        if os.path.isdir(candidate):
+                            mf = os.path.join(candidate, ".mailmap")
+                            if os.path.isfile(mf):
+                                mailmap_data = parse_mailmap(mf)
+                            break  # only one clone subdir
+
                 # 1. Author Resolution
                 author_email = commit.author.email
                 author_name = commit.author.name
