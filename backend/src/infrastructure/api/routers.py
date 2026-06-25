@@ -11,7 +11,8 @@ from src.infrastructure.api.schemas import (
     CommitResponse, AuthorFullProfileResponse, ProjectResponse, FileChangeResponse, CommitWithProjectAndFilesResponse,
     AuthorResponse, FileChangeProfileResponse, CommitProfileResponse,
     AuthorCommitsResponse, ProjectsListResponse, ProjectAuthorsResponse,
-    ProjectAnalyticsResponse, MergeAuthorsRequest, AuthorsListResponse, BranchesListResponse, BranchResponse
+    ProjectAnalyticsResponse, MergeAuthorsRequest, AuthorsListResponse, BranchesListResponse, BranchResponse,
+    FileChangeMetricsResponse, FileChangeASTResponse, ASTNodeResponse
 )
 from src.use_cases.extract_git_history import ExtractGitHistoryUseCase
 from src.use_cases.get_author_commits import (
@@ -61,8 +62,14 @@ def extract_git_data(project_id: int, db: Session = Depends(get_db)):
         return ExtractResponse(**result)
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except RuntimeError as e:
+        # Human-readable errors raised by PyDrillerService (clone failure, etc.)
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
     except Exception as e:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"{type(e).__name__}: {str(e)}"
+        )
 
 @router.delete(
     "/projects/{project_id}", 
@@ -414,3 +421,109 @@ def get_author_by_id(author_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+@router.get(
+    "/files/{file_change_id}/metrics",
+    response_model=FileChangeMetricsResponse,
+    responses={404: {"model": ErrorResponse}},
+    summary="Get stored AST metrics for a file change"
+)
+def get_file_metrics(file_change_id: int, db: Session = Depends(get_db)):
+    """Returns the pre-computed AST metrics (complexity, function count, fingerprint)
+    that were stored during extraction. Fast — no live parsing."""
+    from src.infrastructure.database.models import FileChangeModel
+    fc = db.query(FileChangeModel).filter(FileChangeModel.id == file_change_id).first()
+    if not fc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File change not found")
+    return FileChangeMetricsResponse(
+        id=fc.id,
+        filename=fc.filename,
+        complexity_score=fc.complexity_score,
+        function_count=fc.function_count,
+        ast_fingerprint=fc.ast_fingerprint,
+    )
+
+
+@router.get(
+    "/files/{file_change_id}/ast",
+    response_model=FileChangeASTResponse,
+    responses={404: {"model": ErrorResponse}, 422: {"model": ErrorResponse}},
+    summary="Get real-time AST tree for a file change"
+)
+def get_file_ast(file_change_id: int, db: Session = Depends(get_db)):
+    """Parses the stored source code on-the-fly using tree-sitter and returns
+    a simplified, JSON-serialisable AST tree structure.
+
+    Supported languages: Python, JavaScript, TypeScript, Java, Kotlin, Dart, C, C++, Go.
+    The full AST is never persisted — it is generated here and discarded after serialisation."""
+    from src.infrastructure.database.models import FileChangeModel
+    from src.infrastructure.services.ast_parser import build_ast_tree, get_language_for_file, supported_languages
+
+    fc = db.query(FileChangeModel).filter(FileChangeModel.id == file_change_id).first()
+    if not fc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File change not found")
+
+    # Detect language from file extension
+    language = get_language_for_file(fc.filename)
+    if language is None:
+        ext = "." + fc.filename.rsplit(".", 1)[-1].lower() if "." in fc.filename else "(none)"
+        return FileChangeASTResponse(
+            file_change_id=file_change_id,
+            filename=fc.filename,
+            language="unsupported",
+            ast=None,
+            error=(
+                f"File extension '{ext}' is not supported for AST analysis. "
+                f"Supported languages: {', '.join(supported_languages())}."
+            )
+        )
+
+    # Reconstruct source from diff (added lines only)
+    source_code: str | None = None
+    if fc.raw_diff:
+        lines = [
+            line[1:]
+            for line in fc.raw_diff.splitlines()
+            if line.startswith("+") and not line.startswith("+++")
+        ]
+        source_code = "\n".join(lines) if lines else None
+
+    if not source_code:
+        return FileChangeASTResponse(
+            file_change_id=file_change_id,
+            filename=fc.filename,
+            language=language,
+            ast=None,
+            error="No source code available for this file change record."
+        )
+
+    tree_dict = build_ast_tree(source_code, language)
+    if tree_dict is None:
+        return FileChangeASTResponse(
+            file_change_id=file_change_id,
+            filename=fc.filename,
+            language=language,
+            ast=None,
+            error="tree-sitter failed to parse the source code."
+        )
+
+    return FileChangeASTResponse(
+        file_change_id=file_change_id,
+        filename=fc.filename,
+        language=language,
+        ast=ASTNodeResponse(**tree_dict),
+    )
+
+
+@router.get(
+    "/ast/supported-languages",
+    summary="List languages supported for AST analysis"
+)
+def get_supported_languages():
+    """Returns the list of programming languages currently supported for AST parsing."""
+    from src.infrastructure.services.ast_parser import supported_languages, EXTENSION_TO_LANGUAGE
+    return {
+        "supported_languages": supported_languages(),
+        "file_extensions": EXTENSION_TO_LANGUAGE,
+    }

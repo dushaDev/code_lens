@@ -145,4 +145,32 @@ class BranchesListResponse(BaseModel):
     branches: List[BranchResponse]
 
 
+class FileChangeMetricsResponse(BaseModel):
+    """Stored AST metrics for a file change record."""
+    id: int
+    filename: str
+    complexity_score: Optional[int] = None
+    function_count: Optional[int] = None
+    ast_fingerprint: Optional[str] = None
 
+
+class ASTNodeResponse(BaseModel):
+    """A single node in the simplified real-time AST tree."""
+    type: str
+    start: tuple
+    end: tuple
+    is_error: bool = False
+    text: Optional[str] = None
+    children: Optional[List["ASTNodeResponse"]] = None
+
+
+ASTNodeResponse.model_rebuild()  # Required for self-referential models
+
+
+class FileChangeASTResponse(BaseModel):
+    """Real-time on-demand AST tree for a specific file change."""
+    file_change_id: int
+    filename: str
+    language: str
+    ast: Optional[ASTNodeResponse] = None
+    error: Optional[str] = None
