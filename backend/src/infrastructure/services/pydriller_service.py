@@ -8,7 +8,7 @@ from pydriller import Repository
 from src.domain.entities import ProjectEntity
 from src.use_cases.interfaces import IGitExtractorService
 from src.infrastructure.database.models import AuthorModel, CommitModel, FileChangeModel, BranchModel
-from src.infrastructure.services.ast_parser import parse_python
+from src.infrastructure.services.ast_parser import parse_source, get_language_for_file
 
 def clean_branch_short_name(full_name: str) -> str:
     parts = [p.strip() for p in full_name.split("/") if p.strip()]
@@ -199,12 +199,13 @@ class PyDrillerService(IGitExtractorService):
                 for mod in kept_files:
                     filename = mod.new_path or mod.old_path or "unknown"
 
-                    # --- AST Analysis (Python files only) ---
+                    # --- AST Analysis (multi-language) ---
                     complexity_score = None
                     function_count = None
                     ast_fingerprint = None
-                    if filename.endswith(".py") and mod.source_code:
-                        metrics = parse_python(mod.source_code)
+                    lang = get_language_for_file(filename)
+                    if lang and mod.source_code:
+                        metrics = parse_source(mod.source_code, lang)
                         if metrics:
                             complexity_score = metrics.complexity_score
                             function_count = metrics.function_count

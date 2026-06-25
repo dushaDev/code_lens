@@ -447,37 +447,41 @@ def get_file_metrics(file_change_id: int, db: Session = Depends(get_db)):
 )
 def get_file_ast(file_change_id: int, db: Session = Depends(get_db)):
     """Parses the stored source code on-the-fly using tree-sitter and returns
-    a simplified, JSON-serialisable AST tree structure. The full AST is never
-    persisted — it is generated here and immediately discarded after serialisation."""
+    a simplified, JSON-serialisable AST tree structure.
+
+    Supported languages: Python, JavaScript, TypeScript, Java, Kotlin, Dart, C, C++, Go.
+    The full AST is never persisted — it is generated here and discarded after serialisation."""
     from src.infrastructure.database.models import FileChangeModel
-    from src.infrastructure.services.ast_parser import build_ast_tree
+    from src.infrastructure.services.ast_parser import build_ast_tree, get_language_for_file, supported_languages
 
     fc = db.query(FileChangeModel).filter(FileChangeModel.id == file_change_id).first()
     if not fc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File change not found")
 
-    language = "unknown"
-    source_code: str | None = None
-
-    if fc.filename.endswith(".py"):
-        language = "python"
-        # Source code is reconstructed from the stored raw_diff if available
-        # (PyDriller stores the full post-state source_code inside the diff for new/modified files)
-        if fc.raw_diff:
-            # Extract only the added lines (+) from the diff to reconstruct source
-            lines = []
-            for line in fc.raw_diff.splitlines():
-                if line.startswith("+") and not line.startswith("+++"):
-                    lines.append(line[1:])
-            source_code = "\n".join(lines) if lines else None
-    else:
+    # Detect language from file extension
+    language = get_language_for_file(fc.filename)
+    if language is None:
+        ext = "." + fc.filename.rsplit(".", 1)[-1].lower() if "." in fc.filename else "(none)"
         return FileChangeASTResponse(
             file_change_id=file_change_id,
             filename=fc.filename,
-            language=language,
+            language="unsupported",
             ast=None,
-            error=f"AST parsing is not supported for this file type ({fc.filename.rsplit('.', 1)[-1] if '.' in fc.filename else 'unknown'}). Only .py files are currently supported."
+            error=(
+                f"File extension '{ext}' is not supported for AST analysis. "
+                f"Supported languages: {', '.join(supported_languages())}."
+            )
         )
+
+    # Reconstruct source from diff (added lines only)
+    source_code: str | None = None
+    if fc.raw_diff:
+        lines = [
+            line[1:]
+            for line in fc.raw_diff.splitlines()
+            if line.startswith("+") and not line.startswith("+++")
+        ]
+        source_code = "\n".join(lines) if lines else None
 
     if not source_code:
         return FileChangeASTResponse(
@@ -488,14 +492,14 @@ def get_file_ast(file_change_id: int, db: Session = Depends(get_db)):
             error="No source code available for this file change record."
         )
 
-    tree_dict = build_ast_tree(source_code)
+    tree_dict = build_ast_tree(source_code, language)
     if tree_dict is None:
         return FileChangeASTResponse(
             file_change_id=file_change_id,
             filename=fc.filename,
             language=language,
             ast=None,
-            error="tree-sitter is unavailable or failed to parse the source code."
+            error="tree-sitter failed to parse the source code."
         )
 
     return FileChangeASTResponse(
@@ -504,3 +508,16 @@ def get_file_ast(file_change_id: int, db: Session = Depends(get_db)):
         language=language,
         ast=ASTNodeResponse(**tree_dict),
     )
+
+
+@router.get(
+    "/ast/supported-languages",
+    summary="List languages supported for AST analysis"
+)
+def get_supported_languages():
+    """Returns the list of programming languages currently supported for AST parsing."""
+    from src.infrastructure.services.ast_parser import supported_languages, EXTENSION_TO_LANGUAGE
+    return {
+        "supported_languages": supported_languages(),
+        "file_extensions": EXTENSION_TO_LANGUAGE,
+    }

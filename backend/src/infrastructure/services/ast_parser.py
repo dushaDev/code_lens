@@ -1,6 +1,8 @@
 """
 AST Parser Service (Phase 3 - Qualitative Intelligence Layer)
 
+Supports: Python, JavaScript, TypeScript, Java, Kotlin, Dart, C, C++, Go
+
 DESIGN CONSTRAINT: We never store the raw AST in the database.
 We parse in-memory, extract only numerical metrics + a structural hash,
 and immediately discard the AST object.
@@ -9,46 +11,276 @@ import hashlib
 from dataclasses import dataclass
 from typing import Optional
 
-try:
-    from tree_sitter import Language, Parser, Node
-    import tree_sitter_python as tsp
-    _PYTHON_LANGUAGE = Language(tsp.language())
-    _PYTHON_PARSER = Parser(_PYTHON_LANGUAGE)
-    _TREE_SITTER_AVAILABLE = True
-except Exception:
-    _TREE_SITTER_AVAILABLE = False
+from tree_sitter import Language, Parser, Node
 
-# Nodes that each contribute +1 to cyclomatic complexity
-_COMPLEXITY_NODE_TYPES = frozenset({
-    "if_statement",
-    "elif_clause",
-    "for_statement",
-    "while_statement",
-    "except_clause",
-    "with_statement",
-    "conditional_expression",   # ternary: x if cond else y
-    "boolean_operator",         # and / or branch
-    "assert_statement",
-})
+# ---------------------------------------------------------------------------
+# Language registry — lazy-loaded to avoid import cost for unused languages
+# ---------------------------------------------------------------------------
 
-# Nodes that represent a callable scope (function or method)
-_FUNCTION_NODE_TYPES = frozenset({
-    "function_definition",
-    "async_function_def",
-})
+def _load_languages() -> dict:
+    """
+    Build the registry of (Language, complexity_nodes, function_nodes) per language.
+    Each entry is loaded only if the grammar package is installed.
+    Missing packages are silently skipped so the server still starts.
+    """
+    registry: dict[str, dict] = {}
 
-# Node types to skip entirely when building the fingerprint
-# (variable names, string literals, numbers, comments — we want structure only)
+    def _register(name: str, loader, complexity_nodes: frozenset, function_nodes: frozenset):
+        try:
+            lang = Language(loader())
+            registry[name] = {
+                "lang": lang,
+                "parser": Parser(lang),
+                "complexity": complexity_nodes,
+                "functions": function_nodes,
+            }
+        except Exception:
+            pass  # grammar not installed — skip
+
+    # --- Python ---
+    try:
+        import tree_sitter_python as tsp
+        _register(
+            "python", tsp.language,
+            complexity_nodes=frozenset({
+                "if_statement", "elif_clause", "for_statement", "while_statement",
+                "except_clause", "with_statement", "conditional_expression",
+                "boolean_operator", "assert_statement",
+            }),
+            function_nodes=frozenset({"function_definition", "async_function_def"}),
+        )
+    except ImportError:
+        pass
+
+    # --- JavaScript ---
+    try:
+        import tree_sitter_javascript as tsjs
+        _register(
+            "javascript", tsjs.language,
+            complexity_nodes=frozenset({
+                "if_statement", "for_statement", "for_in_statement", "while_statement",
+                "do_statement", "switch_case", "catch_clause", "ternary_expression",
+                "logical_expression",
+            }),
+            function_nodes=frozenset({
+                "function_declaration", "function", "arrow_function",
+                "method_definition", "generator_function_declaration",
+            }),
+        )
+    except ImportError:
+        pass
+
+    # --- TypeScript (shares JS grammar base) ---
+    try:
+        import tree_sitter_typescript as tsts
+        _register(
+            "typescript", tsts.language_typescript,
+            complexity_nodes=frozenset({
+                "if_statement", "for_statement", "for_in_statement", "while_statement",
+                "do_statement", "switch_case", "catch_clause", "ternary_expression",
+                "logical_expression",
+            }),
+            function_nodes=frozenset({
+                "function_declaration", "function", "arrow_function",
+                "method_definition", "generator_function_declaration",
+            }),
+        )
+        _register(
+            "tsx", tsts.language_tsx,
+            complexity_nodes=frozenset({
+                "if_statement", "for_statement", "for_in_statement", "while_statement",
+                "do_statement", "switch_case", "catch_clause", "ternary_expression",
+                "logical_expression",
+            }),
+            function_nodes=frozenset({
+                "function_declaration", "function", "arrow_function",
+                "method_definition",
+            }),
+        )
+    except ImportError:
+        pass
+
+    # --- Java ---
+    try:
+        import tree_sitter_java as tsjava
+        _register(
+            "java", tsjava.language,
+            complexity_nodes=frozenset({
+                "if_statement", "for_statement", "enhanced_for_statement",
+                "while_statement", "do_statement", "catch_clause",
+                "switch_block_statement_group", "ternary_expression",
+            }),
+            function_nodes=frozenset({
+                "method_declaration", "constructor_declaration",
+            }),
+        )
+    except ImportError:
+        pass
+
+    # --- Kotlin ---
+    try:
+        import tree_sitter_kotlin as tsk
+        _register(
+            "kotlin", tsk.language,
+            complexity_nodes=frozenset({
+                "if_expression", "when_expression", "when_entry",
+                "for_statement", "while_statement", "do_while_statement",
+                "catch_block", "boolean_literal",
+            }),
+            function_nodes=frozenset({
+                "function_declaration", "anonymous_function", "lambda_literal",
+            }),
+        )
+    except ImportError:
+        pass
+
+    # --- Dart ---
+    try:
+        import tree_sitter_dart as tsd
+        _register(
+            "dart", tsd.language,
+            complexity_nodes=frozenset({
+                "if_statement", "for_statement", "while_statement", "do_statement",
+                "catch_clause", "switch_statement_case", "conditional_expression",
+            }),
+            function_nodes=frozenset({
+                "function_declaration", "method_signature", "function_expression",
+            }),
+        )
+    except ImportError:
+        pass
+
+    # --- C ---
+    try:
+        import tree_sitter_c as tsc
+        _register(
+            "c", tsc.language,
+            complexity_nodes=frozenset({
+                "if_statement", "for_statement", "while_statement", "do_statement",
+                "case_statement", "conditional_expression",
+            }),
+            function_nodes=frozenset({"function_definition"}),
+        )
+    except ImportError:
+        pass
+
+    # --- C++ ---
+    try:
+        import tree_sitter_cpp as tscpp
+        _register(
+            "cpp", tscpp.language,
+            complexity_nodes=frozenset({
+                "if_statement", "for_statement", "for_range_loop",
+                "while_statement", "do_statement", "case_statement",
+                "catch_clause", "conditional_expression",
+            }),
+            function_nodes=frozenset({
+                "function_definition", "lambda_expression",
+            }),
+        )
+    except ImportError:
+        pass
+
+    # --- Go ---
+    try:
+        import tree_sitter_go as tsgo
+        _register(
+            "go", tsgo.language,
+            complexity_nodes=frozenset({
+                "if_statement", "for_statement", "expression_case",
+                "type_case_clause", "select_statement", "communication_case",
+            }),
+            function_nodes=frozenset({
+                "function_declaration", "method_declaration", "func_literal",
+            }),
+        )
+    except ImportError:
+        pass
+
+    return registry
+
+
+# Build once at module import — all subsequent calls use the cached dict
+_REGISTRY = _load_languages()
+
+# ---------------------------------------------------------------------------
+# File-extension → language name map
+# ---------------------------------------------------------------------------
+EXTENSION_TO_LANGUAGE: dict[str, str] = {
+    ".py":   "python",
+    ".js":   "javascript",
+    ".mjs":  "javascript",
+    ".cjs":  "javascript",
+    ".jsx":  "javascript",
+    ".ts":   "typescript",
+    ".tsx":  "tsx",
+    ".java": "java",
+    ".kt":   "kotlin",
+    ".kts":  "kotlin",
+    ".dart": "dart",
+    ".c":    "c",
+    ".h":    "c",
+    ".cc":   "cpp",
+    ".cpp":  "cpp",
+    ".cxx":  "cpp",
+    ".hpp":  "cpp",
+    ".go":   "go",
+}
+
+
+def get_language_for_file(filename: str) -> Optional[str]:
+    """Return the language name for a filename, or None if unsupported."""
+    if "." not in filename:
+        return None
+    ext = "." + filename.rsplit(".", 1)[-1].lower()
+    return EXTENSION_TO_LANGUAGE.get(ext)
+
+
+def supported_languages() -> list[str]:
+    """Return the list of languages that have their grammar package installed."""
+    return sorted(_REGISTRY.keys())
+
+
+# ---------------------------------------------------------------------------
+# Node types to skip when building the fingerprint
+# (variable names, literals, comments — we want structure only)
+# ---------------------------------------------------------------------------
 _IGNORE_FOR_FINGERPRINT = frozenset({
-    "identifier",
-    "string",
-    "integer",
-    "float",
-    "comment",
-    "string_content",
+    "identifier", "type_identifier", "field_identifier",
+    "string", "string_literal", "string_content",
+    "integer", "number", "float", "char_literal",
+    "comment", "line_comment", "block_comment",
     "escape_sequence",
 })
 
+
+# ---------------------------------------------------------------------------
+# Core traversal
+# ---------------------------------------------------------------------------
+
+def _walk(node: Node, complexity: list, functions: list, fp_parts: list,
+          complexity_types: frozenset, function_types: frozenset) -> None:
+    node_type = node.type
+
+    if node_type == "ERROR":
+        complexity[0] += 1
+        fp_parts.append("ERROR")
+        return
+
+    if node_type in complexity_types:
+        complexity[0] += 1
+    if node_type in function_types:
+        functions[0] += 1
+    if node_type not in _IGNORE_FOR_FINGERPRINT:
+        fp_parts.append(node_type)
+
+    for child in node.children:
+        _walk(child, complexity, functions, fp_parts, complexity_types, function_types)
+
+
+# ---------------------------------------------------------------------------
+# Public API
+# ---------------------------------------------------------------------------
 
 @dataclass
 class ASTMetrics:
@@ -57,109 +289,76 @@ class ASTMetrics:
     ast_fingerprint: str
 
 
-def _walk(node: "Node", complexity: list, functions: list, fp_parts: list) -> None:
+def parse_source(source_code: str, language: str) -> Optional[ASTMetrics]:
     """
-    Single recursive traversal of the parse tree.
-    Accumulates complexity delta, function count, and fingerprint tokens.
-    Error nodes are counted as complexity +1 so syntax errors don't crash us.
+    Parse source code for the given language and return lightweight AST metrics.
+
+    - The AST object is local to this function and discarded after traversal.
+    - Syntax errors are handled via tree-sitter's built-in error recovery.
+    - Returns None if the language is unsupported or source_code is empty.
     """
-    node_type = node.type
-
-    # Error recovery: syntax error nodes are opaque — just note them
-    if node_type == "ERROR":
-        complexity[0] += 1
-        fp_parts.append("ERROR")
-        return
-
-    if node_type in _COMPLEXITY_NODE_TYPES:
-        complexity[0] += 1
-
-    if node_type in _FUNCTION_NODE_TYPES:
-        functions[0] += 1
-
-    if node_type not in _IGNORE_FOR_FINGERPRINT:
-        fp_parts.append(node_type)
-
-    for child in node.children:
-        _walk(child, complexity, functions, fp_parts)
-
-
-def parse_python(source_code: str) -> Optional[ASTMetrics]:
-    """
-    Parse Python source code and return lightweight AST metrics.
-
-    Returns None if tree-sitter is not available or source_code is empty.
-    The AST object is local to this function and discarded after traversal.
-    """
-    if not _TREE_SITTER_AVAILABLE:
-        return None
     if not source_code or not source_code.strip():
         return None
 
-    try:
-        # Encode to bytes (tree-sitter requires bytes)
-        source_bytes = source_code.encode("utf-8", errors="replace")
-        # tree-sitter uses error recovery by default — syntax errors produce
-        # ERROR nodes instead of raising exceptions
-        tree = _PYTHON_PARSER.parse(source_bytes)
+    entry = _REGISTRY.get(language)
+    if entry is None:
+        return None
 
-        complexity = [1]   # Base complexity = 1 (entry point)
+    try:
+        source_bytes = source_code.encode("utf-8", errors="replace")
+        tree = entry["parser"].parse(source_bytes)
+
+        complexity = [1]   # base complexity = 1
         functions = [0]
         fp_parts: list[str] = []
 
-        _walk(tree.root_node, complexity, functions, fp_parts)
+        _walk(
+            tree.root_node, complexity, functions, fp_parts,
+            entry["complexity"], entry["functions"]
+        )
 
-        # Build fingerprint: SHA-256 of the ordered sequence of structural node types
         fingerprint_input = " ".join(fp_parts)
         ast_fingerprint = hashlib.sha256(fingerprint_input.encode()).hexdigest()[:32]
 
-        # AST is now garbage-collected — we only keep the 3 extracted metrics
         return ASTMetrics(
             complexity_score=complexity[0],
             function_count=functions[0],
             ast_fingerprint=ast_fingerprint,
         )
-
     except Exception:
-        # Never let AST parsing crash the extraction pipeline
         return None
 
 
-def build_ast_tree(source_code: str) -> Optional[dict]:
+def build_ast_tree(source_code: str, language: str) -> Optional[dict]:
     """
     Build a simplified JSON-serialisable AST tree for the real-time API endpoint.
-    Used ONLY in the on-demand /api/v1/files/{id}/ast endpoint.
-
-    Returns a simplified tree dict (not the raw tree-sitter object) so it is
-    safe to serialise and return to the frontend.
+    Used ONLY for the on-demand GET /api/v1/files/{id}/ast endpoint.
+    The AST object is discarded after conversion.
     """
-    if not _TREE_SITTER_AVAILABLE:
-        return None
     if not source_code or not source_code.strip():
+        return None
+
+    entry = _REGISTRY.get(language)
+    if entry is None:
         return None
 
     try:
         source_bytes = source_code.encode("utf-8", errors="replace")
-        tree = _PYTHON_PARSER.parse(source_bytes)
+        tree = entry["parser"].parse(source_bytes)
         return _node_to_dict(tree.root_node, source_bytes, depth=0, max_depth=12)
     except Exception:
         return None
 
 
-def _node_to_dict(node: "Node", source: bytes, depth: int, max_depth: int) -> dict:
-    """
-    Recursively convert a tree-sitter node to a lightweight dict.
-    Skips anonymous punctuation tokens (brackets, colons, etc.) to keep the
-    tree readable for the frontend.
-    """
+def _node_to_dict(node: Node, source: bytes, depth: int, max_depth: int) -> dict:
+    """Recursively convert a tree-sitter node to a lightweight dict."""
     node_dict: dict = {
         "type": node.type,
-        "start": node.start_point,   # (row, col)
+        "start": node.start_point,
         "end": node.end_point,
         "is_error": node.type == "ERROR",
     }
 
-    # For leaf nodes, include the literal text (capped at 120 chars)
     if node.child_count == 0:
         text = source[node.start_byte:node.end_byte].decode("utf-8", errors="replace")
         node_dict["text"] = text[:120]
@@ -167,9 +366,9 @@ def _node_to_dict(node: "Node", source: bytes, depth: int, max_depth: int) -> di
     if depth < max_depth and node.child_count > 0:
         children = []
         for child in node.children:
-            # Skip pure punctuation anonymous nodes to reduce noise
             if not child.is_named and child.type in {
-                ":", ",", "(", ")", "[", "]", "{", "}", ".", ";", "->", "=", "+=", "-=",
+                ":", ",", "(", ")", "[", "]", "{", "}", ".", ";", "->", "=",
+                "+=", "-=", "*=", "/=", "=>", "@",
             }:
                 continue
             children.append(_node_to_dict(child, source, depth + 1, max_depth))
