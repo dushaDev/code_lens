@@ -1,7 +1,8 @@
 """
 AST Parser Service (Phase 3 - Qualitative Intelligence Layer)
 
-Supports: Python, JavaScript, TypeScript, Java, Kotlin, Dart, C, C++, Go
+Supports: Python, JavaScript, TypeScript, Java, Kotlin, Dart, C, C++, Go,
+          Rust, Ruby, C#, Swift, Scala, Bash, Lua, PHP, HTML, CSS
 
 DESIGN CONSTRAINT: We never store the raw AST in the database.
 We parse in-memory, extract only numerical metrics + a structural hash,
@@ -197,6 +198,164 @@ def _load_languages() -> dict:
     except ImportError:
         pass
 
+    # --- Rust ---
+    try:
+        import tree_sitter_rust as tsr
+        _register(
+            "rust", tsr.language,
+            complexity_nodes=frozenset({
+                "if_expression", "for_expression", "while_expression",
+                "match_expression", "match_arm", "loop_expression",
+                "if_let_expression", "while_let_expression",
+            }),
+            function_nodes=frozenset({
+                "function_item", "closure_expression",
+            }),
+        )
+    except ImportError:
+        pass
+
+    # --- Ruby ---
+    try:
+        import tree_sitter_ruby as tsrb
+        _register(
+            "ruby", tsrb.language,
+            complexity_nodes=frozenset({
+                "if", "elsif", "unless", "for", "while", "until",
+                "case", "when", "rescue",
+            }),
+            function_nodes=frozenset({
+                "method", "singleton_method", "lambda",
+            }),
+        )
+    except ImportError:
+        pass
+
+    # --- C# ---
+    try:
+        import tree_sitter_c_sharp as tscs
+        _register(
+            "csharp", tscs.language,
+            complexity_nodes=frozenset({
+                "if_statement", "for_statement", "foreach_statement",
+                "while_statement", "do_statement", "switch_statement",
+                "switch_section", "catch_clause", "conditional_expression",
+            }),
+            function_nodes=frozenset({
+                "method_declaration", "constructor_declaration",
+                "operator_declaration", "local_function_statement",
+                "anonymous_method_expression", "lambda_expression",
+            }),
+        )
+    except ImportError:
+        pass
+
+    # --- Swift ---
+    try:
+        import tree_sitter_swift as tssw
+        _register(
+            "swift", tssw.language,
+            complexity_nodes=frozenset({
+                "if_statement", "for_statement", "while_statement",
+                "repeat_while_statement", "guard_statement",
+                "switch_statement", "catch_clause",
+            }),
+            function_nodes=frozenset({
+                "function_declaration", "initializer_declaration",
+                "lambda_literal",
+            }),
+        )
+    except ImportError:
+        pass
+
+    # --- Scala ---
+    try:
+        import tree_sitter_scala as tssc
+        _register(
+            "scala", tssc.language,
+            complexity_nodes=frozenset({
+                "if_expression", "for_expression", "while_expression",
+                "match_expression", "case_clause", "try_expression",
+            }),
+            function_nodes=frozenset({
+                "function_definition", "val_definition",
+            }),
+        )
+    except ImportError:
+        pass
+
+    # --- Bash ---
+    try:
+        import tree_sitter_bash as tsbash
+        _register(
+            "bash", tsbash.language,
+            complexity_nodes=frozenset({
+                "if_statement", "for_statement", "while_statement",
+                "case_statement", "case_item",
+            }),
+            function_nodes=frozenset({
+                "function_definition",
+            }),
+        )
+    except ImportError:
+        pass
+
+    # --- Lua ---
+    try:
+        import tree_sitter_lua as tslua
+        _register(
+            "lua", tslua.language,
+            complexity_nodes=frozenset({
+                "if_statement", "for_statement", "while_statement",
+                "repeat_statement",
+            }),
+            function_nodes=frozenset({
+                "function_declaration", "function_definition",
+            }),
+        )
+    except ImportError:
+        pass
+
+    # --- PHP ---
+    try:
+        import tree_sitter_php as tsphp
+        _register(
+            "php", tsphp.language_php,
+            complexity_nodes=frozenset({
+                "if_statement", "for_statement", "foreach_statement",
+                "while_statement", "do_statement", "match_expression",
+                "catch_clause", "switch_statement",
+            }),
+            function_nodes=frozenset({
+                "function_definition", "method_declaration",
+                "arrow_function",
+            }),
+        )
+    except ImportError:
+        pass
+
+    # --- HTML (structural fingerprinting only; no cyclomatic complexity) ---
+    try:
+        import tree_sitter_html as tshtml
+        _register(
+            "html", tshtml.language,
+            complexity_nodes=frozenset(),   # No branching logic in HTML
+            function_nodes=frozenset(),
+        )
+    except ImportError:
+        pass
+
+    # --- CSS (structural fingerprinting only) ---
+    try:
+        import tree_sitter_css as tscss
+        _register(
+            "css", tscss.language,
+            complexity_nodes=frozenset(),   # No branching logic in CSS
+            function_nodes=frozenset(),
+        )
+    except ImportError:
+        pass
+
     return registry
 
 
@@ -207,24 +366,62 @@ _REGISTRY = _load_languages()
 # File-extension → language name map
 # ---------------------------------------------------------------------------
 EXTENSION_TO_LANGUAGE: dict[str, str] = {
+    # Python
     ".py":   "python",
+    # JavaScript
     ".js":   "javascript",
     ".mjs":  "javascript",
     ".cjs":  "javascript",
     ".jsx":  "javascript",
+    # TypeScript
     ".ts":   "typescript",
     ".tsx":  "tsx",
+    # Java
     ".java": "java",
+    # Kotlin
     ".kt":   "kotlin",
     ".kts":  "kotlin",
+    # Dart
     ".dart": "dart",
+    # C
     ".c":    "c",
     ".h":    "c",
+    # C++
     ".cc":   "cpp",
     ".cpp":  "cpp",
     ".cxx":  "cpp",
     ".hpp":  "cpp",
+    ".hxx":  "cpp",
+    # Go
     ".go":   "go",
+    # Rust
+    ".rs":   "rust",
+    # Ruby
+    ".rb":   "ruby",
+    ".erb":  "ruby",
+    # C#
+    ".cs":   "csharp",
+    # Swift
+    ".swift": "swift",
+    # Scala
+    ".scala": "scala",
+    ".sc":    "scala",
+    # Bash / Shell
+    ".sh":   "bash",
+    ".bash": "bash",
+    ".zsh":  "bash",
+    # Lua
+    ".lua":  "lua",
+    # PHP
+    ".php":  "php",
+    ".phtml": "php",
+    # HTML
+    ".html": "html",
+    ".htm":  "html",
+    # CSS
+    ".css":  "css",
+    ".scss": "css",
+    ".sass": "css",
 }
 
 
