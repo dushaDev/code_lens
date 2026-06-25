@@ -1,6 +1,8 @@
 import os
 import shutil
 import re
+import time
+import stat
 from datetime import timezone
 from sqlalchemy.orm import Session
 from pydriller import Repository
@@ -10,11 +12,13 @@ from src.use_cases.interfaces import IGitExtractorService
 from src.infrastructure.database.models import AuthorModel, CommitModel, FileChangeModel, BranchModel
 from src.infrastructure.services.ast_parser import parse_source, get_language_for_file
 
+
 def clean_branch_short_name(full_name: str) -> str:
     parts = [p.strip() for p in full_name.split("/") if p.strip()]
     if len(parts) >= 2:
         return "/".join(parts[-2:])
     return "/".join(parts)
+
 
 # Compiled regex for ignoring build, dependency, and cache directories/files
 IGNORE_RE = re.compile(
@@ -29,10 +33,12 @@ IGNORE_RE = re.compile(
     r'(?:^|[/\\])\.DS_Store$'
 )
 
+
 def is_ignored_path(path: str) -> bool:
     if not path:
         return False
     return bool(IGNORE_RE.search(path))
+
 
 def parse_mailmap(file_path: str) -> dict:
     """
@@ -49,25 +55,46 @@ def parse_mailmap(file_path: str) -> dict:
                 line = line.strip()
                 if not line or line.startswith("#"):
                     continue
-                # Extract all <email> parts using regex
                 emails = re.findall(r"<([^>]+)>", line)
                 if len(emails) >= 2:
                     proper_email = emails[0].strip().lower()
                     commit_email = emails[1].strip().lower()
-                    
-                    # Extract name before the first '<' if present
                     proper_name = None
                     name_match = re.match(r"^([^<]+)", line)
                     if name_match:
                         proper_name = name_match.group(1).strip()
-                    
-                    mapping[commit_email] = {
-                        "email": proper_email,
-                        "name": proper_name
-                    }
+                    mapping[commit_email] = {"email": proper_email, "name": proper_name}
     except Exception as e:
-        print(f"Error parsing .mailmap: {e}")
+        print(f"[WARN] Error parsing .mailmap: {e}")
     return mapping
+
+
+def _safe_rmtree(path: str, retries: int = 5, delay: float = 0.5) -> None:
+    """
+    Windows-safe recursive directory removal.
+    Git marks many files read-only; we chmod them before deleting.
+    Retries handle the case where antivirus/Windows Explorer holds a handle.
+    """
+    def _on_error(func, p, excinfo):
+        try:
+            os.chmod(p, stat.S_IWRITE)
+            func(p)
+        except Exception:
+            pass  # best-effort
+
+    for attempt in range(retries):
+        try:
+            shutil.rmtree(path, onerror=_on_error)
+            return
+        except Exception:
+            if attempt < retries - 1:
+                time.sleep(delay)
+    # Final silent attempt
+    try:
+        shutil.rmtree(path, onerror=_on_error)
+    except Exception:
+        pass
+
 
 class PyDrillerService(IGitExtractorService):
     def __init__(self, db: Session):
@@ -75,48 +102,78 @@ class PyDrillerService(IGitExtractorService):
 
     def extract_and_save(self, project: ProjectEntity) -> dict:
         local_path = project.local_saved_path
-        
-        # Clean up any stale/incomplete repository clone directory from previous runs
-        temp_dir = os.path.dirname(local_path)
-        if os.path.exists(temp_dir):
-            import stat
-            def remove_readonly(func, path, excinfo):
-                try:
-                    os.chmod(path, stat.S_IWRITE)
-                    func(path)
-                except Exception:
-                    pass
-            shutil.rmtree(temp_dir, onerror=remove_readonly)
+        temp_dir = os.path.dirname(local_path)  # e.g. temp_repos/2/
 
-        # Ensure parent directory exists for cloning
+        # --- Clean up any stale directory from a previous failed run ---
+        if os.path.exists(temp_dir):
+            _safe_rmtree(temp_dir)
+
         os.makedirs(temp_dir, exist_ok=True)
-        
+
         total_commits = 0
         squash_warnings = 0
         new_authors_count = 0
 
         try:
-            # Traversal uses only_no_merge=True to filter out standard merge commits
-            repo = Repository(project.git_url, clone_repo_to=os.path.dirname(local_path), only_no_merge=True, include_refs=True)
-            
-            # Find and parse .mailmap if present in the cloned repository
-            mailmap_data = {}
-            branch_cache = {}  # key: (project_id, branch_name) -> BranchModel
-            if os.path.exists(temp_dir):
-                for item in os.listdir(temp_dir):
-                    item_path = os.path.join(temp_dir, item)
-                    if os.path.isdir(item_path):
-                        mailmap_file = os.path.join(item_path, ".mailmap")
-                        if os.path.isfile(mailmap_file):
-                            mailmap_data = parse_mailmap(mailmap_file)
-                            break
+            # ----------------------------------------------------------------
+            # Step 1: Clone — wrap separately so Git errors are human-readable
+            # ----------------------------------------------------------------
+            try:
+                repo = Repository(
+                    project.git_url,
+                    clone_repo_to=temp_dir,
+                    only_no_merge=True,
+                    include_refs=True,
+                )
+            except Exception as clone_err:
+                # GitCommandError.str() is often just a path — unwrap it
+                err_str = str(clone_err).strip()
+                # Try to get the actual stderr from GitCommandError
+                stderr = getattr(clone_err, "stderr", None) or ""
+                if stderr:
+                    err_str = stderr.strip()
+                raise RuntimeError(
+                    f"Git clone failed for URL '{project.git_url}'. "
+                    f"Possible causes: invalid URL, private repo without credentials, "
+                    f"network timeout, or disk permission error. "
+                    f"Details: {err_str}"
+                ) from clone_err
 
+            # ----------------------------------------------------------------
+            # Step 2: Find the actual cloned sub-directory (don't assume name)
+            # PyDriller names the clone after the repo basename, which may
+            # differ from what we stored in local_saved_path.
+            # ----------------------------------------------------------------
+            cloned_subdirs = [
+                os.path.join(temp_dir, d)
+                for d in os.listdir(temp_dir)
+                if os.path.isdir(os.path.join(temp_dir, d))
+            ]
+            if not cloned_subdirs:
+                raise RuntimeError(
+                    f"Clone succeeded but no directory was created inside '{temp_dir}'. "
+                    f"This is unexpected — check disk space and permissions."
+                )
+            actual_clone_path = cloned_subdirs[0]  # always exactly one clone
+
+            # ----------------------------------------------------------------
+            # Step 3: Parse .mailmap from the actual cloned directory
+            # ----------------------------------------------------------------
+            mailmap_data = {}
+            mailmap_file = os.path.join(actual_clone_path, ".mailmap")
+            if os.path.isfile(mailmap_file):
+                mailmap_data = parse_mailmap(mailmap_file)
+
+            branch_cache = {}  # key: (project_id, branch_name) -> BranchModel
+
+            # ----------------------------------------------------------------
+            # Step 4: Traverse commits
+            # ----------------------------------------------------------------
             for commit in repo.traverse_commits():
                 # 1. Author Resolution
                 author_email = commit.author.email
                 author_name = commit.author.name
-                
-                # Apply .mailmap mapping
+
                 email_lower = author_email.lower()
                 if email_lower in mailmap_data:
                     mapped = mailmap_data[email_lower]
@@ -128,9 +185,9 @@ class PyDrillerService(IGitExtractorService):
                 if not author:
                     author = AuthorModel(name=author_name, email=author_email)
                     self.db.add(author)
-                    self.db.flush()  # To obtain author.id
+                    self.db.flush()
                     new_authors_count += 1
-                
+
                 # 2. Squash Heuristics
                 is_squash = False
                 if commit.insertions > 1000:
@@ -139,15 +196,15 @@ class PyDrillerService(IGitExtractorService):
                     is_squash = True
                 elif re.search(r'\(#\d+\)$', commit.msg.split('\n')[0].strip()):
                     is_squash = True
-                
+
                 if is_squash:
                     squash_warnings += 1
 
-                # 3. Filter File Changes and calculate kept additions/deletions
+                # 3. Filter File Changes
                 kept_files = []
                 kept_insertions = 0
                 kept_deletions = 0
-                
+
                 for mod in commit.modified_files:
                     path = mod.new_path or mod.old_path or "unknown"
                     if is_ignored_path(path):
@@ -157,7 +214,11 @@ class PyDrillerService(IGitExtractorService):
                     kept_deletions += mod.deleted_lines or 0
 
                 # 4. Save Commit
-                dt = commit.committer_date.astimezone(timezone.utc).replace(tzinfo=None) if commit.committer_date.tzinfo else commit.committer_date
+                dt = (
+                    commit.committer_date.astimezone(timezone.utc).replace(tzinfo=None)
+                    if commit.committer_date.tzinfo
+                    else commit.committer_date
+                )
 
                 db_commit = CommitModel(
                     hash=commit.hash,
@@ -167,17 +228,16 @@ class PyDrillerService(IGitExtractorService):
                     message=commit.msg,
                     insertions=kept_insertions,
                     deletions=kept_deletions,
-                    is_squash_suspected=is_squash
+                    is_squash_suspected=is_squash,
                 )
                 self.db.add(db_commit)
                 total_commits += 1
 
-                # Link branches
+                # 4b. Link branches
                 if commit.branches:
                     for b_name in commit.branches:
                         cache_key = (project.id, b_name)
                         if cache_key not in branch_cache:
-                            # Check database to see if branch exists
                             branch_model = self.db.query(BranchModel).filter(
                                 BranchModel.project_id == project.id,
                                 BranchModel.name == b_name
@@ -187,29 +247,31 @@ class PyDrillerService(IGitExtractorService):
                                 branch_model = BranchModel(
                                     project_id=project.id,
                                     name=b_name,
-                                    short_name=short
+                                    short_name=short,
                                 )
                                 self.db.add(branch_model)
                                 self.db.flush()
                             branch_cache[cache_key] = branch_model
-                        
+
                         db_commit.branches.append(branch_cache[cache_key])
 
-                # 5. Save File Changes
+                # 5. Save File Changes with AST metrics
                 for mod in kept_files:
                     filename = mod.new_path or mod.old_path or "unknown"
 
-                    # --- AST Analysis (multi-language) ---
                     complexity_score = None
                     function_count = None
                     ast_fingerprint = None
                     lang = get_language_for_file(filename)
                     if lang and mod.source_code:
-                        metrics = parse_source(mod.source_code, lang)
-                        if metrics:
-                            complexity_score = metrics.complexity_score
-                            function_count = metrics.function_count
-                            ast_fingerprint = metrics.ast_fingerprint
+                        try:
+                            metrics = parse_source(mod.source_code, lang)
+                            if metrics:
+                                complexity_score = metrics.complexity_score
+                                function_count = metrics.function_count
+                                ast_fingerprint = metrics.ast_fingerprint
+                        except Exception:
+                            pass  # AST failure never aborts commit extraction
 
                     file_change = FileChangeModel(
                         commit_hash=commit.hash,
@@ -223,29 +285,26 @@ class PyDrillerService(IGitExtractorService):
                         ast_fingerprint=ast_fingerprint,
                     )
                     self.db.add(file_change)
-                
+
                 self.db.flush()
-                
+
             self.db.commit()
 
         except Exception as e:
             self.db.rollback()
-            raise e
+            # Re-raise with the original exception type preserved so callers
+            # can distinguish RuntimeError (our messages) from everything else
+            raise
+
         finally:
-            # Garbage collection: delete the cloned repo directory
-            if os.path.exists(os.path.dirname(local_path)):
-                import stat
-                def remove_readonly(func, path, excinfo):
-                    try:
-                        os.chmod(path, stat.S_IWRITE)
-                        func(path)
-                    except Exception:
-                        pass
-                shutil.rmtree(os.path.dirname(local_path), onerror=remove_readonly)
+            # Always delete the cloned repo to keep disk clean
+            if os.path.exists(temp_dir):
+                _safe_rmtree(temp_dir)
 
         return {
             "status": "success",
             "total_commits": total_commits,
             "total_authors": new_authors_count,
-            "squash_warnings": squash_warnings
+            "squash_warnings": squash_warnings,
         }
+

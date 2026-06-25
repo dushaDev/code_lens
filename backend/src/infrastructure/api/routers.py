@@ -62,8 +62,14 @@ def extract_git_data(project_id: int, db: Session = Depends(get_db)):
         return ExtractResponse(**result)
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except RuntimeError as e:
+        # Human-readable errors raised by PyDrillerService (clone failure, etc.)
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
     except Exception as e:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"{type(e).__name__}: {str(e)}"
+        )
 
 @router.delete(
     "/projects/{project_id}", 
