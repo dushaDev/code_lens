@@ -398,7 +398,12 @@ export default function App() {
               )}
 
               {currentTab === 'settings' && (
-                <Settings />
+                <Settings 
+                  course={currentCourse}
+                  onCourseReset={() => {
+                    setCurrentCourse({ ...currentCourse });
+                  }}
+                />
               )}
             </>
           )}

@@ -62,6 +62,13 @@ class ResetDatabaseUseCase:
     def execute(self) -> None:
         self.db_service.reset_database()
 
+class ResetCourseUseCase:
+    def __init__(self, db_service: IDatabaseService):
+        self.db_service = db_service
+
+    def execute(self, course_id: int) -> None:
+        self.db_service.reset_course(course_id)
+
 class MergeAuthorsUseCase:
     def __init__(self, author_repo: IAuthorRepository):
         self.author_repo = author_repo

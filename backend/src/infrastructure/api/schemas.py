@@ -15,6 +15,12 @@ class LoginRequest(BaseModel):
     email: EmailStr
     password: str
 
+class CourseResetRequest(BaseModel):
+    password: str
+
+class SystemResetRequest(BaseModel):
+    password: str
+
 class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"

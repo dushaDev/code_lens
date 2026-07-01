@@ -79,6 +79,10 @@ class IDatabaseService(ABC):
     def reset_database(self) -> None:
         pass
 
+    @abstractmethod
+    def reset_course(self, course_id: int) -> None:
+        pass
+
 class ICourseRepository(ABC):
     @abstractmethod
     def create(self, name: str, description: Optional[str]) -> CourseEntity:

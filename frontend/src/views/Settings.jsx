@@ -2,13 +2,17 @@ import React, { useState } from 'react';
 import { Database, AlertTriangle, ShieldCheck, Save, Settings as SettingsIcon } from 'lucide-react';
 import './Settings.css';
 
-export default function Settings() {
+export default function Settings({ course, onCourseReset }) {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
+  const [password, setPassword] = useState('');
 
-  const handleResetDB = async () => {
-    if (!window.confirm('WARNING: This will delete all course history, projects, and author details from the database. Are you sure?')) {
+  const handleResetCourse = async (e) => {
+    e.preventDefault();
+    if (!password) return;
+
+    if (!window.confirm(`WARNING: This will permanently delete all projects and git metrics under "${course?.name}". Are you sure?`)) {
       return;
     }
 
@@ -22,26 +26,34 @@ export default function Settings() {
     if (token === 'mock-jwt-token') {
       setTimeout(() => {
         setLoading(false);
-        setMessage('Mock database reset completed successfully.');
+        setPassword('');
+        setMessage(`All projects under "${course?.name}" cleared successfully.`);
+        if (onCourseReset) onCourseReset();
       }, 1000);
       return;
     }
 
     try {
-      const response = await fetch('/api/v1/system/reset', {
+      const response = await fetch(`/api/v1/courses/${course.id}/reset`, {
         method: 'POST',
         headers: {
+          'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`
-        }
+        },
+        body: JSON.stringify({
+          password: password
+        })
       });
 
       const data = await response.json();
 
       if (!response.ok) {
-        throw new Error(data.detail || 'Reset failed');
+        throw new Error(data.detail || 'Failed to verify password.');
       }
 
-      setMessage(data.message || 'Database reset completed successfully.');
+      setMessage(`Projects and Git history for "${course?.name}" cleared successfully.`);
+      setPassword('');
+      if (onCourseReset) onCourseReset();
     } catch (err) {
       setError(err.message || 'Database connection error.');
     } finally {
@@ -53,8 +65,8 @@ export default function Settings() {
     <div className="settings-view">
       <div className="view-header">
         <div>
-          <h1>System Settings</h1>
-          <p className="subtitle">Configure database targets, extraction parameters, and security policies.</p>
+          <h1>Course Settings</h1>
+          <p className="subtitle">Configure parsing parameters and maintain repository data for {course?.name}.</p>
         </div>
       </div>
 
@@ -88,26 +100,40 @@ export default function Settings() {
           </div>
         </div>
 
-        {/* Database Control Card */}
+        {/* Course Database Control Card */}
         <div className="settings-card card danger-border">
           <div className="card-title-row">
             <Database size={18} className="red-text" />
-            <h2>Database Maintenance</h2>
+            <h2>Reset Course Data</h2>
           </div>
-          <div className="card-body-form">
+          <form onSubmit={handleResetCourse} className="card-body-form">
             <p className="danger-notice">
-              Resetting the database clears all courses, project files, extracted commits, authors, and AST metric caches.
-              The schemas and tables will remain intact, but all data rows will be truncated.
+              Resetting course data deletes all projects, extracted commit logs, and student analysis metrics under <strong>"{course?.name}"</strong>. 
+              Other courses and user accounts remain completely untouched.
             </p>
+            
+            <div className="form-group">
+              <label className="form-label">Verify Instructor Password</label>
+              <input 
+                type="password" 
+                className="input-field" 
+                placeholder="Enter password to authorize reset" 
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+              />
+            </div>
+
             <button 
+              type="submit" 
               className="btn btn-danger" 
-              onClick={handleResetDB} 
               disabled={loading}
+              style={{ alignSelf: 'flex-start' }}
             >
               <AlertTriangle size={16} />
-              <span>{loading ? 'Truncating tables...' : 'Reset System Database'}</span>
+              <span>{loading ? 'Clearing course data...' : 'Clear Course Projects & Data'}</span>
             </button>
-          </div>
+          </form>
         </div>
       </div>
     </div>

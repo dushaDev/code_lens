@@ -20,6 +20,22 @@
   padding-bottom: 24px;
 }
 
+.header-button-group {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.wipe-db-btn {
+  color: var(--color-danger);
+  border-color: rgba(239, 68, 68, 0.3);
+}
+
+.wipe-db-btn:hover {
+  background-color: var(--color-danger-bg);
+  border-color: var(--color-danger);
+}
+
 .user-greeting h1 {
   font-size: 2rem;
   font-weight: 700;

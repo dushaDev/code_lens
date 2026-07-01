@@ -19,13 +19,14 @@ from src.infrastructure.api.schemas import (
     ProjectAnalyticsResponse, MergeAuthorsRequest, AuthorsListResponse, BranchesListResponse, BranchResponse,
     FileChangeMetricsResponse, FileChangeASTResponse, ASTNodeResponse,
     CourseCreateRequest, CourseResponse, CoursesListResponse,
-    UserRegisterRequest, UserResponse, UserUpdateRequest, UsersListResponse, TokenResponse, LoginRequest
+    UserRegisterRequest, UserResponse, UserUpdateRequest, UsersListResponse, TokenResponse, LoginRequest,
+    CourseResetRequest, SystemResetRequest
 )
 from src.use_cases.extract_git_history import ExtractGitHistoryUseCase
 from src.use_cases.get_author_commits import (
     GetAuthorCommitsUseCase, GetAuthorFullProfileUseCase,
     GetAllProjectsUseCase, GetProjectsByAuthorUseCase, GetProjectAuthorsUseCase,
-    ResetDatabaseUseCase, MergeAuthorsUseCase
+    ResetDatabaseUseCase, ResetCourseUseCase, MergeAuthorsUseCase
 )
 from src.use_cases.get_project_analytics import GetProjectAnalyticsUseCase
 from src.use_cases.get_project_details import (
@@ -986,13 +987,59 @@ def get_supported_languages(
     responses={401: {"model": ErrorResponse}, 500: {"model": ErrorResponse}}
 )
 def reset_database(
+    request: SystemResetRequest,
     db: Session = Depends(get_db),
     current_user: UserModel = Depends(get_current_user)
 ):
+    """Full database wipe (deletes all courses, projects, authors, commits, file changes).
+    Verifies user password. Does NOT delete users table."""
+    if not verify_password(request.password, current_user.hashed_password):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect password verification."
+        )
+
     db_service = DatabaseService(db)
     use_case = ResetDatabaseUseCase(db_service)
     try:
         use_case.execute()
-        return {"status": "success", "message": "Database has been reset successfully."}
+        return {"status": "success", "message": "Full database has been reset successfully."}
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+@router.post(
+    "/courses/{course_id}/reset",
+    status_code=status.HTTP_200_OK,
+    tags=["Courses"],
+    responses={401: {"model": ErrorResponse}, 404: {"model": ErrorResponse}, 500: {"model": ErrorResponse}}
+)
+def reset_course(
+    course_id: int,
+    request: CourseResetRequest,
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_user)
+):
+    """Clear all projects and related commits, branches, file changes for a specific course.
+    Verifies user password."""
+    # Verify course exists
+    course_repo = CourseRepository(db)
+    if not course_repo.get_by_id(course_id):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Course with ID {course_id} not found."
+        )
+
+    if not verify_password(request.password, current_user.hashed_password):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect password verification."
+        )
+
+    db_service = DatabaseService(db)
+    use_case = ResetCourseUseCase(db_service)
+    try:
+        use_case.execute(course_id)
+        return {"status": "success", "message": f"Course projects and data cleared successfully."}
     except Exception as e:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))

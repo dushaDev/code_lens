@@ -436,6 +436,7 @@ class DatabaseService(IDatabaseService):
         session = self.db or SessionLocal()
         try:
             # Delete/truncate data one by one in correct dependency order (leaves schema intact, resets PK sequences)
+            # CRITICAL: We do NOT delete/truncate the 'users' table. It remains untouched.
             session.execute(text("TRUNCATE TABLE file_changes RESTART IDENTITY CASCADE;"))
             session.execute(text("TRUNCATE TABLE commit_branches CASCADE;"))
             session.execute(text("TRUNCATE TABLE commits RESTART IDENTITY CASCADE;"))
@@ -443,6 +444,24 @@ class DatabaseService(IDatabaseService):
             session.execute(text("TRUNCATE TABLE projects RESTART IDENTITY CASCADE;"))
             session.execute(text("TRUNCATE TABLE authors RESTART IDENTITY CASCADE;"))
             session.execute(text("TRUNCATE TABLE courses RESTART IDENTITY CASCADE;"))
+            session.commit()
+        except Exception as e:
+            session.rollback()
+            raise e
+        finally:
+            if not self.db:
+                session.close()
+
+    def reset_course(self, course_id: int) -> None:
+        from src.infrastructure.database.session import SessionLocal
+
+        session = self.db or SessionLocal()
+        try:
+            # Fetch and delete all projects belonging to the course
+            # This triggers database cascades to delete related commits, branches, file changes
+            projects = session.query(ProjectModel).filter(ProjectModel.course_id == course_id).all()
+            for project in projects:
+                session.delete(project)
             session.commit()
         except Exception as e:
             session.rollback()

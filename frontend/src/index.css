@@ -4,7 +4,7 @@
   /* HSL Color System */
   --primary-hue: 224;
   --primary-sat: 86%;
-  --primary-light: 46%; /* Beautiful Navy Blue: #1043A6 */
+  --primary-light: 54%; /* Lightened premium blue */
   
   --primary: hsl(var(--primary-hue), var(--primary-sat), var(--primary-light));
   --primary-hover: hsl(var(--primary-hue), var(--primary-sat), calc(var(--primary-light) - 8%));
