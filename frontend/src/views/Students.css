@@ -1,0 +1,90 @@
+.students-view {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  text-align: left;
+}
+
+.students-metrics-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 20px;
+}
+
+.student-metric-card {
+  padding: 20px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.student-metric-card h3 {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: var(--text-main);
+  line-height: 1.2;
+}
+
+.student-metric-card p {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.purple-text { color: hsl(262, 80%, 50%); }
+.blue-text { color: var(--primary); }
+.emerald-text { color: var(--color-success); }
+
+/* Student Search */
+.students-search {
+  padding: 12px;
+}
+
+/* Student List Details */
+.student-info-cell {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.student-avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background-color: var(--bg-hover);
+  color: var(--text-main);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 600;
+  font-size: 0.85rem;
+  border: 1px solid var(--border-color);
+}
+
+.student-name {
+  display: block;
+  font-weight: 600;
+  font-size: 0.95rem;
+}
+
+.student-id {
+  display: block;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+.bold-cell {
+  font-weight: 600;
+}
+
+.additions-text {
+  color: var(--color-success);
+  font-weight: 500;
+  font-size: 0.85rem;
+  margin-right: 8px;
+}
+
+.deletions-text {
+  color: var(--color-danger);
+  font-weight: 500;
+  font-size: 0.85rem;
+}
