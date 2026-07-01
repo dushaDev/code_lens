@@ -311,6 +311,52 @@ export default function App() {
     alert(`Alert resolved as: ${result}`);
   };
 
+  const handleMergeAuthors = async (sourceId, targetId) => {
+    if (!window.confirm("Are you sure you want to merge these two author profiles? This will combine their git logs and contribution history.")) {
+      return;
+    }
+
+    const token = localStorage.getItem('token');
+    if (token === 'mock-jwt-token') {
+      alert('Profiles merged successfully! (Demo Mode)');
+      // Update local state by combining values
+      const sourceObj = students.find(s => s.id === sourceId);
+      const targetObj = students.find(s => s.id === targetId);
+      if (sourceObj && targetObj) {
+        targetObj.commitsCount += sourceObj.commitsCount;
+        targetObj.additions += sourceObj.additions;
+        targetObj.deletions += sourceObj.deletions;
+        setStudents(students.filter(s => s.id !== sourceId));
+      }
+      return;
+    }
+
+    try {
+      const response = await fetch('/api/v1/authors/merge', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          source_author_id: sourceId,
+          target_author_id: targetId
+        })
+      });
+
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.detail || 'Author merge failed.');
+      }
+
+      alert('Student profiles merged successfully. Recalculating metrics...');
+      // Re-trigger course data loading
+      setCurrentCourse({ ...currentCourse });
+    } catch (err) {
+      alert('Merge failed: ' + err.message);
+    }
+  };
+
   if (authLoading) {
     return (
       <div className="loader-box" style={{ height: '100vh', justifyContent: 'center' }}>
@@ -387,7 +433,11 @@ export default function App() {
               )}
 
               {currentTab === 'students' && (
-                <Students students={students} />
+                <Students 
+                  students={students}
+                  projects={projects}
+                  onMergeAuthors={handleMergeAuthors}
+                />
               )}
 
               {currentTab === 'plagiarism' && (
