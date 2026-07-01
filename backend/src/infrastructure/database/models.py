@@ -6,6 +6,21 @@ from sqlalchemy.orm import declarative_base, Mapped, mapped_column, relationship
 
 Base = declarative_base()
 
+
+class CourseModel(Base):
+    __tablename__ = "courses"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    description: Mapped[Optional[str]] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    projects: Mapped[List["ProjectModel"]] = relationship(
+        "ProjectModel", back_populates="course",
+        cascade="all, delete-orphan", passive_deletes=True
+    )
+
+
 class ProjectModel(Base):
     __tablename__ = "projects"
 
@@ -15,7 +30,11 @@ class ProjectModel(Base):
     git_url: Mapped[str] = mapped_column(String, nullable=False)
     local_saved_path: Mapped[str] = mapped_column(String, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    course_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("courses.id", ondelete="CASCADE"), nullable=False
+    )
 
+    course: Mapped["CourseModel"] = relationship("CourseModel", back_populates="projects")
     commits: Mapped[List["CommitModel"]] = relationship(
         "CommitModel", back_populates="project", cascade="all, delete-orphan", passive_deletes=True
     )
@@ -110,5 +129,10 @@ class FileChangeModel(Base):
     lines_added: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     lines_removed: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     raw_diff: Mapped[Optional[str]] = mapped_column(Text)
+
+    # AST Qualitative Metrics (Phase 3)
+    complexity_score: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    function_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    ast_fingerprint: Mapped[Optional[str]] = mapped_column(String, nullable=True)
 
     commit: Mapped["CommitModel"] = relationship("CommitModel", back_populates="file_changes")

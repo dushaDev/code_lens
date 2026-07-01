@@ -2,14 +2,30 @@ from pydantic import BaseModel, ConfigDict
 from typing import List, Optional
 from datetime import datetime
 
+class CourseCreateRequest(BaseModel):
+    name: str
+    description: Optional[str] = None
+
+class CourseResponse(BaseModel):
+    id: int
+    name: str
+    description: Optional[str] = None
+    created_at: datetime
+
+class CoursesListResponse(BaseModel):
+    total_courses: int
+    courses: List[CourseResponse]
+
 class ProjectCreateRequest(BaseModel):
     name: str
     description: Optional[str] = None
     git_url: str
+    course_id: int
 
 class ProjectCreateResponse(BaseModel):
     project_id: int
     name: str
+    course_id: int
 
 class ExtractResponse(BaseModel):
     status: str
@@ -38,6 +54,7 @@ class ProjectResponse(BaseModel):
     git_url: str
     local_saved_path: str
     created_at: datetime
+    course_id: Optional[int] = None
 
 class FileChangeResponse(BaseModel):
     id: int
@@ -145,4 +162,32 @@ class BranchesListResponse(BaseModel):
     branches: List[BranchResponse]
 
 
+class FileChangeMetricsResponse(BaseModel):
+    """Stored AST metrics for a file change record."""
+    id: int
+    filename: str
+    complexity_score: Optional[int] = None
+    function_count: Optional[int] = None
+    ast_fingerprint: Optional[str] = None
 
+
+class ASTNodeResponse(BaseModel):
+    """A single node in the simplified real-time AST tree."""
+    type: str
+    start: tuple
+    end: tuple
+    is_error: bool = False
+    text: Optional[str] = None
+    children: Optional[List["ASTNodeResponse"]] = None
+
+
+ASTNodeResponse.model_rebuild()  # Required for self-referential models
+
+
+class FileChangeASTResponse(BaseModel):
+    """Real-time on-demand AST tree for a specific file change."""
+    file_change_id: int
+    filename: str
+    language: str
+    ast: Optional[ASTNodeResponse] = None
+    error: Optional[str] = None
