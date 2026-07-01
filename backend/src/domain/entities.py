@@ -11,6 +11,9 @@ class FileChangeEntity:
     raw_diff: Optional[str] = None
     commit_hash: Optional[str] = None
     id: Optional[int] = None
+    complexity_score: Optional[int] = None
+    function_count: Optional[int] = None
+    ast_fingerprint: Optional[str] = None
 
 @dataclass
 class BranchEntity:
@@ -47,7 +50,16 @@ class ProjectEntity:
     name: str
     git_url: str
     local_saved_path: str
+    course_id: Optional[int] = None
     description: Optional[str] = None
     created_at: Optional[datetime] = None
     id: Optional[int] = None
     commits: List[CommitEntity] = field(default_factory=list)
+
+@dataclass
+class CourseEntity:
+    name: str
+    description: Optional[str] = None
+    created_at: Optional[datetime] = None
+    id: Optional[int] = None
+    projects: List[ProjectEntity] = field(default_factory=list)
