@@ -90,6 +90,18 @@
 
 .progress-fill {
   height: 100%;
-  background-color: var(--primary);
   border-radius: 4px;
+  transition: width 0.4s ease-out;
+}
+
+.progress-fill-good {
+  background-color: var(--color-success);
+}
+
+.progress-fill-warning {
+  background-color: var(--color-warning);
+}
+
+.progress-fill-danger {
+  background-color: var(--color-danger);
 }

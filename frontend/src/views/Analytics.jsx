@@ -86,6 +86,26 @@ export default function Analytics({ project, onBack }) {
     return 'badge-success';
   };
 
+  const getContributionColorClass = (percentage, totalContributors) => {
+    if (!totalContributors || totalContributors <= 0) return 'progress-fill-good';
+    
+    // Ideal share is 100% divided by number of contributors
+    const idealShare = 100 / totalContributors;
+    const deviation = Math.abs(percentage - idealShare);
+    const relativeDeviation = deviation / idealShare;
+    
+    // Within 35% deviation from ideal: Good (Green)
+    // Within 65% deviation from ideal: Warning (Orange)
+    // Greater deviation: Danger (Red)
+    if (relativeDeviation < 0.35) {
+      return 'progress-fill-good';
+    } else if (relativeDeviation < 0.65) {
+      return 'progress-fill-warning';
+    } else {
+      return 'progress-fill-danger';
+    }
+  };
+
   return (
     <div className="analytics-view">
       <div className="analytics-header">
@@ -191,7 +211,7 @@ export default function Analytics({ project, onBack }) {
                           <span className="progress-text">{contrib.contribution_percentage?.toFixed(1)}%</span>
                           <div className="progress-track">
                             <div 
-                              className="progress-fill" 
+                              className={`progress-fill ${getContributionColorClass(contrib.contribution_percentage, analytics.contributions.length)}`}
                               style={{ width: `${contrib.contribution_percentage}%` }}
                             ></div>
                           </div>
