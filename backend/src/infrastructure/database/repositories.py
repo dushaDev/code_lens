@@ -1,8 +1,8 @@
 from typing import List, Optional
 from sqlalchemy.orm import Session, selectinload, joinedload, defer
-from src.domain.entities import ProjectEntity, AuthorEntity, CommitEntity, FileChangeEntity, BranchEntity
-from src.use_cases.interfaces import IProjectRepository, IAuthorRepository, ICommitRepository, IDatabaseService
-from src.infrastructure.database.models import ProjectModel, AuthorModel, CommitModel, FileChangeModel, BranchModel, Base
+from src.domain.entities import ProjectEntity, AuthorEntity, CommitEntity, FileChangeEntity, BranchEntity, CourseEntity
+from src.use_cases.interfaces import IProjectRepository, IAuthorRepository, ICommitRepository, IDatabaseService, ICourseRepository
+from src.infrastructure.database.models import ProjectModel, AuthorModel, CommitModel, FileChangeModel, BranchModel, CourseModel, Base
 from src.infrastructure.database.session import engine
 
 class ProjectRepository(IProjectRepository):
@@ -19,16 +19,18 @@ class ProjectRepository(IProjectRepository):
             description=project_model.description,
             git_url=project_model.git_url,
             local_saved_path=project_model.local_saved_path,
-            created_at=project_model.created_at
+            created_at=project_model.created_at,
+            course_id=project_model.course_id
         )
 
-    def create(self, name: str, description: Optional[str], git_url: str) -> ProjectEntity:
+    def create(self, name: str, description: Optional[str], git_url: str, course_id: int) -> ProjectEntity:
         # Initial saved path is empty, updated via update_local_path once ID is flushed/committed
         project_model = ProjectModel(
             name=name,
             description=description,
             git_url=git_url,
-            local_saved_path=""
+            local_saved_path="",
+            course_id=course_id
         )
         self.db.add(project_model)
         self.db.flush()  # Populates ID
@@ -39,7 +41,8 @@ class ProjectRepository(IProjectRepository):
             description=project_model.description,
             git_url=project_model.git_url,
             local_saved_path=project_model.local_saved_path,
-            created_at=project_model.created_at
+            created_at=project_model.created_at,
+            course_id=project_model.course_id
         )
 
     def update_local_path(self, project_id: int, local_path: str) -> None:
@@ -65,7 +68,8 @@ class ProjectRepository(IProjectRepository):
                 git_url=m.git_url,
                 local_saved_path=m.local_saved_path,
                 description=m.description,
-                created_at=m.created_at
+                created_at=m.created_at,
+                course_id=m.course_id
             )
             for m in project_models
         ]
@@ -85,7 +89,8 @@ class ProjectRepository(IProjectRepository):
                 git_url=m.git_url,
                 local_saved_path=m.local_saved_path,
                 description=m.description,
-                created_at=m.created_at
+                created_at=m.created_at,
+                course_id=m.course_id
             )
             for m in project_models
         ]
@@ -437,6 +442,7 @@ class DatabaseService(IDatabaseService):
             session.execute(text("TRUNCATE TABLE branches RESTART IDENTITY CASCADE;"))
             session.execute(text("TRUNCATE TABLE projects RESTART IDENTITY CASCADE;"))
             session.execute(text("TRUNCATE TABLE authors RESTART IDENTITY CASCADE;"))
+            session.execute(text("TRUNCATE TABLE courses RESTART IDENTITY CASCADE;"))
             session.commit()
         except Exception as e:
             session.rollback()
@@ -444,3 +450,66 @@ class DatabaseService(IDatabaseService):
         finally:
             if not self.db:
                 session.close()
+
+
+class CourseRepository(ICourseRepository):
+    def __init__(self, db: Session):
+        self.db = db
+
+    def create(self, name: str, description: Optional[str]) -> CourseEntity:
+        course_model = CourseModel(name=name, description=description)
+        self.db.add(course_model)
+        self.db.commit()
+        self.db.refresh(course_model)
+        return CourseEntity(
+            id=course_model.id,
+            name=course_model.name,
+            description=course_model.description,
+            created_at=course_model.created_at
+        )
+
+    def get_by_id(self, course_id: int) -> Optional[CourseEntity]:
+        course_model = self.db.query(CourseModel).filter(CourseModel.id == course_id).first()
+        if not course_model:
+            return None
+        return CourseEntity(
+            id=course_model.id,
+            name=course_model.name,
+            description=course_model.description,
+            created_at=course_model.created_at
+        )
+
+    def get_all(self) -> List[CourseEntity]:
+        course_models = self.db.query(CourseModel).all()
+        return [
+            CourseEntity(
+                id=m.id,
+                name=m.name,
+                description=m.description,
+                created_at=m.created_at
+            )
+            for m in course_models
+        ]
+
+    def delete(self, course_id: int) -> bool:
+        course_model = self.db.query(CourseModel).filter(CourseModel.id == course_id).first()
+        if not course_model:
+            return False
+        self.db.delete(course_model)
+        self.db.commit()
+        return True
+
+    def get_projects(self, course_id: int) -> List[ProjectEntity]:
+        project_models = self.db.query(ProjectModel).filter(ProjectModel.course_id == course_id).all()
+        return [
+            ProjectEntity(
+                id=m.id,
+                name=m.name,
+                git_url=m.git_url,
+                local_saved_path=m.local_saved_path,
+                description=m.description,
+                created_at=m.created_at,
+                course_id=m.course_id
+            )
+            for m in project_models
+        ]

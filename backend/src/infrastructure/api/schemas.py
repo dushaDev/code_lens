@@ -2,14 +2,30 @@ from pydantic import BaseModel, ConfigDict
 from typing import List, Optional
 from datetime import datetime
 
+class CourseCreateRequest(BaseModel):
+    name: str
+    description: Optional[str] = None
+
+class CourseResponse(BaseModel):
+    id: int
+    name: str
+    description: Optional[str] = None
+    created_at: datetime
+
+class CoursesListResponse(BaseModel):
+    total_courses: int
+    courses: List[CourseResponse]
+
 class ProjectCreateRequest(BaseModel):
     name: str
     description: Optional[str] = None
     git_url: str
+    course_id: int
 
 class ProjectCreateResponse(BaseModel):
     project_id: int
     name: str
+    course_id: int
 
 class ExtractResponse(BaseModel):
     status: str
@@ -38,6 +54,7 @@ class ProjectResponse(BaseModel):
     git_url: str
     local_saved_path: str
     created_at: datetime
+    course_id: Optional[int] = None
 
 class FileChangeResponse(BaseModel):
     id: int

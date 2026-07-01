@@ -4,7 +4,7 @@ from typing import List, Optional
 import os
 
 from src.infrastructure.database.session import get_db
-from src.infrastructure.database.repositories import ProjectRepository, AuthorRepository, CommitRepository, DatabaseService
+from src.infrastructure.database.repositories import ProjectRepository, AuthorRepository, CommitRepository, DatabaseService, CourseRepository
 from src.infrastructure.services.pydriller_service import PyDrillerService
 from src.infrastructure.api.schemas import (
     ProjectCreateRequest, ProjectCreateResponse, ExtractResponse, ErrorResponse,
@@ -12,7 +12,8 @@ from src.infrastructure.api.schemas import (
     AuthorResponse, FileChangeProfileResponse, CommitProfileResponse,
     AuthorCommitsResponse, ProjectsListResponse, ProjectAuthorsResponse,
     ProjectAnalyticsResponse, MergeAuthorsRequest, AuthorsListResponse, BranchesListResponse, BranchResponse,
-    FileChangeMetricsResponse, FileChangeASTResponse, ASTNodeResponse
+    FileChangeMetricsResponse, FileChangeASTResponse, ASTNodeResponse,
+    CourseCreateRequest, CourseResponse, CoursesListResponse
 )
 from src.use_cases.extract_git_history import ExtractGitHistoryUseCase
 from src.use_cases.get_author_commits import (
@@ -27,25 +28,146 @@ from src.use_cases.get_project_details import (
 from src.use_cases.get_author_details import (
     GetAllAuthorsUseCase, GetAuthorByIdUseCase
 )
+from src.use_cases.manage_courses import (
+    CreateCourseUseCase, GetAllCoursesUseCase, GetCourseByIdUseCase,
+    DeleteCourseUseCase, GetCourseProjectsUseCase
+)
 
 router = APIRouter(prefix="/api/v1")
 
+# ---------------------------------------------------------------------------
+# Course endpoints
+# ---------------------------------------------------------------------------
+
+@router.post("/courses", response_model=CourseResponse, status_code=status.HTTP_201_CREATED)
+def create_course(request: CourseCreateRequest, db: Session = Depends(get_db)):
+    course_repo = CourseRepository(db)
+    use_case = CreateCourseUseCase(course_repo)
+    try:
+        course = use_case.execute(name=request.name, description=request.description)
+        return CourseResponse(
+            id=course.id,
+            name=course.name,
+            description=course.description,
+            created_at=course.created_at
+        )
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+@router.get("/courses", response_model=CoursesListResponse, responses={500: {"model": ErrorResponse}})
+def get_all_courses(db: Session = Depends(get_db)):
+    course_repo = CourseRepository(db)
+    use_case = GetAllCoursesUseCase(course_repo)
+    try:
+        courses = use_case.execute()
+        courses_list = [
+            CourseResponse(id=c.id, name=c.name, description=c.description, created_at=c.created_at)
+            for c in courses
+        ]
+        return CoursesListResponse(total_courses=len(courses_list), courses=courses_list)
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+@router.get(
+    "/courses/{course_id}",
+    response_model=CourseResponse,
+    responses={404: {"model": ErrorResponse}, 500: {"model": ErrorResponse}}
+)
+def get_course_by_id(course_id: int, db: Session = Depends(get_db)):
+    course_repo = CourseRepository(db)
+    use_case = GetCourseByIdUseCase(course_repo)
+    try:
+        course = use_case.execute(course_id)
+        return CourseResponse(
+            id=course.id,
+            name=course.name,
+            description=course.description,
+            created_at=course.created_at
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+@router.delete(
+    "/courses/{course_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses={404: {"model": ErrorResponse}}
+)
+def delete_course(course_id: int, db: Session = Depends(get_db)):
+    course_repo = CourseRepository(db)
+    use_case = DeleteCourseUseCase(course_repo)
+    try:
+        use_case.execute(course_id)
+        return None
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+@router.get(
+    "/courses/{course_id}/projects",
+    response_model=ProjectsListResponse,
+    responses={404: {"model": ErrorResponse}, 500: {"model": ErrorResponse}}
+)
+def get_course_projects(course_id: int, db: Session = Depends(get_db)):
+    course_repo = CourseRepository(db)
+    use_case = GetCourseProjectsUseCase(course_repo)
+    try:
+        projects = use_case.execute(course_id)
+        projects_list = [
+            ProjectResponse(
+                id=p.id,
+                name=p.name,
+                description=p.description,
+                git_url=p.git_url,
+                local_saved_path=p.local_saved_path,
+                created_at=p.created_at,
+                course_id=p.course_id
+            )
+            for p in projects
+        ]
+        return ProjectsListResponse(total_projects=len(projects_list), projects=projects_list)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+# ---------------------------------------------------------------------------
+# Project endpoints
+# ---------------------------------------------------------------------------
+
 @router.post("/projects", response_model=ProjectCreateResponse, status_code=status.HTTP_201_CREATED)
 def create_project(request: ProjectCreateRequest, db: Session = Depends(get_db)):
+    course_repo = CourseRepository(db)
     repo = ProjectRepository(db)
-    
+
+    # Validate course exists before creating project
+    course = course_repo.get_by_id(request.course_id)
+    if not course:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Course with ID {request.course_id} not found."
+        )
+
     # 1. Create project row to flush / populate project ID
     project = repo.create(
         name=request.name,
         description=request.description,
-        git_url=request.git_url
+        git_url=request.git_url,
+        course_id=request.course_id
     )
     
     # 2. Update project with unique local path using its ID
     local_path = f"./temp_repos/{project.id}/repo"
     repo.update_local_path(project.id, local_path)
     
-    return ProjectCreateResponse(project_id=project.id, name=project.name)
+    return ProjectCreateResponse(project_id=project.id, name=project.name, course_id=project.course_id)
 
 @router.post(
     "/extract/{project_id}", 

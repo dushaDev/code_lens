@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 from typing import List, Optional
-from src.domain.entities import ProjectEntity, AuthorEntity, CommitEntity, BranchEntity
+from src.domain.entities import ProjectEntity, AuthorEntity, CommitEntity, BranchEntity, CourseEntity
 
 class IProjectRepository(ABC):
     @abstractmethod
@@ -8,7 +8,7 @@ class IProjectRepository(ABC):
         pass
 
     @abstractmethod
-    def create(self, name: str, description: Optional[str], git_url: str) -> ProjectEntity:
+    def create(self, name: str, description: Optional[str], git_url: str, course_id: int) -> ProjectEntity:
         pass
 
     @abstractmethod
@@ -77,4 +77,25 @@ class IGitExtractorService(ABC):
 class IDatabaseService(ABC):
     @abstractmethod
     def reset_database(self) -> None:
+        pass
+
+class ICourseRepository(ABC):
+    @abstractmethod
+    def create(self, name: str, description: Optional[str]) -> CourseEntity:
+        pass
+
+    @abstractmethod
+    def get_by_id(self, course_id: int) -> Optional[CourseEntity]:
+        pass
+
+    @abstractmethod
+    def get_all(self) -> List[CourseEntity]:
+        pass
+
+    @abstractmethod
+    def delete(self, course_id: int) -> bool:
+        pass
+
+    @abstractmethod
+    def get_projects(self, course_id: int) -> List[ProjectEntity]:
         pass
