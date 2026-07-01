@@ -103,7 +103,7 @@
   padding: 8px 0;
 }
 
-.project-name-cell {
+.project-name-cell-content {
   display: flex;
   align-items: center;
   gap: 12px;

@@ -40,7 +40,7 @@
 }
 
 /* Student List Details */
-.student-info-cell {
+.student-info-cell-content {
   display: flex;
   align-items: center;
   gap: 16px;

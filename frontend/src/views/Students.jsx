@@ -71,15 +71,17 @@ export default function Students({ students }) {
             <tbody>
               {filteredStudents.map((student) => (
                 <tr key={student.id}>
-                  <td className="student-info-cell">
-                    <div className="student-avatar">
-                      {student.name.slice(0, 2).toUpperCase()}
-                    </div>
-                    <div>
-                      <span className="student-name">{student.name}</span>
-                      <span className="student-id">ID: {student.studentId || `CS-${1000 + student.id}`}</span>
-                    </div>
-                  </td>
+                    <td>
+                      <div className="student-info-cell-content">
+                        <div className="student-avatar">
+                          {student.name.slice(0, 2).toUpperCase()}
+                        </div>
+                        <div>
+                          <span className="student-name">{student.name}</span>
+                          <span className="student-id">ID: {student.studentId || `CS-${1000 + student.id}`}</span>
+                        </div>
+                      </div>
+                    </td>
                   <td className="muted-cell">{student.email}</td>
                   <td className="bold-cell">{student.commitsCount || 24}</td>
                   <td>

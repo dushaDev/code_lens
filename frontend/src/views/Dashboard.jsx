@@ -113,8 +113,10 @@ export default function Dashboard({
                 const isHighRisk = project.plagiarismRisk === 'High Risk';
                 return (
                   <tr key={project.id} className={isHighRisk ? 'row-high-risk' : ''}>
-                    <td className="project-name-cell">
-                      <span className="project-title">{project.name}</span>
+                    <td>
+                      <div className="project-name-cell-content">
+                        <span className="project-title">{project.name}</span>
+                      </div>
                     </td>
                     <td>
                       <div className="tech-badges-list">
