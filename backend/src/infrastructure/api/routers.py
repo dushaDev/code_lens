@@ -6,6 +6,11 @@ import os
 from src.infrastructure.database.session import get_db
 from src.infrastructure.database.repositories import ProjectRepository, AuthorRepository, CommitRepository, DatabaseService, CourseRepository
 from src.infrastructure.services.pydriller_service import PyDrillerService
+from src.infrastructure.auth.dependencies import get_current_user
+from src.infrastructure.auth.user_repository import UserRepository
+from src.infrastructure.auth.hashing import verify_password
+from src.infrastructure.auth.jwt import create_access_token
+from src.infrastructure.database.models import UserModel
 from src.infrastructure.api.schemas import (
     ProjectCreateRequest, ProjectCreateResponse, ExtractResponse, ErrorResponse,
     CommitResponse, AuthorFullProfileResponse, ProjectResponse, FileChangeResponse, CommitWithProjectAndFilesResponse,
@@ -13,7 +18,8 @@ from src.infrastructure.api.schemas import (
     AuthorCommitsResponse, ProjectsListResponse, ProjectAuthorsResponse,
     ProjectAnalyticsResponse, MergeAuthorsRequest, AuthorsListResponse, BranchesListResponse, BranchResponse,
     FileChangeMetricsResponse, FileChangeASTResponse, ASTNodeResponse,
-    CourseCreateRequest, CourseResponse, CoursesListResponse
+    CourseCreateRequest, CourseResponse, CoursesListResponse,
+    UserRegisterRequest, UserResponse, UserUpdateRequest, UsersListResponse, TokenResponse, LoginRequest
 )
 from src.use_cases.extract_git_history import ExtractGitHistoryUseCase
 from src.use_cases.get_author_commits import (
@@ -36,11 +42,218 @@ from src.use_cases.manage_courses import (
 router = APIRouter(prefix="/api/v1")
 
 # ---------------------------------------------------------------------------
-# Course endpoints
+# Auth endpoints (PUBLIC — no token required)
 # ---------------------------------------------------------------------------
 
-@router.post("/courses", response_model=CourseResponse, status_code=status.HTTP_201_CREATED)
-def create_course(request: CourseCreateRequest, db: Session = Depends(get_db)):
+@router.post(
+    "/auth/register",
+    response_model=UserResponse,
+    status_code=status.HTTP_201_CREATED,
+    tags=["Auth"]
+)
+def register(request: UserRegisterRequest, db: Session = Depends(get_db)):
+    """Register a new user account."""
+    user_repo = UserRepository(db)
+
+    if user_repo.get_by_email(request.email):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="A user with this email already exists."
+        )
+    if user_repo.get_by_username(request.username):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="A user with this username already exists."
+        )
+
+    user = user_repo.create(
+        username=request.username,
+        email=request.email,
+        password=request.password
+    )
+    return UserResponse(
+        id=user.id,
+        username=user.username,
+        email=user.email,
+        is_active=user.is_active,
+        created_at=user.created_at
+    )
+
+
+@router.post(
+    "/auth/login",
+    response_model=TokenResponse,
+    tags=["Auth"]
+)
+def login(request: LoginRequest, db: Session = Depends(get_db)):
+    """Login with email and password to receive a JWT access token."""
+    user_repo = UserRepository(db)
+    user = user_repo.get_by_email(request.email)
+
+    if not user or not verify_password(request.password, user.hashed_password):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect email or password.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    if not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="User account is deactivated."
+        )
+
+    token = create_access_token(data={"sub": str(user.id)})
+    return TokenResponse(access_token=token)
+
+
+# ---------------------------------------------------------------------------
+# User management endpoints (PROTECTED)
+# ---------------------------------------------------------------------------
+
+@router.get(
+    "/users",
+    response_model=UsersListResponse,
+    tags=["Users"],
+    responses={401: {"model": ErrorResponse}, 500: {"model": ErrorResponse}}
+)
+def get_all_users(
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_user)
+):
+    """List all registered users."""
+    user_repo = UserRepository(db)
+    users = user_repo.get_all()
+    return UsersListResponse(
+        total_users=len(users),
+        users=[
+            UserResponse(id=u.id, username=u.username, email=u.email,
+                         is_active=u.is_active, created_at=u.created_at)
+            for u in users
+        ]
+    )
+
+
+@router.get(
+    "/users/me",
+    response_model=UserResponse,
+    tags=["Users"],
+    responses={401: {"model": ErrorResponse}}
+)
+def get_me(current_user: UserModel = Depends(get_current_user)):
+    """Get the currently authenticated user's profile."""
+    return UserResponse(
+        id=current_user.id,
+        username=current_user.username,
+        email=current_user.email,
+        is_active=current_user.is_active,
+        created_at=current_user.created_at
+    )
+
+
+@router.get(
+    "/users/{user_id}",
+    response_model=UserResponse,
+    tags=["Users"],
+    responses={401: {"model": ErrorResponse}, 404: {"model": ErrorResponse}}
+)
+def get_user_by_id(
+    user_id: int,
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_user)
+):
+    """Get a user by their ID."""
+    user_repo = UserRepository(db)
+    user = user_repo.get_by_id(user_id)
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found.")
+    return UserResponse(
+        id=user.id, username=user.username, email=user.email,
+        is_active=user.is_active, created_at=user.created_at
+    )
+
+
+@router.put(
+    "/users/{user_id}",
+    response_model=UserResponse,
+    tags=["Users"],
+    responses={401: {"model": ErrorResponse}, 404: {"model": ErrorResponse}, 409: {"model": ErrorResponse}}
+)
+def update_user(
+    user_id: int,
+    request: UserUpdateRequest,
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_user)
+):
+    """Update a user's username, email, password, or active status."""
+    user_repo = UserRepository(db)
+
+    # Uniqueness checks for changed fields
+    if request.email:
+        existing = user_repo.get_by_email(request.email)
+        if existing and existing.id != user_id:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Email is already taken by another user."
+            )
+    if request.username:
+        existing = user_repo.get_by_username(request.username)
+        if existing and existing.id != user_id:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Username is already taken by another user."
+            )
+
+    user = user_repo.update(
+        user_id=user_id,
+        username=request.username,
+        email=request.email,
+        password=request.password,
+        is_active=request.is_active
+    )
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found.")
+
+    return UserResponse(
+        id=user.id, username=user.username, email=user.email,
+        is_active=user.is_active, created_at=user.created_at
+    )
+
+
+@router.delete(
+    "/users/{user_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    tags=["Users"],
+    responses={401: {"model": ErrorResponse}, 404: {"model": ErrorResponse}}
+)
+def delete_user(
+    user_id: int,
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_user)
+):
+    """Delete a user account."""
+    user_repo = UserRepository(db)
+    success = user_repo.delete(user_id)
+    if not success:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found.")
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Course endpoints (PROTECTED)
+# ---------------------------------------------------------------------------
+
+@router.post(
+    "/courses",
+    response_model=CourseResponse,
+    status_code=status.HTTP_201_CREATED,
+    tags=["Courses"]
+)
+def create_course(
+    request: CourseCreateRequest,
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_user)
+):
     course_repo = CourseRepository(db)
     use_case = CreateCourseUseCase(course_repo)
     try:
@@ -55,8 +268,16 @@ def create_course(request: CourseCreateRequest, db: Session = Depends(get_db)):
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 
-@router.get("/courses", response_model=CoursesListResponse, responses={500: {"model": ErrorResponse}})
-def get_all_courses(db: Session = Depends(get_db)):
+@router.get(
+    "/courses",
+    response_model=CoursesListResponse,
+    tags=["Courses"],
+    responses={401: {"model": ErrorResponse}, 500: {"model": ErrorResponse}}
+)
+def get_all_courses(
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_user)
+):
     course_repo = CourseRepository(db)
     use_case = GetAllCoursesUseCase(course_repo)
     try:
@@ -73,9 +294,14 @@ def get_all_courses(db: Session = Depends(get_db)):
 @router.get(
     "/courses/{course_id}",
     response_model=CourseResponse,
-    responses={404: {"model": ErrorResponse}, 500: {"model": ErrorResponse}}
+    tags=["Courses"],
+    responses={401: {"model": ErrorResponse}, 404: {"model": ErrorResponse}, 500: {"model": ErrorResponse}}
 )
-def get_course_by_id(course_id: int, db: Session = Depends(get_db)):
+def get_course_by_id(
+    course_id: int,
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_user)
+):
     course_repo = CourseRepository(db)
     use_case = GetCourseByIdUseCase(course_repo)
     try:
@@ -95,9 +321,14 @@ def get_course_by_id(course_id: int, db: Session = Depends(get_db)):
 @router.delete(
     "/courses/{course_id}",
     status_code=status.HTTP_204_NO_CONTENT,
-    responses={404: {"model": ErrorResponse}}
+    tags=["Courses"],
+    responses={401: {"model": ErrorResponse}, 404: {"model": ErrorResponse}}
 )
-def delete_course(course_id: int, db: Session = Depends(get_db)):
+def delete_course(
+    course_id: int,
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_user)
+):
     course_repo = CourseRepository(db)
     use_case = DeleteCourseUseCase(course_repo)
     try:
@@ -112,9 +343,14 @@ def delete_course(course_id: int, db: Session = Depends(get_db)):
 @router.get(
     "/courses/{course_id}/projects",
     response_model=ProjectsListResponse,
-    responses={404: {"model": ErrorResponse}, 500: {"model": ErrorResponse}}
+    tags=["Courses"],
+    responses={401: {"model": ErrorResponse}, 404: {"model": ErrorResponse}, 500: {"model": ErrorResponse}}
 )
-def get_course_projects(course_id: int, db: Session = Depends(get_db)):
+def get_course_projects(
+    course_id: int,
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_user)
+):
     course_repo = CourseRepository(db)
     use_case = GetCourseProjectsUseCase(course_repo)
     try:
@@ -139,11 +375,20 @@ def get_course_projects(course_id: int, db: Session = Depends(get_db)):
 
 
 # ---------------------------------------------------------------------------
-# Project endpoints
+# Project endpoints (PROTECTED)
 # ---------------------------------------------------------------------------
 
-@router.post("/projects", response_model=ProjectCreateResponse, status_code=status.HTTP_201_CREATED)
-def create_project(request: ProjectCreateRequest, db: Session = Depends(get_db)):
+@router.post(
+    "/projects",
+    response_model=ProjectCreateResponse,
+    status_code=status.HTTP_201_CREATED,
+    tags=["Projects"]
+)
+def create_project(
+    request: ProjectCreateRequest,
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_user)
+):
     course_repo = CourseRepository(db)
     repo = ProjectRepository(db)
 
@@ -162,23 +407,29 @@ def create_project(request: ProjectCreateRequest, db: Session = Depends(get_db))
         git_url=request.git_url,
         course_id=request.course_id
     )
-    
+
     # 2. Update project with unique local path using its ID
     local_path = f"./temp_repos/{project.id}/repo"
     repo.update_local_path(project.id, local_path)
-    
+
     return ProjectCreateResponse(project_id=project.id, name=project.name, course_id=project.course_id)
 
+
 @router.post(
-    "/extract/{project_id}", 
-    response_model=ExtractResponse, 
-    responses={404: {"model": ErrorResponse}, 500: {"model": ErrorResponse}}
+    "/extract/{project_id}",
+    response_model=ExtractResponse,
+    tags=["Projects"],
+    responses={401: {"model": ErrorResponse}, 404: {"model": ErrorResponse}, 500: {"model": ErrorResponse}}
 )
-def extract_git_data(project_id: int, db: Session = Depends(get_db)):
+def extract_git_data(
+    project_id: int,
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_user)
+):
     project_repo = ProjectRepository(db)
     extractor_service = PyDrillerService(db)
     use_case = ExtractGitHistoryUseCase(project_repo, extractor_service)
-    
+
     try:
         result = use_case.execute(project_id)
         return ExtractResponse(**result)
@@ -193,105 +444,35 @@ def extract_git_data(project_id: int, db: Session = Depends(get_db)):
             detail=f"{type(e).__name__}: {str(e)}"
         )
 
+
 @router.delete(
-    "/projects/{project_id}", 
+    "/projects/{project_id}",
     status_code=status.HTTP_204_NO_CONTENT,
-    responses={404: {"model": ErrorResponse}}
+    tags=["Projects"],
+    responses={401: {"model": ErrorResponse}, 404: {"model": ErrorResponse}}
 )
-def delete_project(project_id: int, db: Session = Depends(get_db)):
+def delete_project(
+    project_id: int,
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_user)
+):
     repo = ProjectRepository(db)
     success = repo.delete(project_id)
     if not success:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
     return None
 
-@router.get(
-    "/authors/{author_id}/commits",
-    response_model=AuthorCommitsResponse,
-    responses={404: {"model": ErrorResponse}, 500: {"model": ErrorResponse}}
-)
-def get_author_commits(author_id: int, project_id: Optional[int] = None, branch: Optional[str] = None, db: Session = Depends(get_db)):
-    author_repo = AuthorRepository(db)
-    commit_repo = CommitRepository(db)
-    use_case = GetAuthorCommitsUseCase(author_repo, commit_repo)
-    try:
-        commits = use_case.execute(author_id, project_id=project_id, branch=branch)
-        commits_list = [
-            CommitResponse(
-                hash=c.hash,
-                project_id=c.project_id,
-                author_id=c.author_id,
-                timestamp=c.timestamp,
-                message=c.message,
-                insertions=c.insertions,
-                deletions=c.deletions,
-                is_squash_suspected=c.is_squash_suspected,
-                branches=",".join([b.short_name for b in c.branches]) if c.branches else None
-            )
-            for c in commits
-        ]
-        return AuthorCommitsResponse(total_commits=len(commits_list), commits=commits_list)
-    except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
-
-@router.get(
-    "/authors/{author_id}/full-profile",
-    response_model=AuthorFullProfileResponse,
-    responses={404: {"model": ErrorResponse}, 500: {"model": ErrorResponse}}
-)
-def get_author_full_profile(author_id: int, project_id: Optional[int] = None, db: Session = Depends(get_db)):
-    author_repo = AuthorRepository(db)
-    project_repo = ProjectRepository(db)
-    use_case = GetAuthorFullProfileUseCase(author_repo, project_repo)
-    try:
-        author = use_case.execute(author_id, project_id=project_id)
-        
-        commits_resp = []
-        for c in author.commits:
-            file_changes_resp = [
-                FileChangeProfileResponse(
-                    filename=fc.filename,
-                    status=fc.status,
-                    lines_added=fc.lines_added,
-                    lines_removed=fc.lines_removed
-                )
-                for fc in c.file_changes
-            ]
-            
-            commits_resp.append(
-                CommitProfileResponse(
-                    hash=c.hash,
-                    timestamp=c.timestamp,
-                    message=c.message,
-                    branches=",".join([b.short_name for b in c.branches]) if c.branches else None,
-                    insertions=c.insertions,
-                    deletions=c.deletions,
-                    is_squash_suspected=c.is_squash_suspected,
-                    total_file_changes=len(file_changes_resp),
-                    file_changes=file_changes_resp
-                )
-            )
-            
-        return AuthorFullProfileResponse(
-            id=author.id,
-            name=author.name,
-            email=author.email,
-            total_commits=len(commits_resp),
-            commits=commits_resp
-        )
-    except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 @router.get(
     "/projects",
     response_model=ProjectsListResponse,
-    responses={500: {"model": ErrorResponse}}
+    tags=["Projects"],
+    responses={401: {"model": ErrorResponse}, 500: {"model": ErrorResponse}}
 )
-def get_all_projects(db: Session = Depends(get_db)):
+def get_all_projects(
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_user)
+):
     project_repo = ProjectRepository(db)
     use_case = GetAllProjectsUseCase(project_repo)
     try:
@@ -303,112 +484,12 @@ def get_all_projects(db: Session = Depends(get_db)):
                 description=p.description,
                 git_url=p.git_url,
                 local_saved_path=p.local_saved_path,
-                created_at=p.created_at
+                created_at=p.created_at,
+                course_id=p.course_id
             )
             for p in projects
         ]
         return ProjectsListResponse(total_projects=len(projects_list), projects=projects_list)
-    except Exception as e:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
-
-@router.get(
-    "/authors/{author_id}/projects",
-    response_model=ProjectsListResponse,
-    responses={404: {"model": ErrorResponse}, 500: {"model": ErrorResponse}}
-)
-def get_projects_by_author(author_id: int, db: Session = Depends(get_db)):
-    author_repo = AuthorRepository(db)
-    project_repo = ProjectRepository(db)
-    use_case = GetProjectsByAuthorUseCase(author_repo, project_repo)
-    try:
-        projects = use_case.execute(author_id)
-        projects_list = [
-            ProjectResponse(
-                id=p.id,
-                name=p.name,
-                description=p.description,
-                git_url=p.git_url,
-                local_saved_path=p.local_saved_path,
-                created_at=p.created_at
-            )
-            for p in projects
-        ]
-        return ProjectsListResponse(total_projects=len(projects_list), projects=projects_list)
-    except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
-
-@router.get(
-    "/projects/{project_id}/authors",
-    response_model=ProjectAuthorsResponse,
-    responses={404: {"model": ErrorResponse}, 500: {"model": ErrorResponse}}
-)
-def get_project_authors(project_id: int, branch: Optional[str] = None, db: Session = Depends(get_db)):
-    project_repo = ProjectRepository(db)
-    author_repo = AuthorRepository(db)
-    use_case = GetProjectAuthorsUseCase(project_repo, author_repo)
-    try:
-        authors = use_case.execute(project_id, branch=branch)
-        authors_list = [
-            AuthorResponse(
-                id=a.id,
-                name=a.name,
-                email=a.email
-            )
-            for a in authors
-        ]
-        return ProjectAuthorsResponse(total_authors=len(authors_list), authors=authors_list)
-    except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
-
-@router.post("/system/reset", status_code=status.HTTP_200_OK)
-def reset_database(db: Session = Depends(get_db)):
-    db_service = DatabaseService(db)
-    use_case = ResetDatabaseUseCase(db_service)
-    try:
-        use_case.execute()
-        return {"status": "success", "message": "Database has been reset successfully."}
-    except Exception as e:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
-
-@router.get(
-    "/projects/{project_id}/analytics",
-    response_model=ProjectAnalyticsResponse,
-    responses={404: {"model": ErrorResponse}, 500: {"model": ErrorResponse}}
-)
-def get_project_analytics(project_id: int, db: Session = Depends(get_db)):
-    project_repo = ProjectRepository(db)
-    author_repo = AuthorRepository(db)
-    commit_repo = CommitRepository(db)
-    use_case = GetProjectAnalyticsUseCase(project_repo, author_repo, commit_repo)
-    try:
-        return use_case.execute(project_id)
-    except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
-
-@router.post(
-    "/authors/merge",
-    status_code=status.HTTP_200_OK,
-    responses={400: {"model": ErrorResponse}, 404: {"model": ErrorResponse}, 500: {"model": ErrorResponse}}
-)
-def merge_authors(request: MergeAuthorsRequest, db: Session = Depends(get_db)):
-    author_repo = AuthorRepository(db)
-    use_case = MergeAuthorsUseCase(author_repo)
-    try:
-        use_case.execute(request.source_author_id, request.target_author_id)
-        return {"status": "success", "message": f"Author {request.source_author_id} has been merged into Author {request.target_author_id} successfully."}
-    except ValueError as e:
-        # Check if it was a cycle validation error or not found error
-        detail = str(e)
-        if "not found" in detail:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=detail)
-        else:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=detail)
     except Exception as e:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
@@ -416,9 +497,14 @@ def merge_authors(request: MergeAuthorsRequest, db: Session = Depends(get_db)):
 @router.get(
     "/projects/{project_id}",
     response_model=ProjectResponse,
-    responses={404: {"model": ErrorResponse}, 500: {"model": ErrorResponse}}
+    tags=["Projects"],
+    responses={401: {"model": ErrorResponse}, 404: {"model": ErrorResponse}, 500: {"model": ErrorResponse}}
 )
-def get_project_by_id(project_id: int, db: Session = Depends(get_db)):
+def get_project_by_id(
+    project_id: int,
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_user)
+):
     project_repo = ProjectRepository(db)
     use_case = GetProjectByIdUseCase(project_repo)
     try:
@@ -429,7 +515,8 @@ def get_project_by_id(project_id: int, db: Session = Depends(get_db)):
             description=p.description,
             git_url=p.git_url,
             local_saved_path=p.local_saved_path,
-            created_at=p.created_at
+            created_at=p.created_at,
+            course_id=p.course_id
         )
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
@@ -440,9 +527,14 @@ def get_project_by_id(project_id: int, db: Session = Depends(get_db)):
 @router.get(
     "/projects/{project_id}/branches",
     response_model=BranchesListResponse,
-    responses={404: {"model": ErrorResponse}, 500: {"model": ErrorResponse}}
+    tags=["Projects"],
+    responses={401: {"model": ErrorResponse}, 404: {"model": ErrorResponse}, 500: {"model": ErrorResponse}}
 )
-def get_project_branches(project_id: int, db: Session = Depends(get_db)):
+def get_project_branches(
+    project_id: int,
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_user)
+):
     project_repo = ProjectRepository(db)
     commit_repo = CommitRepository(db)
     use_case = GetProjectBranchesUseCase(project_repo, commit_repo)
@@ -467,13 +559,15 @@ def get_project_branches(project_id: int, db: Session = Depends(get_db)):
 @router.get(
     "/projects/{project_id}/commits",
     response_model=AuthorCommitsResponse,
-    responses={404: {"model": ErrorResponse}, 500: {"model": ErrorResponse}}
+    tags=["Projects"],
+    responses={401: {"model": ErrorResponse}, 404: {"model": ErrorResponse}, 500: {"model": ErrorResponse}}
 )
 def get_project_commits(
     project_id: int,
     branch: Optional[str] = None,
     author_id: Optional[int] = None,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_user)
 ):
     project_repo = ProjectRepository(db)
     commit_repo = CommitRepository(db)
@@ -502,21 +596,76 @@ def get_project_commits(
 
 
 @router.get(
+    "/projects/{project_id}/authors",
+    response_model=ProjectAuthorsResponse,
+    tags=["Projects"],
+    responses={401: {"model": ErrorResponse}, 404: {"model": ErrorResponse}, 500: {"model": ErrorResponse}}
+)
+def get_project_authors(
+    project_id: int,
+    branch: Optional[str] = None,
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_user)
+):
+    project_repo = ProjectRepository(db)
+    author_repo = AuthorRepository(db)
+    use_case = GetProjectAuthorsUseCase(project_repo, author_repo)
+    try:
+        authors = use_case.execute(project_id, branch=branch)
+        authors_list = [
+            AuthorResponse(id=a.id, name=a.name, email=a.email)
+            for a in authors
+        ]
+        return ProjectAuthorsResponse(total_authors=len(authors_list), authors=authors_list)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+@router.get(
+    "/projects/{project_id}/analytics",
+    response_model=ProjectAnalyticsResponse,
+    tags=["Projects"],
+    responses={401: {"model": ErrorResponse}, 404: {"model": ErrorResponse}, 500: {"model": ErrorResponse}}
+)
+def get_project_analytics(
+    project_id: int,
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_user)
+):
+    project_repo = ProjectRepository(db)
+    author_repo = AuthorRepository(db)
+    commit_repo = CommitRepository(db)
+    use_case = GetProjectAnalyticsUseCase(project_repo, author_repo, commit_repo)
+    try:
+        return use_case.execute(project_id)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+# ---------------------------------------------------------------------------
+# Author endpoints (PROTECTED)
+# ---------------------------------------------------------------------------
+
+@router.get(
     "/authors",
     response_model=AuthorsListResponse,
-    responses={500: {"model": ErrorResponse}}
+    tags=["Authors"],
+    responses={401: {"model": ErrorResponse}, 500: {"model": ErrorResponse}}
 )
-def get_all_authors(db: Session = Depends(get_db)):
+def get_all_authors(
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_user)
+):
     author_repo = AuthorRepository(db)
     use_case = GetAllAuthorsUseCase(author_repo)
     try:
         authors = use_case.execute()
         authors_list = [
-            AuthorResponse(
-                id=a.id,
-                name=a.name,
-                email=a.email
-            )
+            AuthorResponse(id=a.id, name=a.name, email=a.email)
             for a in authors
         ]
         return AuthorsListResponse(total_authors=len(authors_list), authors=authors_list)
@@ -527,17 +676,114 @@ def get_all_authors(db: Session = Depends(get_db)):
 @router.get(
     "/authors/{author_id}",
     response_model=AuthorResponse,
-    responses={404: {"model": ErrorResponse}, 500: {"model": ErrorResponse}}
+    tags=["Authors"],
+    responses={401: {"model": ErrorResponse}, 404: {"model": ErrorResponse}, 500: {"model": ErrorResponse}}
 )
-def get_author_by_id(author_id: int, db: Session = Depends(get_db)):
+def get_author_by_id(
+    author_id: int,
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_user)
+):
     author_repo = AuthorRepository(db)
     use_case = GetAuthorByIdUseCase(author_repo)
     try:
         a = use_case.execute(author_id)
-        return AuthorResponse(
-            id=a.id,
-            name=a.name,
-            email=a.email
+        return AuthorResponse(id=a.id, name=a.name, email=a.email)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+@router.get(
+    "/authors/{author_id}/commits",
+    response_model=AuthorCommitsResponse,
+    tags=["Authors"],
+    responses={401: {"model": ErrorResponse}, 404: {"model": ErrorResponse}, 500: {"model": ErrorResponse}}
+)
+def get_author_commits(
+    author_id: int,
+    project_id: Optional[int] = None,
+    branch: Optional[str] = None,
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_user)
+):
+    author_repo = AuthorRepository(db)
+    commit_repo = CommitRepository(db)
+    use_case = GetAuthorCommitsUseCase(author_repo, commit_repo)
+    try:
+        commits = use_case.execute(author_id, project_id=project_id, branch=branch)
+        commits_list = [
+            CommitResponse(
+                hash=c.hash,
+                project_id=c.project_id,
+                author_id=c.author_id,
+                timestamp=c.timestamp,
+                message=c.message,
+                insertions=c.insertions,
+                deletions=c.deletions,
+                is_squash_suspected=c.is_squash_suspected,
+                branches=",".join([b.short_name for b in c.branches]) if c.branches else None
+            )
+            for c in commits
+        ]
+        return AuthorCommitsResponse(total_commits=len(commits_list), commits=commits_list)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+@router.get(
+    "/authors/{author_id}/full-profile",
+    response_model=AuthorFullProfileResponse,
+    tags=["Authors"],
+    responses={401: {"model": ErrorResponse}, 404: {"model": ErrorResponse}, 500: {"model": ErrorResponse}}
+)
+def get_author_full_profile(
+    author_id: int,
+    project_id: Optional[int] = None,
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_user)
+):
+    author_repo = AuthorRepository(db)
+    project_repo = ProjectRepository(db)
+    use_case = GetAuthorFullProfileUseCase(author_repo, project_repo)
+    try:
+        author = use_case.execute(author_id, project_id=project_id)
+
+        commits_resp = []
+        for c in author.commits:
+            file_changes_resp = [
+                FileChangeProfileResponse(
+                    filename=fc.filename,
+                    status=fc.status,
+                    lines_added=fc.lines_added,
+                    lines_removed=fc.lines_removed
+                )
+                for fc in c.file_changes
+            ]
+
+            commits_resp.append(
+                CommitProfileResponse(
+                    hash=c.hash,
+                    timestamp=c.timestamp,
+                    message=c.message,
+                    branches=",".join([b.short_name for b in c.branches]) if c.branches else None,
+                    insertions=c.insertions,
+                    deletions=c.deletions,
+                    is_squash_suspected=c.is_squash_suspected,
+                    total_file_changes=len(file_changes_resp),
+                    file_changes=file_changes_resp
+                )
+            )
+
+        return AuthorFullProfileResponse(
+            id=author.id,
+            name=author.name,
+            email=author.email,
+            total_commits=len(commits_resp),
+            commits=commits_resp
         )
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
@@ -546,12 +792,82 @@ def get_author_by_id(author_id: int, db: Session = Depends(get_db)):
 
 
 @router.get(
+    "/authors/{author_id}/projects",
+    response_model=ProjectsListResponse,
+    tags=["Authors"],
+    responses={401: {"model": ErrorResponse}, 404: {"model": ErrorResponse}, 500: {"model": ErrorResponse}}
+)
+def get_projects_by_author(
+    author_id: int,
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_user)
+):
+    author_repo = AuthorRepository(db)
+    project_repo = ProjectRepository(db)
+    use_case = GetProjectsByAuthorUseCase(author_repo, project_repo)
+    try:
+        projects = use_case.execute(author_id)
+        projects_list = [
+            ProjectResponse(
+                id=p.id,
+                name=p.name,
+                description=p.description,
+                git_url=p.git_url,
+                local_saved_path=p.local_saved_path,
+                created_at=p.created_at,
+                course_id=p.course_id
+            )
+            for p in projects
+        ]
+        return ProjectsListResponse(total_projects=len(projects_list), projects=projects_list)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+@router.post(
+    "/authors/merge",
+    status_code=status.HTTP_200_OK,
+    tags=["Authors"],
+    responses={400: {"model": ErrorResponse}, 401: {"model": ErrorResponse}, 404: {"model": ErrorResponse}, 500: {"model": ErrorResponse}}
+)
+def merge_authors(
+    request: MergeAuthorsRequest,
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_user)
+):
+    author_repo = AuthorRepository(db)
+    use_case = MergeAuthorsUseCase(author_repo)
+    try:
+        use_case.execute(request.source_author_id, request.target_author_id)
+        return {"status": "success", "message": f"Author {request.source_author_id} has been merged into Author {request.target_author_id} successfully."}
+    except ValueError as e:
+        detail = str(e)
+        if "not found" in detail:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=detail)
+        else:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=detail)
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+# ---------------------------------------------------------------------------
+# File / AST endpoints (PROTECTED)
+# ---------------------------------------------------------------------------
+
+@router.get(
     "/files/{file_change_id}/metrics",
     response_model=FileChangeMetricsResponse,
-    responses={404: {"model": ErrorResponse}},
+    tags=["Files"],
+    responses={401: {"model": ErrorResponse}, 404: {"model": ErrorResponse}},
     summary="Get stored AST metrics for a file change"
 )
-def get_file_metrics(file_change_id: int, db: Session = Depends(get_db)):
+def get_file_metrics(
+    file_change_id: int,
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_user)
+):
     """Returns the pre-computed AST metrics (complexity, function count, fingerprint)
     that were stored during extraction. Fast — no live parsing."""
     from src.infrastructure.database.models import FileChangeModel
@@ -570,10 +886,15 @@ def get_file_metrics(file_change_id: int, db: Session = Depends(get_db)):
 @router.get(
     "/files/{file_change_id}/ast",
     response_model=FileChangeASTResponse,
-    responses={404: {"model": ErrorResponse}, 422: {"model": ErrorResponse}},
+    tags=["Files"],
+    responses={401: {"model": ErrorResponse}, 404: {"model": ErrorResponse}, 422: {"model": ErrorResponse}},
     summary="Get real-time AST tree for a file change"
 )
-def get_file_ast(file_change_id: int, db: Session = Depends(get_db)):
+def get_file_ast(
+    file_change_id: int,
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_user)
+):
     """Parses the stored source code on-the-fly using tree-sitter and returns
     a simplified, JSON-serialisable AST tree structure.
 
@@ -640,12 +961,38 @@ def get_file_ast(file_change_id: int, db: Session = Depends(get_db)):
 
 @router.get(
     "/ast/supported-languages",
+    tags=["Files"],
     summary="List languages supported for AST analysis"
 )
-def get_supported_languages():
+def get_supported_languages(
+    current_user: UserModel = Depends(get_current_user)
+):
     """Returns the list of programming languages currently supported for AST parsing."""
     from src.infrastructure.services.ast_parser import supported_languages, EXTENSION_TO_LANGUAGE
     return {
         "supported_languages": supported_languages(),
         "file_extensions": EXTENSION_TO_LANGUAGE,
     }
+
+
+# ---------------------------------------------------------------------------
+# System endpoints (PROTECTED)
+# ---------------------------------------------------------------------------
+
+@router.post(
+    "/system/reset",
+    status_code=status.HTTP_200_OK,
+    tags=["System"],
+    responses={401: {"model": ErrorResponse}, 500: {"model": ErrorResponse}}
+)
+def reset_database(
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_user)
+):
+    db_service = DatabaseService(db)
+    use_case = ResetDatabaseUseCase(db_service)
+    try:
+        use_case.execute()
+        return {"status": "success", "message": "Database has been reset successfully."}
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
