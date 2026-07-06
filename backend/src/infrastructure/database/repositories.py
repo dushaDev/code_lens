@@ -19,7 +19,7 @@ class ProjectRepository(IProjectRepository):
             description=project_model.description,
             git_url=project_model.git_url,
             local_saved_path=project_model.local_saved_path,
-            group_no=project_model.group_no,
+            group_no=project_model.group_no or "G-00",
             created_at=project_model.created_at,
             course_id=project_model.course_id
         )
@@ -43,7 +43,7 @@ class ProjectRepository(IProjectRepository):
             description=project_model.description,
             git_url=project_model.git_url,
             local_saved_path=project_model.local_saved_path,
-            group_no=project_model.group_no,
+            group_no=project_model.group_no or "G-00",
             created_at=project_model.created_at,
             course_id=project_model.course_id
         )
@@ -70,7 +70,7 @@ class ProjectRepository(IProjectRepository):
                 name=m.name,
                 git_url=m.git_url,
                 local_saved_path=m.local_saved_path,
-                group_no=m.group_no,
+                group_no=m.group_no or "G-00",
                 description=m.description,
                 created_at=m.created_at,
                 course_id=m.course_id
@@ -92,7 +92,7 @@ class ProjectRepository(IProjectRepository):
                 name=m.name,
                 git_url=m.git_url,
                 local_saved_path=m.local_saved_path,
-                group_no=m.group_no,
+                group_no=m.group_no or "G-00",
                 description=m.description,
                 created_at=m.created_at,
                 course_id=m.course_id
@@ -531,7 +531,7 @@ class CourseRepository(ICourseRepository):
                 name=m.name,
                 git_url=m.git_url,
                 local_saved_path=m.local_saved_path,
-                group_no=m.group_no,
+                group_no=m.group_no or "G-00",
                 description=m.description,
                 created_at=m.created_at,
                 course_id=m.course_id

@@ -77,7 +77,7 @@ class ProjectCreateResponse(BaseModel):
     project_id: int
     name: str
     course_id: int
-    group_no: str
+    group_no: Optional[str] = "G-00"
 
 class ExtractResponse(BaseModel):
     status: str
@@ -105,7 +105,7 @@ class ProjectResponse(BaseModel):
     description: Optional[str] = None
     git_url: str
     local_saved_path: str
-    group_no: str
+    group_no: Optional[str] = "G-00"
     created_at: datetime
     course_id: Optional[int] = None
 
