@@ -252,8 +252,6 @@
 .create-project-cta:hover {
   border-color: var(--primary);
   background-color: #fafbfc;
-  transform: translateY(-2px);
-  box-shadow: var(--shadow-md);
 }
 
 .cta-icon-box {
