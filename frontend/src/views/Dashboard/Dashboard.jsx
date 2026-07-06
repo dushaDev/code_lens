@@ -131,7 +131,18 @@ export default function Dashboard({
                 return (
                   <tr key={project.id} className={isHighRisk ? 'row-high-risk' : ''}>
                     <td>
-                      <div className="project-name-cell-content">
+                      <div className="project-name-cell-content" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <span className="group-tag" style={{
+                          backgroundColor: 'var(--bg-app)',
+                          border: '1px solid var(--border-color)',
+                          color: 'var(--text-muted)',
+                          padding: '2px 6px',
+                          borderRadius: '4px',
+                          fontSize: '0.75rem',
+                          fontWeight: '700',
+                          letterSpacing: '0.02em',
+                          textTransform: 'uppercase'
+                        }}>{project.group_no || project.groupNo || 'G-00'}</span>
                         <span className="project-title">{project.name}</span>
                       </div>
                     </td>

@@ -71,11 +71,13 @@ class ProjectCreateRequest(BaseModel):
     description: Optional[str] = None
     git_url: str
     course_id: int
+    group_no: str
 
 class ProjectCreateResponse(BaseModel):
     project_id: int
     name: str
     course_id: int
+    group_no: str
 
 class ExtractResponse(BaseModel):
     status: str
@@ -103,6 +105,7 @@ class ProjectResponse(BaseModel):
     description: Optional[str] = None
     git_url: str
     local_saved_path: str
+    group_no: str
     created_at: datetime
     course_id: Optional[int] = None
 

@@ -113,10 +113,21 @@ export default function Analytics({ project, onBack }) {
           <ArrowLeft size={16} />
           <span>Back to Projects</span>
         </button>
-        <div className="header-text-block">
-          <h1>Analytics: {project.name}</h1>
+          <h1 style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <span className="group-tag" style={{
+              backgroundColor: 'var(--bg-app)',
+              border: '1px solid var(--border-color)',
+              color: 'var(--text-muted)',
+              padding: '2px 8px',
+              borderRadius: '4px',
+              fontSize: '0.85rem',
+              fontWeight: '700',
+              letterSpacing: '0.02em',
+              textTransform: 'uppercase'
+            }}>{project.group_no || project.groupNo || 'G-00'}</span>
+            <span>{project.name}</span>
+          </h1>
           <p className="subtitle">Repository metadata, contribution inequality, and git log history metrics.</p>
-        </div>
       </div>
 
       {analytics && (

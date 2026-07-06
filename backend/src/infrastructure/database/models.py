@@ -40,6 +40,7 @@ class ProjectModel(Base):
     description: Mapped[Optional[str]] = mapped_column(Text)
     git_url: Mapped[str] = mapped_column(String, nullable=False)
     local_saved_path: Mapped[str] = mapped_column(String, nullable=False)
+    group_no: Mapped[str] = mapped_column(String, nullable=False, server_default="G-00")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     course_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("courses.id", ondelete="CASCADE"), nullable=False

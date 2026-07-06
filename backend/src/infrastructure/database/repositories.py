@@ -19,17 +19,19 @@ class ProjectRepository(IProjectRepository):
             description=project_model.description,
             git_url=project_model.git_url,
             local_saved_path=project_model.local_saved_path,
+            group_no=project_model.group_no,
             created_at=project_model.created_at,
             course_id=project_model.course_id
         )
 
-    def create(self, name: str, description: Optional[str], git_url: str, course_id: int) -> ProjectEntity:
+    def create(self, name: str, description: Optional[str], git_url: str, course_id: int, group_no: str) -> ProjectEntity:
         # Initial saved path is empty, updated via update_local_path once ID is flushed/committed
         project_model = ProjectModel(
             name=name,
             description=description,
             git_url=git_url,
             local_saved_path="",
+            group_no=group_no,
             course_id=course_id
         )
         self.db.add(project_model)
@@ -41,6 +43,7 @@ class ProjectRepository(IProjectRepository):
             description=project_model.description,
             git_url=project_model.git_url,
             local_saved_path=project_model.local_saved_path,
+            group_no=project_model.group_no,
             created_at=project_model.created_at,
             course_id=project_model.course_id
         )
@@ -67,6 +70,7 @@ class ProjectRepository(IProjectRepository):
                 name=m.name,
                 git_url=m.git_url,
                 local_saved_path=m.local_saved_path,
+                group_no=m.group_no,
                 description=m.description,
                 created_at=m.created_at,
                 course_id=m.course_id
@@ -88,6 +92,7 @@ class ProjectRepository(IProjectRepository):
                 name=m.name,
                 git_url=m.git_url,
                 local_saved_path=m.local_saved_path,
+                group_no=m.group_no,
                 description=m.description,
                 created_at=m.created_at,
                 course_id=m.course_id
@@ -526,6 +531,7 @@ class CourseRepository(ICourseRepository):
                 name=m.name,
                 git_url=m.git_url,
                 local_saved_path=m.local_saved_path,
+                group_no=m.group_no,
                 description=m.description,
                 created_at=m.created_at,
                 course_id=m.course_id

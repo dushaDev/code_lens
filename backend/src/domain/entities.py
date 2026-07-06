@@ -50,6 +50,7 @@ class ProjectEntity:
     name: str
     git_url: str
     local_saved_path: str
+    group_no: str
     course_id: Optional[int] = None
     description: Optional[str] = None
     created_at: Optional[datetime] = None

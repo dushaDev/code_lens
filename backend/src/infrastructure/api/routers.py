@@ -363,6 +363,7 @@ def get_course_projects(
                 description=p.description,
                 git_url=p.git_url,
                 local_saved_path=p.local_saved_path,
+                group_no=p.group_no,
                 created_at=p.created_at,
                 course_id=p.course_id
             )
@@ -406,14 +407,20 @@ def create_project(
         name=request.name,
         description=request.description,
         git_url=request.git_url,
-        course_id=request.course_id
+        course_id=request.course_id,
+        group_no=request.group_no
     )
 
     # 2. Update project with unique local path using its ID
     local_path = f"./temp_repos/{project.id}/repo"
     repo.update_local_path(project.id, local_path)
 
-    return ProjectCreateResponse(project_id=project.id, name=project.name, course_id=project.course_id)
+    return ProjectCreateResponse(
+        project_id=project.id, 
+        name=project.name, 
+        course_id=project.course_id,
+        group_no=project.group_no
+    )
 
 
 @router.post(

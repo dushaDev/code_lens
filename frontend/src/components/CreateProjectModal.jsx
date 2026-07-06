@@ -10,13 +10,14 @@ export default function CreateProjectModal({
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [gitUrl, setGitUrl] = useState('');
+  const [groupNo, setGroupNo] = useState('');
   const [loading, setLoading] = useState(false);
   const [progressMsg, setProgressMsg] = useState('');
   const [error, setError] = useState('');
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!name.trim() || !gitUrl.trim()) return;
+    if (!name.trim() || !gitUrl.trim() || !groupNo.trim()) return;
 
     setLoading(true);
     setError('');
@@ -36,6 +37,7 @@ export default function CreateProjectModal({
               name,
               description,
               gitUrl,
+              group_no: groupNo,
               techStack: ['Python', 'JS'],
               lastUpdated: 'Just now',
               plagiarismRisk: 'Good',
@@ -62,7 +64,8 @@ export default function CreateProjectModal({
           name,
           description,
           git_url: gitUrl,
-          course_id: course.id
+          course_id: course.id,
+          group_no: groupNo
         })
       });
 
@@ -93,6 +96,7 @@ export default function CreateProjectModal({
         name,
         description,
         gitUrl,
+        group_no: groupNo,
         techStack: ['Detecting...'],
         lastUpdated: 'Just now',
         plagiarismRisk: 'Good',
@@ -135,16 +139,30 @@ export default function CreateProjectModal({
           </div>
         ) : (
           <form onSubmit={handleSubmit} className="modal-form">
-            <div className="form-group">
-              <label className="form-label">Project / Repository Name</label>
-              <input 
-                type="text" 
-                className="input-field" 
-                placeholder="e.g. Compiler Construction - Group 4"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                required
-              />
+            <div className="form-group-row" style={{ display: 'flex', gap: '16px' }}>
+              <div className="form-group" style={{ flex: 2 }}>
+                <label className="form-label">Project / Repository Name</label>
+                <input 
+                  type="text" 
+                  className="input-field" 
+                  placeholder="e.g. Compiler Construction"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  required
+                />
+              </div>
+
+              <div className="form-group" style={{ flex: 1 }}>
+                <label className="form-label">Group No / Tag</label>
+                <input 
+                  type="text" 
+                  className="input-field" 
+                  placeholder="e.g. Group 4"
+                  value={groupNo}
+                  onChange={(e) => setGroupNo(e.target.value)}
+                  required
+                />
+              </div>
             </div>
 
             <div className="form-group">

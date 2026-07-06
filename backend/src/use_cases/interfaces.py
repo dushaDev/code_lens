@@ -8,7 +8,7 @@ class IProjectRepository(ABC):
         pass
 
     @abstractmethod
-    def create(self, name: str, description: Optional[str], git_url: str, course_id: int) -> ProjectEntity:
+    def create(self, name: str, description: Optional[str], git_url: str, course_id: int, group_no: str) -> ProjectEntity:
         pass
 
     @abstractmethod
