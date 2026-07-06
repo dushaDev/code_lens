@@ -36,11 +36,23 @@ export default function Dashboard({
     alert('Report downloaded successfully!');
   };
 
+  const getGreeting = () => {
+    const hrs = new Date().getHours();
+    if (hrs < 12) return 'Good morning';
+    if (hrs < 17) return 'Good afternoon';
+    return 'Good evening';
+  };
+
+  const getFormattedDate = () => {
+    const options = { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' };
+    return new Date().toLocaleDateString(undefined, options);
+  };
+
   return (
     <div className="dashboard-view">
       <div className="dashboard-greeting">
-        <h1>Good morning, {user?.username || 'Professor'}</h1>
-        <p className="subtitle">Here is the latest overview of your academic analysis metrics.</p>
+        <h1>{getGreeting()}, {user?.username || 'Professor'}</h1>
+        <p className="subtitle">Today is {getFormattedDate()}. Here is the latest overview of your academic analysis metrics.</p>
       </div>
 
       {/* Stat Cards Grid */}
