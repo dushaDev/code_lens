@@ -1,37 +1,40 @@
 import React from 'react';
 import { 
-  Code,
-  Terminal,
-  Cpu,
-  Smartphone,
-  Coffee,
-  Braces,
-  Binary,
-  Hash,
-  Gem,
-  Database,
-  Palette,
-  Layers,
-  Settings,
-  FileText,
-  Layout,
-  Globe,
-  Wrench,
-  Sparkles
-} from 'lucide-react';
+  DiPython,
+  DiJavascript1,
+  DiReact,
+  DiJava,
+  DiAndroid,
+  DiDatabase,
+  DiHtml5,
+  DiCss3,
+  DiGo,
+  DiRuby,
+  DiPhp,
+  DiMarkdown,
+  DiTerminal
+} from 'react-icons/di';
+import { 
+  SiTypescript,
+  SiKotlin,
+  SiRust,
+  SiPostgresql,
+  SiYaml,
+  SiJson,
+  SiCplusplus
+} from 'react-icons/si';
 
 /**
- * Returns the icon and CSS badge class for a given programming language or technology.
- * Supports a comprehensive list of standard developer stacks.
+ * Returns the official brand logo icon (from react-icons) and CSS badge class for a technology.
  * 
  * @param {string} techName Name of the technology stack
- * @param {number} size Icon width and height in pixels (default: 12)
+ * @param {number} size Icon width and height in pixels (default: 14)
  * @returns {{ icon: React.ReactNode, badgeClass: string }}
  */
-export function getTechDetails(techName, size = 12) {
+export function getTechDetails(techName, size = 14) {
   if (!techName) {
     return {
-      icon: <Code size={size} />,
+      icon: <DiTerminal size={size} />,
       badgeClass: 'badge-info'
     };
   }
@@ -41,7 +44,7 @@ export function getTechDetails(techName, size = 12) {
   // Python
   if (name.includes('python') || name === 'py') {
     return {
-      icon: <Terminal size={size} />,
+      icon: <DiPython size={size} color="#3776AB" />,
       badgeClass: 'tech-python'
     };
   }
@@ -49,7 +52,7 @@ export function getTechDetails(techName, size = 12) {
   // React & Web Frameworks
   if (name.includes('react')) {
     return {
-      icon: <Sparkles size={size} />,
+      icon: <DiReact size={size} color="#61DAFB" />,
       badgeClass: 'tech-react'
     };
   }
@@ -57,13 +60,13 @@ export function getTechDetails(techName, size = 12) {
   // JavaScript & TypeScript
   if (name === 'javascript' || name === 'js' || name.includes('node')) {
     return {
-      icon: <Braces size={size} />,
+      icon: <DiJavascript1 size={size} color="#F7DF1E" />,
       badgeClass: 'tech-react'
     };
   }
   if (name === 'typescript' || name === 'ts') {
     return {
-      icon: <Braces size={size} />,
+      icon: <SiTypescript size={size - 2} color="#3178C6" />,
       badgeClass: 'tech-ts'
     };
   }
@@ -71,7 +74,7 @@ export function getTechDetails(techName, size = 12) {
   // C++ & C
   if (name === 'c++' || name === 'cpp' || name === 'c') {
     return {
-      icon: <Cpu size={size} />,
+      icon: <SiCplusplus size={size - 2} color="#00599C" />,
       badgeClass: 'tech-cpp'
     };
   }
@@ -79,7 +82,7 @@ export function getTechDetails(techName, size = 12) {
   // C#
   if (name === 'c#' || name === 'csharp') {
     return {
-      icon: <Hash size={size} />,
+      icon: <DiTerminal size={size} color="#239120" />,
       badgeClass: 'tech-csharp'
     };
   }
@@ -87,23 +90,35 @@ export function getTechDetails(techName, size = 12) {
   // Java
   if (name === 'java') {
     return {
-      icon: <Coffee size={size} />,
+      icon: <DiJava size={size + 4} color="#007396" style={{ marginTop: '-2px' }} />,
       badgeClass: 'tech-kotlin'
     };
   }
 
   // Kotlin & Android
-  if (name === 'kotlin' || name.includes('android')) {
+  if (name === 'kotlin') {
     return {
-      icon: <Smartphone size={size} />,
+      icon: <SiKotlin size={size - 2} color="#7F52FF" />,
+      badgeClass: 'tech-kotlin'
+    };
+  }
+  if (name.includes('android')) {
+    return {
+      icon: <DiAndroid size={size + 2} color="#3DDC84" />,
       badgeClass: 'tech-kotlin'
     };
   }
 
   // Database / SQL
-  if (name.includes('sql') || name === 'postgres' || name === 'mysql' || name === 'database' || name === 'db') {
+  if (name === 'postgresql' || name === 'postgres') {
     return {
-      icon: <Database size={size} />,
+      icon: <SiPostgresql size={size - 2} color="#4169E1" />,
+      badgeClass: 'tech-db'
+    };
+  }
+  if (name.includes('sql') || name === 'database' || name === 'db' || name === 'mysql') {
+    return {
+      icon: <DiDatabase size={size} color="#4479A1" />,
       badgeClass: 'tech-db'
     };
   }
@@ -111,7 +126,7 @@ export function getTechDetails(techName, size = 12) {
   // HTML & Markup
   if (name === 'html' || name === 'xml') {
     return {
-      icon: <Layout size={size} />,
+      icon: <DiHtml5 size={size + 2} color="#E34F26" />,
       badgeClass: 'tech-html'
     };
   }
@@ -119,7 +134,7 @@ export function getTechDetails(techName, size = 12) {
   // CSS & Styling
   if (name === 'css' || name === 'scss' || name === 'sass' || name.includes('tailwind')) {
     return {
-      icon: <Palette size={size} />,
+      icon: <DiCss3 size={size + 2} color="#1572B6" />,
       badgeClass: 'tech-css'
     };
   }
@@ -127,7 +142,7 @@ export function getTechDetails(techName, size = 12) {
   // Shell & Scripting
   if (name === 'shell' || name === 'bash' || name === 'sh' || name === 'powershell') {
     return {
-      icon: <Terminal size={size} />,
+      icon: <DiTerminal size={size} color="#4EAA25" />,
       badgeClass: 'tech-shell'
     };
   }
@@ -135,7 +150,7 @@ export function getTechDetails(techName, size = 12) {
   // Go / Golang
   if (name === 'go' || name === 'golang') {
     return {
-      icon: <Binary size={size} />,
+      icon: <DiGo size={size + 4} color="#00ADD8" />,
       badgeClass: 'tech-go'
     };
   }
@@ -143,7 +158,7 @@ export function getTechDetails(techName, size = 12) {
   // Rust
   if (name === 'rust' || name === 'rs') {
     return {
-      icon: <Wrench size={size} />,
+      icon: <SiRust size={size - 2} color="#000000" />,
       badgeClass: 'tech-rust'
     };
   }
@@ -151,7 +166,7 @@ export function getTechDetails(techName, size = 12) {
   // Ruby
   if (name === 'ruby' || name === 'rb') {
     return {
-      icon: <Gem size={size} />,
+      icon: <DiRuby size={size} color="#CC342D" />,
       badgeClass: 'tech-ruby'
     };
   }
@@ -159,15 +174,21 @@ export function getTechDetails(techName, size = 12) {
   // PHP
   if (name === 'php') {
     return {
-      icon: <Globe size={size} />,
+      icon: <DiPhp size={size + 4} color="#777BB4" />,
       badgeClass: 'tech-php'
     };
   }
 
   // Configuration (YAML, JSON, TOML)
-  if (name === 'yaml' || name === 'yml' || name === 'json' || name === 'toml') {
+  if (name === 'yaml' || name === 'yml') {
     return {
-      icon: <Settings size={size} />,
+      icon: <SiYaml size={size - 2} color="#CB171E" />,
+      badgeClass: 'tech-config'
+    };
+  }
+  if (name === 'json') {
+    return {
+      icon: <SiJson size={size - 2} color="#292929" />,
       badgeClass: 'tech-config'
     };
   }
@@ -175,22 +196,14 @@ export function getTechDetails(techName, size = 12) {
   // Documentation (Markdown)
   if (name === 'markdown' || name === 'md') {
     return {
-      icon: <FileText size={size} />,
+      icon: <DiMarkdown size={size + 2} color="#000000" />,
       badgeClass: 'tech-md'
-    };
-  }
-
-  // Scala & JVM languages
-  if (name === 'scala') {
-    return {
-      icon: <Layers size={size} />,
-      badgeClass: 'tech-kotlin'
     };
   }
 
   // Default fallback
   return {
-    icon: <Code size={size} />,
+    icon: <DiTerminal size={size} color="#64748b" />,
     badgeClass: 'badge-info'
   };
 }
