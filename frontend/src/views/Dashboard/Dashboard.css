@@ -143,6 +143,11 @@
   color: #0891b2;
 }
 
+.tech-ts {
+  background-color: #f0fdf4;
+  color: #16a34a;
+}
+
 .tech-cpp {
   background-color: #faf5ff;
   color: #7c3aed;
@@ -151,6 +156,61 @@
 .tech-kotlin {
   background-color: #fdf2f8;
   color: #db2777;
+}
+
+.tech-csharp {
+  background-color: #e0f2fe;
+  color: #0369a1;
+}
+
+.tech-db {
+  background-color: #f1f5f9;
+  color: #475569;
+}
+
+.tech-html {
+  background-color: #fff7ed;
+  color: #ea580c;
+}
+
+.tech-css {
+  background-color: #ecfeff;
+  color: #0d9488;
+}
+
+.tech-shell {
+  background-color: #f8fafc;
+  color: #64748b;
+}
+
+.tech-go {
+  background-color: #f0f9ff;
+  color: #0284c7;
+}
+
+.tech-rust {
+  background-color: #fff5f5;
+  color: #e53e3e;
+}
+
+.tech-ruby {
+  background-color: #fff5f7;
+  color: #d53f8c;
+}
+
+.tech-php {
+  background-color: #f5f3ff;
+  color: #6d28d9;
+}
+
+.tech-config {
+  background-color: #f3f4f6;
+  color: #374151;
+}
+
+.tech-md {
+  background-color: #ecfdf5;
+  color: #059669;
 }
 
 /* High Risk row indicator */

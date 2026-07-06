@@ -6,13 +6,9 @@ import {
   Download, 
   ArrowUpRight, 
   PlusCircle, 
-  Code,
-  Terminal,
-  Cpu,
-  Smartphone,
-  Coffee,
-  Braces
+  Code
 } from 'lucide-react';
+import { getTechDetails } from '../../utils/techIcons';
 import './Dashboard.css';
 
 export default function Dashboard({ 
@@ -27,26 +23,7 @@ export default function Dashboard({
   // Function to map tech stack names to beautiful background colors and icons
   const renderTechBadge = (tech) => {
     if (!tech) return null;
-    const lower = tech.toLowerCase();
-    let badgeClass = 'badge-info';
-    let icon = <Code size={12} />;
-    
-    if (lower.includes('python')) {
-      badgeClass = 'tech-python';
-      icon = <Terminal size={12} />;
-    } else if (lower.includes('react') || lower.includes('js') || lower.includes('javascript')) {
-      badgeClass = 'tech-react';
-      icon = <Braces size={12} />;
-    } else if (lower.includes('c++') || lower.includes('cpp')) {
-      badgeClass = 'tech-cpp';
-      icon = <Cpu size={12} />;
-    } else if (lower.includes('kotlin') || lower.includes('android')) {
-      badgeClass = 'tech-kotlin';
-      icon = <Smartphone size={12} />;
-    } else if (lower.includes('java')) {
-      badgeClass = 'tech-kotlin';
-      icon = <Coffee size={12} />;
-    }
+    const { icon, badgeClass } = getTechDetails(tech, 12);
     
     return (
       <span 

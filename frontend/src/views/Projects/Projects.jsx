@@ -8,6 +8,7 @@ import {
   AlertOctagon, 
   Trash2 
 } from 'lucide-react';
+import { getTechDetails } from '../../utils/techIcons';
 import './Projects.css';
 
 export default function Projects({ 
@@ -18,27 +19,34 @@ export default function Projects({
   const [filter, setFilter] = useState('all'); // all, good, high-risk
   const [search, setSearch] = useState('');
 
-  // Filtering projects list
-  const filteredProjects = projects.filter((p) => {
-    const matchesSearch = p.name.toLowerCase().includes(search.toLowerCase());
+  const filteredProjects = projects.filter((project) => {
+    // Filter condition
+    if (filter === 'good' && project.plagiarismRisk !== 'Good') return false;
+    if (filter === 'high-risk' && project.plagiarismRisk !== 'High Risk') return false;
+
+    // Search condition
+    const matchesSearch = 
+      project.name.toLowerCase().includes(search.toLowerCase()) ||
+      project.description?.toLowerCase().includes(search.toLowerCase()) ||
+      project.techStack?.some(tech => tech.toLowerCase().includes(search.toLowerCase()));
     
-    if (filter === 'good') {
-      return matchesSearch && p.plagiarismRisk !== 'High Risk';
-    }
-    if (filter === 'high-risk') {
-      return matchesSearch && p.plagiarismRisk === 'High Risk';
-    }
     return matchesSearch;
   });
 
   const renderTechBadge = (tech) => {
-    const lower = tech.toLowerCase();
-    let badgeClass = 'tech-python';
-    if (lower.includes('react') || lower.includes('js')) badgeClass = 'tech-react';
-    else if (lower.includes('c++') || lower.includes('cpp')) badgeClass = 'tech-cpp';
-    else if (lower.includes('kotlin') || lower.includes('java')) badgeClass = 'tech-kotlin';
+    if (!tech) return null;
+    const { icon, badgeClass } = getTechDetails(tech, 12);
     
-    return <span key={tech} className={`tech-badge ${badgeClass}`}>{tech}</span>;
+    return (
+      <span 
+        key={tech} 
+        className={`tech-badge ${badgeClass}`} 
+        style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+      >
+        {icon}
+        <span>{tech}</span>
+      </span>
+    );
   };
 
   return (
