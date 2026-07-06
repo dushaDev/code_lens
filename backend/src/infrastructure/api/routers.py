@@ -364,6 +364,7 @@ def get_course_projects(
                 git_url=p.git_url,
                 local_saved_path=p.local_saved_path,
                 group_no=p.group_no,
+                tech_stack=p.tech_stack,
                 created_at=p.created_at,
                 course_id=p.course_id
             )
@@ -419,7 +420,8 @@ def create_project(
         project_id=project.id, 
         name=project.name, 
         course_id=project.course_id,
-        group_no=project.group_no
+        group_no=project.group_no,
+        tech_stack=project.tech_stack
     )
 
 

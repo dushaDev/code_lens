@@ -121,23 +121,12 @@ export default function App() {
               });
               const authorsData = authorsRes.ok ? await authorsRes.json() : { authors: [] };
 
-              // Infer tech stack from project name or file extensions
-              let techStack = ['Python'];
-              const nameLower = proj.name.toLowerCase();
-              if (nameLower.includes('react') || nameLower.includes('web') || nameLower.includes('node') || nameLower.includes('js')) {
-                techStack = ['JavaScript', 'React'];
-              } else if (nameLower.includes('structure') || nameLower.includes('c++') || nameLower.includes('cpp') || nameLower.includes('tree')) {
-                techStack = ['C++'];
-              } else if (nameLower.includes('android') || nameLower.includes('mobile') || nameLower.includes('kotlin') || nameLower.includes('app')) {
-                techStack = ['Kotlin'];
-              }
-
               const gini = analyticsData ? analyticsData.gini_coefficient : 0.35;
               const plagiarismRisk = gini > 0.6 ? 'High Risk' : 'Good';
 
               return {
                 ...proj,
-                techStack,
+                techStack: proj.tech_stack || ['Python'],
                 lastUpdated,
                 plagiarismRisk,
                 gini,
@@ -150,7 +139,7 @@ export default function App() {
               console.error(`Error loading details for project ${proj.id}:`, err);
               return {
                 ...proj,
-                techStack: ['Python'],
+                techStack: proj.tech_stack || ['Python'],
                 lastUpdated: 'Recently updated',
                 plagiarismRisk: 'Good',
                 gini: 0.35,

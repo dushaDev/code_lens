@@ -55,6 +55,7 @@ class ProjectEntity:
     description: Optional[str] = None
     created_at: Optional[datetime] = None
     id: Optional[int] = None
+    tech_stack: List[str] = field(default_factory=list)
     commits: List[CommitEntity] = field(default_factory=list)
 
 @dataclass

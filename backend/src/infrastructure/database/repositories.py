@@ -9,6 +9,64 @@ class ProjectRepository(IProjectRepository):
     def __init__(self, db: Session):
         self.db = db
 
+    def _detect_tech_stack(self, project_id: int) -> List[str]:
+        from collections import Counter
+        import os
+        results = (
+            self.db.query(FileChangeModel.filename)
+            .join(CommitModel)
+            .filter(CommitModel.project_id == project_id)
+            .all()
+        )
+        extension_map = {
+            '.py': 'Python',
+            '.js': 'JavaScript',
+            '.jsx': 'JavaScript',
+            '.ts': 'TypeScript',
+            '.tsx': 'TypeScript',
+            '.java': 'Java',
+            '.cpp': 'C++',
+            '.cc': 'C++',
+            '.cxx': 'C++',
+            '.c': 'C',
+            '.h': 'C/C++',
+            '.cs': 'C#',
+            '.go': 'Go',
+            '.rs': 'Rust',
+            '.rb': 'Ruby',
+            '.php': 'PHP',
+            '.swift': 'Swift',
+            '.kt': 'Kotlin',
+            '.kts': 'Kotlin',
+            '.dart': 'Dart',
+            '.html': 'HTML',
+            '.css': 'CSS',
+            '.scss': 'CSS',
+            '.sql': 'SQL',
+            '.sh': 'Shell',
+            '.md': 'Markdown'
+        }
+        counter = Counter()
+        for row in results:
+            filename = row[0]
+            ext = os.path.splitext(filename)[1].lower()
+            if ext in extension_map:
+                counter[extension_map[ext]] += 1
+                
+        if not counter:
+            project = self.db.query(ProjectModel).filter(ProjectModel.id == project_id).first()
+            if project:
+                name_lower = project.name.lower()
+                if any(x in name_lower for x in ['react', 'web', 'node', 'js']):
+                    return ['JavaScript']
+                if any(x in name_lower for x in ['structure', 'c++', 'cpp', 'tree']):
+                    return ['C++']
+                if any(x in name_lower for x in ['android', 'kotlin', 'mobile', 'app']):
+                    return ['Kotlin']
+            return ['Python']
+            
+        return [tech for tech, count in counter.most_common(4)]
+
     def get_by_id(self, project_id: int) -> Optional[ProjectEntity]:
         project_model = self.db.query(ProjectModel).filter(ProjectModel.id == project_id).first()
         if not project_model:
@@ -21,7 +79,8 @@ class ProjectRepository(IProjectRepository):
             local_saved_path=project_model.local_saved_path,
             group_no=project_model.group_no or "G-00",
             created_at=project_model.created_at,
-            course_id=project_model.course_id
+            course_id=project_model.course_id,
+            tech_stack=self._detect_tech_stack(project_model.id)
         )
 
     def create(self, name: str, description: Optional[str], git_url: str, course_id: int, group_no: str) -> ProjectEntity:
@@ -45,7 +104,8 @@ class ProjectRepository(IProjectRepository):
             local_saved_path=project_model.local_saved_path,
             group_no=project_model.group_no or "G-00",
             created_at=project_model.created_at,
-            course_id=project_model.course_id
+            course_id=project_model.course_id,
+            tech_stack=self._detect_tech_stack(project_model.id)
         )
 
     def update_local_path(self, project_id: int, local_path: str) -> None:
@@ -73,7 +133,8 @@ class ProjectRepository(IProjectRepository):
                 group_no=m.group_no or "G-00",
                 description=m.description,
                 created_at=m.created_at,
-                course_id=m.course_id
+                course_id=m.course_id,
+                tech_stack=self._detect_tech_stack(m.id)
             )
             for m in project_models
         ]
@@ -95,7 +156,8 @@ class ProjectRepository(IProjectRepository):
                 group_no=m.group_no or "G-00",
                 description=m.description,
                 created_at=m.created_at,
-                course_id=m.course_id
+                course_id=m.course_id,
+                tech_stack=self._detect_tech_stack(m.id)
             )
             for m in project_models
         ]
@@ -525,6 +587,7 @@ class CourseRepository(ICourseRepository):
 
     def get_projects(self, course_id: int) -> List[ProjectEntity]:
         project_models = self.db.query(ProjectModel).filter(ProjectModel.course_id == course_id).all()
+        project_repo = ProjectRepository(self.db)
         return [
             ProjectEntity(
                 id=m.id,
@@ -534,7 +597,8 @@ class CourseRepository(ICourseRepository):
                 group_no=m.group_no or "G-00",
                 description=m.description,
                 created_at=m.created_at,
-                course_id=m.course_id
+                course_id=m.course_id,
+                tech_stack=project_repo._detect_tech_stack(m.id)
             )
             for m in project_models
         ]

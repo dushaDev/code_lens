@@ -78,6 +78,7 @@ class ProjectCreateResponse(BaseModel):
     name: str
     course_id: int
     group_no: Optional[str] = "G-00"
+    tech_stack: List[str] = []
 
 class ExtractResponse(BaseModel):
     status: str
@@ -106,6 +107,7 @@ class ProjectResponse(BaseModel):
     git_url: str
     local_saved_path: str
     group_no: Optional[str] = "G-00"
+    tech_stack: List[str] = []
     created_at: datetime
     course_id: Optional[int] = None
 
