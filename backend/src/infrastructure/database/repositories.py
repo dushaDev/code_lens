@@ -43,8 +43,7 @@ class ProjectRepository(IProjectRepository):
             '.css': 'CSS',
             '.scss': 'CSS',
             '.sql': 'SQL',
-            '.sh': 'Shell',
-            '.md': 'Markdown'
+            '.sh': 'Shell'
         }
         counter = Counter()
         for row in results:
