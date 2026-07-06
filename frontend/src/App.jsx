@@ -76,33 +76,6 @@ export default function App() {
     const loadCourseData = async () => {
       const token = localStorage.getItem('token');
 
-      // Mock fallback data setup
-      const mockProjects = [
-        { id: 1, name: 'Advanced Algorithms Group 4', description: 'Complexity metrics search', gitUrl: 'https://github.com/algo/group4.git', techStack: ['Python'], lastUpdated: '2 hours ago', plagiarismRisk: 'Good', course_id: currentCourse.id, gini: 0.34, authorsCount: 3, commitsCount: 48, authors: [] },
-        { id: 2, name: 'Web Dev Final - Section B', description: 'Full stack app review', gitUrl: 'https://github.com/web/secb.git', techStack: ['JavaScript', 'React'], lastUpdated: 'Yesterday', plagiarismRisk: 'Good', course_id: currentCourse.id, gini: 0.28, authorsCount: 2, commitsCount: 34, authors: [] },
-        { id: 3, name: 'Data Structures - Assignment 2', description: 'Red-Black tree implementations', gitUrl: 'https://github.com/ds/assign2.git', techStack: ['C++'], lastUpdated: '3 days ago', plagiarismRisk: 'High Risk', course_id: currentCourse.id, gini: 0.82, authorsCount: 3, commitsCount: 24, authors: [] },
-        { id: 4, name: 'Mobile App Dev - Prototype', description: 'Android application review', gitUrl: 'https://github.com/mobile/proto.git', techStack: ['Kotlin'], lastUpdated: '1 week ago', plagiarismRisk: 'Good', course_id: currentCourse.id, gini: 0.35, authorsCount: 2, commitsCount: 16, authors: [] },
-      ];
-
-      const mockStudents = [
-        { id: 1, name: 'Chamara Kapugedara', email: 'chamara@codelens.edu', studentId: 'CS-2401', commitsCount: 28, additions: 1840, deletions: 210, status: 'Active' },
-        { id: 2, name: 'Dusha Madushanka', email: 'dusha@codelens.edu', studentId: 'CS-2402', commitsCount: 42, additions: 3290, deletions: 450, status: 'Active' },
-        { id: 3, name: 'Noyel Fernando', email: 'noyel@codelens.edu', studentId: 'CS-2403', commitsCount: 16, additions: 920, deletions: 120, status: 'Active' },
-        { id: 4, name: 'Sanduni K', email: 'sanduni@codelens.edu', studentId: 'CS-2404', commitsCount: 8, additions: 320, deletions: 40, status: 'Active' },
-      ];
-
-      const mockAlerts = [
-        { id: 1, severity: 'High', percentage: 86, timestamp: '2 hours ago', projectA: 'Data Structures - Assignment 2', authorA: 'Student Group 3', projectB: 'Data Structures - Assignment 2 (Copy)', authorB: 'Student Group 7', matchedFile: 'src/rb_tree.cpp', status: 'Needs Review' },
-        { id: 2, severity: 'Medium', percentage: 64, timestamp: '1 day ago', projectA: 'Web Dev Final - Section B', authorA: 'Alice Johnson', projectB: 'Web Dev Final - Section A', authorB: 'Bob Smith', matchedFile: 'app/server.js', status: 'Resolved' },
-      ];
-
-      if (token === 'mock-jwt-token') {
-        setProjects(mockProjects);
-        setStudents(mockStudents);
-        setPlagiarismAlerts(mockAlerts);
-        return;
-      }
-
       try {
         const response = await fetch(`/api/v1/courses/${currentCourse.id}/projects`, {
           headers: {
@@ -207,8 +180,8 @@ export default function App() {
                   email: auth.email,
                   studentId: `CS-${1000 + auth.id}`,
                   commitsCount: contribution ? contribution.commit_count : (proj.commitsCount / (proj.authorsCount || 1)),
-                  additions: contribution ? contribution.lines_added : 1200,
-                  deletions: contribution ? Math.floor(contribution.lines_added * 0.2) : 240,
+                  additions: contribution ? contribution.lines_added : 0,
+                  deletions: contribution ? Math.floor(contribution.lines_added * 0.2) : 0,
                   status: 'Active'
                 };
               } else {
@@ -225,7 +198,7 @@ export default function App() {
         });
 
         const derivedStudents = Object.values(studentsMap);
-        setStudents(derivedStudents.length > 0 ? derivedStudents : mockStudents);
+        setStudents(derivedStudents);
 
         // 5. Derive plagiarism alerts dynamically based on Gini index
         const derivedAlerts = [];
@@ -247,13 +220,13 @@ export default function App() {
           });
         });
 
-        setPlagiarismAlerts(derivedAlerts.length > 0 ? derivedAlerts : mockAlerts);
+        setPlagiarismAlerts(derivedAlerts);
 
       } catch (err) {
-        console.error('Failed to load course details from API, loading mockups:', err);
-        setProjects(mockProjects);
-        setStudents(mockStudents);
-        setPlagiarismAlerts(mockAlerts);
+        console.error('Failed to load course details from API:', err);
+        setProjects([]);
+        setStudents([]);
+        setPlagiarismAlerts([]);
       }
     };
 
@@ -284,10 +257,6 @@ export default function App() {
     if (!window.confirm('Are you sure you want to delete this project?')) return;
     
     const token = localStorage.getItem('token');
-    if (token === 'mock-jwt-token') {
-      setProjects(projects.filter(p => p.id !== id));
-      return;
-    }
 
     try {
       const response = await fetch(`/api/v1/projects/${id}`, {
@@ -300,7 +269,7 @@ export default function App() {
         setProjects(projects.filter(p => p.id !== id));
       }
     } catch (err) {
-      setProjects(projects.filter(p => p.id !== id));
+      console.error('Delete project failed:', err);
     }
   };
 
@@ -317,19 +286,6 @@ export default function App() {
     }
 
     const token = localStorage.getItem('token');
-    if (token === 'mock-jwt-token') {
-      alert('Profiles merged successfully! (Demo Mode)');
-      // Update local state by combining values
-      const sourceObj = students.find(s => s.id === sourceId);
-      const targetObj = students.find(s => s.id === targetId);
-      if (sourceObj && targetObj) {
-        targetObj.commitsCount += sourceObj.commitsCount;
-        targetObj.additions += sourceObj.additions;
-        targetObj.deletions += sourceObj.deletions;
-        setStudents(students.filter(s => s.id !== sourceId));
-      }
-      return;
-    }
 
     try {
       const response = await fetch('/api/v1/authors/merge', {

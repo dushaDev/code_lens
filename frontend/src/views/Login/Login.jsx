@@ -60,12 +60,6 @@ export default function Login({ onLoginSuccess }) {
     }
   };
 
-  const handleUseDemo = () => {
-    // Mock user for offline mode/speed testing
-    const demoUser = { id: 1, username: 'Dr. Noyel Fernando', email: 'noyel@example.com' };
-    localStorage.setItem('token', 'mock-jwt-token');
-    onLoginSuccess(demoUser);
-  };
 
   return (
     <div className="login-page">
@@ -155,18 +149,6 @@ export default function Login({ onLoginSuccess }) {
               : "Don't have an account? Register"}
           </button>
         </div>
-
-        <div className="auth-divider">
-          <span>OR</span>
-        </div>
-
-        <button 
-          type="button" 
-          className="btn btn-outline demo-btn"
-          onClick={handleUseDemo}
-        >
-          Use Demo / Offline Mode
-        </button>
       </div>
     </div>
   );

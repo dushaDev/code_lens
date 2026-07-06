@@ -20,17 +20,6 @@ export default function CourseSelect({ user, onSelectCourse, onLogout }) {
     setLoading(true);
     setError('');
     const token = localStorage.getItem('token');
-    
-    if (token === 'mock-jwt-token') {
-      setCourses([
-        { id: 1, name: 'Advanced Algorithms - Term 1', description: 'Group analysis and complexity checks' },
-        { id: 2, name: 'Web Dev Final - Section B', description: 'React and node project reviews' },
-        { id: 3, name: 'Data Structures - Assignment 2', description: 'C++ coding exercises' },
-        { id: 4, name: 'Mobile App Dev - Prototype', description: 'Android & Flutter application evaluations' },
-      ]);
-      setLoading(false);
-      return;
-    }
 
     try {
       const response = await fetch('/api/v1/courses', {
@@ -42,13 +31,8 @@ export default function CourseSelect({ user, onSelectCourse, onLogout }) {
       const data = await response.json();
       setCourses(data.courses);
     } catch (err) {
-      setError('Could not connect to backend. Loaded offline demo courses.');
-      setCourses([
-        { id: 1, name: 'Advanced Algorithms - Term 1', description: 'Group analysis and complexity checks' },
-        { id: 2, name: 'Web Dev Final - Section B', description: 'React and node project reviews' },
-        { id: 3, name: 'Data Structures - Assignment 2', description: 'C++ coding exercises' },
-        { id: 4, name: 'Mobile App Dev - Prototype', description: 'Android & Flutter application evaluations' },
-      ]);
+      setError('Could not retrieve courses from backend database.');
+      setCourses([]);
     } finally {
       setLoading(false);
     }
@@ -63,18 +47,6 @@ export default function CourseSelect({ user, onSelectCourse, onLogout }) {
     if (!newCourseName.trim()) return;
 
     const token = localStorage.getItem('token');
-    if (token === 'mock-jwt-token') {
-      const newMockCourse = {
-        id: courses.length + 1,
-        name: newCourseName,
-        description: newCourseDesc || 'Custom course'
-      };
-      setCourses([...courses, newMockCourse]);
-      setNewCourseName('');
-      setNewCourseDesc('');
-      setShowAddForm(false);
-      return;
-    }
 
     try {
       const response = await fetch('/api/v1/courses', {
@@ -104,10 +76,6 @@ export default function CourseSelect({ user, onSelectCourse, onLogout }) {
     if (!window.confirm('Are you sure you want to delete this course? All belonging projects will be deleted.')) return;
 
     const token = localStorage.getItem('token');
-    if (token === 'mock-jwt-token') {
-      setCourses(courses.filter(c => c.id !== id));
-      return;
-    }
 
     try {
       const response = await fetch(`/api/v1/courses/${id}`, {
@@ -131,16 +99,6 @@ export default function CourseSelect({ user, onSelectCourse, onLogout }) {
     setWipeError('');
 
     const token = localStorage.getItem('token');
-    if (token === 'mock-jwt-token') {
-      setTimeout(() => {
-        setCourses([]);
-        setWipePassword('');
-        setWipeLoading(false);
-        setShowWipeModal(false);
-        alert('Mock database wiped successfully.');
-      }, 1000);
-      return;
-    }
 
     try {
       const response = await fetch('/api/v1/system/reset', {

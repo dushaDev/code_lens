@@ -21,26 +21,6 @@ export default function Analytics({ project, onBack }) {
       setError('');
       const token = localStorage.getItem('token');
 
-      // Mock mode
-      if (token === 'mock-jwt-token') {
-        setTimeout(() => {
-          setAnalytics({
-            project_id: project.id,
-            gini_coefficient: project.plagiarismRisk === 'High Risk' ? 0.82 : 0.34,
-            total_commits: 48,
-            total_insertions: 3420,
-            distribution_status: project.plagiarismRisk === 'High Risk' ? 'Highly Unequal Contribution' : 'Balanced Contribution',
-            contributions: [
-              { author_id: 1, name: 'Dusha Dev', email: 'dusha@example.com', commit_count: 36, lines_added: 2800, contribution_percentage: 81.8 },
-              { author_id: 2, name: 'Chamara K', email: 'chamara@example.com', commit_count: 8, lines_added: 420, contribution_percentage: 12.2 },
-              { author_id: 3, name: 'Noyel F', email: 'noyel@example.com', commit_count: 4, lines_added: 200, contribution_percentage: 6.0 },
-            ]
-          });
-          setLoading(false);
-        }, 600);
-        return;
-      }
-
       try {
         const response = await fetch(`/api/v1/projects/${project.id}/analytics`, {
           headers: {
@@ -51,18 +31,7 @@ export default function Analytics({ project, onBack }) {
         const data = await response.json();
         setAnalytics(data);
       } catch (err) {
-        // Fallback mock
-        setAnalytics({
-          project_id: project.id,
-          gini_coefficient: 0.38,
-          total_commits: 34,
-          total_insertions: 2150,
-          distribution_status: 'Balanced Contribution',
-          contributions: [
-            { author_id: 1, name: 'Dusha Dev', email: 'dusha@example.com', commit_count: 22, lines_added: 1400, contribution_percentage: 65.1 },
-            { author_id: 2, name: 'Chamara K', email: 'chamara@example.com', commit_count: 12, lines_added: 750, contribution_percentage: 34.9 },
-          ]
-        });
+        setError(err.message || 'Failed to load project analytics from database.');
       } finally {
         setLoading(false);
       }

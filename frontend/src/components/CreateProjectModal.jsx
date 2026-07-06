@@ -25,33 +25,6 @@ export default function CreateProjectModal({
 
     const token = localStorage.getItem('token');
 
-    // Mock bypass
-    if (token === 'mock-jwt-token') {
-      setTimeout(() => {
-        setProgressMsg('Cloning repository files...');
-        setTimeout(() => {
-          setProgressMsg('Running git log extraction...');
-          setTimeout(() => {
-            const mockProj = {
-              id: Math.floor(Math.random() * 1000) + 10,
-              name,
-              description,
-              gitUrl,
-              group_no: groupNo,
-              techStack: ['Python', 'JS'],
-              lastUpdated: 'Just now',
-              plagiarismRisk: 'Good',
-              course_id: course.id
-            };
-            onProjectCreated(mockProj);
-            setLoading(false);
-            onClose();
-          }, 800);
-        }, 800);
-      }, 800);
-      return;
-    }
-
     try {
       // 1. Create project entry
       const createRes = await fetch('/api/v1/projects', {

@@ -21,17 +21,6 @@ export default function Settings({ course, onCourseReset }) {
     setError('');
 
     const token = localStorage.getItem('token');
-    
-    // Mock check
-    if (token === 'mock-jwt-token') {
-      setTimeout(() => {
-        setLoading(false);
-        setPassword('');
-        setMessage(`All projects under "${course?.name}" cleared successfully.`);
-        if (onCourseReset) onCourseReset();
-      }, 1000);
-      return;
-    }
 
     try {
       const response = await fetch(`/api/v1/courses/${course.id}/reset`, {
