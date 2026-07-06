@@ -1,14 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import Sidebar from './components/Sidebar';
 import Header from './components/Header';
-import Login from './views/Login';
-import CourseSelect from './views/CourseSelect';
-import Dashboard from './views/Dashboard';
-import Projects from './views/Projects';
-import Students from './views/Students';
-import Plagiarism from './views/Plagiarism';
-import Settings from './views/Settings';
-import Analytics from './views/Analytics';
+import Login from './views/Login/Login';
+import CourseSelect from './views/CourseSelect/CourseSelect';
+import Dashboard from './views/Dashboard/Dashboard';
+import Projects from './views/Projects/Projects';
+import Students from './views/Students/Students';
+import Plagiarism from './views/Plagiarism/Plagiarism';
+import Settings from './views/Settings/Settings';
+import Analytics from './views/Analytics/Analytics';
 import CreateProjectModal from './components/CreateProjectModal';
 import './App.css';
 
