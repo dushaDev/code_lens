@@ -6,7 +6,12 @@ import {
   Download, 
   ArrowUpRight, 
   PlusCircle, 
-  Code 
+  Code,
+  Terminal,
+  Cpu,
+  Smartphone,
+  Coffee,
+  Braces
 } from 'lucide-react';
 import './Dashboard.css';
 
@@ -19,17 +24,40 @@ export default function Dashboard({
   onCreateProjectClick 
 }) {
 
-  // Function to map tech stack names to beautiful background colors
+  // Function to map tech stack names to beautiful background colors and icons
   const renderTechBadge = (tech) => {
     if (!tech) return null;
     const lower = tech.toLowerCase();
     let badgeClass = 'badge-info';
-    if (lower.includes('python')) badgeClass = 'tech-python';
-    else if (lower.includes('react') || lower.includes('js') || lower.includes('javascript')) badgeClass = 'tech-react';
-    else if (lower.includes('c++') || lower.includes('cpp')) badgeClass = 'tech-cpp';
-    else if (lower.includes('kotlin') || lower.includes('java')) badgeClass = 'tech-kotlin';
+    let icon = <Code size={12} />;
     
-    return <span key={tech} className={`tech-badge ${badgeClass}`}>{tech}</span>;
+    if (lower.includes('python')) {
+      badgeClass = 'tech-python';
+      icon = <Terminal size={12} />;
+    } else if (lower.includes('react') || lower.includes('js') || lower.includes('javascript')) {
+      badgeClass = 'tech-react';
+      icon = <Braces size={12} />;
+    } else if (lower.includes('c++') || lower.includes('cpp')) {
+      badgeClass = 'tech-cpp';
+      icon = <Cpu size={12} />;
+    } else if (lower.includes('kotlin') || lower.includes('android')) {
+      badgeClass = 'tech-kotlin';
+      icon = <Smartphone size={12} />;
+    } else if (lower.includes('java')) {
+      badgeClass = 'tech-kotlin';
+      icon = <Coffee size={12} />;
+    }
+    
+    return (
+      <span 
+        key={tech} 
+        className={`tech-badge ${badgeClass}`} 
+        style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+      >
+        {icon}
+        <span>{tech}</span>
+      </span>
+    );
   };
 
   const handleExport = () => {
