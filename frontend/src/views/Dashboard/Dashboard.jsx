@@ -21,19 +21,47 @@ export default function Dashboard({
 }) {
 
   // Function to map tech stack names to beautiful background colors and icons
-  const renderTechBadge = (tech) => {
-    if (!tech) return null;
-    const { icon, badgeClass } = getTechDetails(tech, 12);
-    
+  const renderTechBadges = (techStack) => {
+    if (!techStack) return null;
+    const maxVisible = 2;
+    const visibleTech = techStack.slice(0, maxVisible);
+    const extraCount = techStack.length - maxVisible;
+
     return (
-      <span 
-        key={tech} 
-        className={`tech-badge ${badgeClass}`} 
-        style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}
-      >
-        {icon}
-        <span>{tech}</span>
-      </span>
+      <div className="tech-badges-list" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+        {visibleTech.map((tech) => {
+          const { icon, badgeClass } = getTechDetails(tech, 12);
+          return (
+            <span 
+              key={tech} 
+              className={`tech-badge ${badgeClass}`} 
+              style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+            >
+              {icon}
+              <span>{tech}</span>
+            </span>
+          );
+        })}
+        {extraCount > 0 && (
+          <span 
+            className="tech-badge" 
+            style={{ 
+              display: 'inline-flex', 
+              alignItems: 'center', 
+              backgroundColor: 'var(--bg-app)', 
+              color: 'var(--text-muted)', 
+              border: '1px solid var(--border-color)', 
+              fontSize: '11px', 
+              padding: '2px 6px', 
+              borderRadius: '4px', 
+              fontWeight: 'bold' 
+            }}
+            title={techStack.slice(maxVisible).join(', ')}
+          >
+            +{extraCount}
+          </span>
+        )}
+      </div>
     );
   };
 
@@ -146,11 +174,9 @@ export default function Dashboard({
                         <span className="project-title">{project.name}</span>
                       </div>
                     </td>
-                    <td>
-                      <div className="tech-badges-list">
-                        {project.techStack?.map(tech => renderTechBadge(tech))}
-                      </div>
-                    </td>
+                     <td>
+                       {renderTechBadges(project.techStack)}
+                     </td>
                     <td className="muted-cell">{project.lastUpdated}</td>
                     <td>
                       {isHighRisk ? (
