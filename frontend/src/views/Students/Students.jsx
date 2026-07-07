@@ -275,7 +275,7 @@ export default function Students({
 
               {/* Arrow Indicator */}
               <div style={{ display: 'flex', justifyContent: 'center', margin: '8px 0', color: 'var(--primary)' }}>
-                <span style={{ fontSize: '1.1rem' }}>⬇️ Merge Into ⬇️</span>
+                <span style={{ fontSize: '0.85rem', fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Merge Into</span>
               </div>
 
               {/* Step 2: Target */}
@@ -319,7 +319,7 @@ export default function Students({
               <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', backgroundColor: '#fffbeb', border: '1px solid #fef3c7', padding: '10px', borderRadius: '6px', display: 'flex', gap: '8px', alignItems: 'flex-start', marginBottom: '16px' }}>
                 <span>💡</span>
                 <div>
-                  <strong>What happens next?</strong> All commits, lines of code, and git activities from profile (1) will be consolidated into profile (2). Profile (1) will then be removed from the directory.
+                  <strong>What happens next?</strong> All commits, lines of code, and git activities from profile (1) will be consolidated into profile (2). Profile (1) will then be removed from the directory. <strong style={{ color: 'var(--color-danger)' }}>This action cannot be undone.</strong>
                 </div>
               </div>
               
