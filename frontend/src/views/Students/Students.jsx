@@ -258,21 +258,39 @@ export default function Students({
               </button>
             </div>
             
-            <form onSubmit={handleMergeSubmit} className="modal-form">
-              <div style={{ marginBottom: '16px', fontSize: '0.9rem', color: 'var(--text-muted)', textAlign: 'left' }}>
-                Merge all commits, branch activity, and files from <strong>{selectedSourceStudent.name}</strong> ({selectedSourceStudent.email}) into the target student below.
-              </div>
+            <form onSubmit={handleMergeSubmit} className="modal-form" style={{ textAlign: 'left' }}>
               
-              <div className="form-group" style={{ textAlign: 'left' }}>
-                <label className="form-label">Target Student (Same Project Only)</label>
+              {/* Step 1: Source */}
+              <div style={{ marginBottom: '12px', padding: '12px', backgroundColor: 'var(--bg-app)', borderRadius: '6px', border: '1px solid var(--border-color)' }}>
+                <div style={{ fontSize: '0.75rem', fontWeight: 'bold', color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: '4px' }}>
+                  1. Profile to Merge (Will be Hidden)
+                </div>
+                <div style={{ fontSize: '0.9rem', fontWeight: '600', color: 'var(--text-main)' }}>
+                  {selectedSourceStudent.name}
+                </div>
+                <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                  {selectedSourceStudent.email}
+                </div>
+              </div>
+
+              {/* Arrow Indicator */}
+              <div style={{ display: 'flex', justifyContent: 'center', margin: '8px 0', color: 'var(--primary)' }}>
+                <span style={{ fontSize: '1.1rem' }}>⬇️ Merge Into ⬇️</span>
+              </div>
+
+              {/* Step 2: Target */}
+              <div style={{ marginBottom: '16px', padding: '12px', backgroundColor: 'var(--bg-app)', borderRadius: '6px', border: '1px solid var(--border-color)' }}>
+                <div style={{ fontSize: '0.75rem', fontWeight: 'bold', color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: '6px' }}>
+                  2. Destination Profile (Will Receive Data)
+                </div>
                 <select
                   className="select-field"
                   value={mergeTargetId}
                   onChange={(e) => setMergeTargetId(e.target.value)}
                   required
-                  style={{ width: '100%' }}
+                  style={{ width: '100%', padding: '8px' }}
                 >
-                  <option value="">Select target student...</option>
+                  <option value="">Select target student profile...</option>
                   {students
                     .filter((s) => {
                       if (s.id === selectedSourceStudent.id) return false;
@@ -291,13 +309,21 @@ export default function Students({
                   const targetProjects = s.projects || [];
                   return sourceProjects.some(id => targetProjects.includes(id));
                 }).length === 0 && (
-                  <p className="help-text error-text" style={{ marginTop: '8px', color: 'var(--color-danger)', fontSize: '0.8rem' }}>
-                    No other authors belong to this project.
+                  <p style={{ marginTop: '8px', color: 'var(--color-danger)', fontSize: '0.8rem', margin: 0 }}>
+                    No other student profiles found in the same project.
                   </p>
                 )}
               </div>
+
+              {/* Explanation Note */}
+              <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', backgroundColor: '#fffbeb', border: '1px solid #fef3c7', padding: '10px', borderRadius: '6px', display: 'flex', gap: '8px', alignItems: 'flex-start', marginBottom: '16px' }}>
+                <span>💡</span>
+                <div>
+                  <strong>What happens next?</strong> All commits, lines of code, and git activities from profile (1) will be consolidated into profile (2). Profile (1) will then be removed from the directory.
+                </div>
+              </div>
               
-              <div className="form-actions" style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px', marginTop: '24px' }}>
+              <div className="form-actions" style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px', marginTop: '20px' }}>
                 <button 
                   type="button" 
                   className="btn btn-secondary" 
