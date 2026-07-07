@@ -23,6 +23,7 @@ export default function Analytics({ project, onBack }) {
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [activeTab, setActiveTab] = useState('quantitative');
+  const [showCommitsModal, setShowCommitsModal] = useState(false);
 
   const isBot = (name, email) => {
     const nameLower = name.toLowerCase();
@@ -666,54 +667,65 @@ export default function Analytics({ project, onBack }) {
           {/* Commit Message Quality Analysis */}
           <div className="recent-projects-section card" style={{ marginTop: '24px' }}>
             <div className="recent-projects-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <h2>Recent Commit Message Quality Analysis</h2>
-              <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Showing last 10 commits</span>
+              <h2>Recent Repository Commits</h2>
+              <button 
+                type="button" 
+                className="btn btn-outline btn-sm"
+                onClick={() => setShowCommitsModal(true)}
+              >
+                See all commits
+              </button>
             </div>
             <div className="table-container">
               <table className="custom-table">
                 <thead>
                   <tr>
-                    <th>Commit Message</th>
+                    <th style={{ width: '45%' }}>Commit Message</th>
                     <th>Author</th>
                     <th>Date/Time</th>
                     <th>Impact Changes</th>
-                    <th>Quality Assessment</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {commits.slice(0, 10).map((c) => {
+                  {commits.slice(0, 5).map((c) => {
                     const getAuthorName = (authorId) => {
                       const contrib = analytics.contributions?.find(a => a.author_id === authorId);
                       return contrib ? contrib.name : 'Unknown';
                     };
-                    const checkQuality = (msg) => {
-                      const msgLower = msg.toLowerCase().trim();
-                      const lazyWords = ['fix', 'update', 'wip', 'test', 'commit', 'changes', 'done', 'temp', 'working', 'bug', 'debug', 'code'];
-                      if (msg.length < 8 || lazyWords.includes(msgLower)) {
-                        return { text: 'Non-descriptive / Short', color: 'danger' };
-                      }
-                      const words = msgLower.split(/\s+/).filter(w => w.length > 0);
-                      if (words.length >= 3) {
-                        return { text: 'Descriptive / Informative', color: 'success' };
-                      }
-                      return { text: 'Neutral', color: 'warning' };
+                    const formatDate = (dateStr) => {
+                      const d = new Date(dateStr);
+                      return d.toLocaleString([], { 
+                        year: 'numeric', 
+                        month: 'numeric', 
+                        day: 'numeric', 
+                        hour: '2-digit', 
+                        minute: '2-digit' 
+                      });
                     };
-                    const quality = checkQuality(c.message);
                     return (
                       <tr key={c.hash}>
-                        <td style={{ fontWeight: '500', color: 'var(--text-main)', textAlign: 'left', padding: '10px 12px' }}>
-                          <code>{c.message}</code>
+                        <td style={{ textAlign: 'left', padding: '10px 12px' }}>
+                          <div style={{
+                            display: '-webkit-box',
+                            WebkitLineClamp: 3,
+                            WebkitBoxOrient: 'vertical',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            fontSize: '0.85rem',
+                            lineHeight: '1.4',
+                            fontWeight: '500',
+                            color: 'var(--text-main)'
+                          }} title={c.message}>
+                            <code>{c.message}</code>
+                          </div>
                         </td>
                         <td className="muted-cell" style={{ fontSize: '0.85rem' }}>{getAuthorName(c.author_id)}</td>
                         <td className="muted-cell" style={{ fontSize: '0.85rem' }}>
-                          {new Date(c.timestamp).toLocaleString()}
+                          {formatDate(c.timestamp)}
                         </td>
-                        <td style={{ fontSize: '0.85rem' }}>
+                        <td style={{ fontSize: '0.85rem', fontWeight: '600' }}>
                           <span style={{ color: 'var(--text-success)', marginRight: '6px' }}>+{c.insertions}</span>
                           <span style={{ color: 'var(--text-danger)' }}>-{c.deletions}</span>
-                        </td>
-                        <td>
-                          <Tag text={quality.text} variant={quality.color} style={{ fontSize: '10px', padding: '3.5px 8px' }} />
                         </td>
                       </tr>
                     );
@@ -722,8 +734,108 @@ export default function Analytics({ project, onBack }) {
               </table>
             </div>
           </div>
+
+          {/* All Commits Popup Modal */}
+          {showCommitsModal && (
+            <div 
+              className="modal-overlay" 
+              onClick={() => setShowCommitsModal(false)}
+              style={{
+                position: 'fixed',
+                top: 0,
+                left: 0,
+                right: 0,
+                bottom: 0,
+                backgroundColor: 'rgba(0, 0, 0, 0.6)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                zIndex: 9999,
+                backdropFilter: 'blur(4px)'
+              }}
+            >
+              <div 
+                className="modal-content card" 
+                onClick={(e) => e.stopPropagation()} 
+                style={{ 
+                  maxWidth: '850px', 
+                  width: '90%', 
+                  maxHeight: '85vh', 
+                  display: 'flex', 
+                  flexDirection: 'column',
+                  padding: '24px',
+                  boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.3)'
+                }}
+              >
+                <div className="modal-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border-color)', paddingBottom: '16px', marginBottom: '16px' }}>
+                  <h2 style={{ margin: 0, fontSize: '1.25rem', color: 'var(--text-main)' }}>All Repository Commits ({commits.length})</h2>
+                  <button 
+                    type="button"
+                    onClick={() => setShowCommitsModal(false)} 
+                    style={{ 
+                      background: 'transparent', 
+                      border: 'none', 
+                      color: 'var(--text-muted)', 
+                      cursor: 'pointer', 
+                      fontSize: '1.5rem', 
+                      lineHeight: '1',
+                      padding: '4px'
+                    }}
+                  >
+                    &times;
+                  </button>
+                </div>
+                <div style={{ overflowY: 'auto', flex: 1, paddingRight: '4px' }}>
+                  <table className="custom-table" style={{ width: '100%' }}>
+                    <thead>
+                      <tr>
+                        <th style={{ width: '50%' }}>Commit Message</th>
+                        <th>Author</th>
+                        <th>Date/Time</th>
+                        <th>Impact Changes</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {commits.map((c) => {
+                        const getAuthorName = (authorId) => {
+                          const contrib = analytics.contributions?.find(a => a.author_id === authorId);
+                          return contrib ? contrib.name : 'Unknown';
+                        };
+                        const formatDate = (dateStr) => {
+                          const d = new Date(dateStr);
+                          return d.toLocaleString([], { 
+                            year: 'numeric', 
+                            month: 'numeric', 
+                            day: 'numeric', 
+                            hour: '2-digit', 
+                            minute: '2-digit' 
+                          });
+                        };
+                        return (
+                          <tr key={c.hash}>
+                            <td style={{ textAlign: 'left', padding: '10px 12px', whiteSpace: 'pre-wrap' }}>
+                              <code>{c.message}</code>
+                            </td>
+                            <td className="muted-cell" style={{ fontSize: '0.85rem' }}>{getAuthorName(c.author_id)}</td>
+                            <td className="muted-cell" style={{ fontSize: '0.85rem' }}>
+                              {formatDate(c.timestamp)}
+                            </td>
+                            <td style={{ fontSize: '0.85rem', fontWeight: '600' }}>
+                              <span style={{ color: 'var(--text-success)', marginRight: '6px' }}>+{c.insertions}</span>
+                              <span style={{ color: 'var(--text-danger)' }}>-{c.deletions}</span>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       )}
+
 
 
       {analytics && activeTab === 'qualitative' && (
