@@ -171,7 +171,8 @@ export default function App() {
                   commitsCount: contribution ? contribution.commit_count : (proj.commitsCount / (proj.authorsCount || 1)),
                   additions: contribution ? contribution.lines_added : 0,
                   deletions: contribution ? Math.floor(contribution.lines_added * 0.2) : 0,
-                  status: 'Active'
+                  status: 'Active',
+                  projects: [proj.id]
                 };
               } else {
                 // Accumulate commits/lines if student is in multiple projects
@@ -180,6 +181,9 @@ export default function App() {
                   studentsMap[emailKey].commitsCount += contribution.commit_count;
                   studentsMap[emailKey].additions += contribution.lines_added;
                   studentsMap[emailKey].deletions += Math.floor(contribution.lines_added * 0.2);
+                }
+                if (!studentsMap[emailKey].projects.includes(proj.id)) {
+                  studentsMap[emailKey].projects.push(proj.id);
                 }
               }
             });

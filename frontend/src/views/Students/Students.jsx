@@ -23,7 +23,8 @@ export default function Students({
   const [sortOrder, setSortOrder] = useState('commits-desc');
   
   // Merge state
-  const [mergingSourceId, setMergingSourceId] = useState(null);
+  const [showMergeModal, setShowMergeModal] = useState(false);
+  const [selectedSourceStudent, setSelectedSourceStudent] = useState(null);
   const [mergeTargetId, setMergeTargetId] = useState('');
 
   // 1. Identify bots helper
@@ -79,17 +80,18 @@ export default function Students({
     return 0;
   });
 
-  const handleMergeSubmit = (e, sourceId) => {
+  const handleMergeSubmit = (e) => {
     e.preventDefault();
-    if (!mergeTargetId) return;
+    if (!selectedSourceStudent || !mergeTargetId) return;
     
-    if (sourceId === parseInt(mergeTargetId)) {
+    if (selectedSourceStudent.id === parseInt(mergeTargetId)) {
       alert("You cannot merge a student into themselves.");
       return;
     }
 
-    onMergeAuthors(sourceId, parseInt(mergeTargetId));
-    setMergingSourceId(null);
+    onMergeAuthors(selectedSourceStudent.id, parseInt(mergeTargetId));
+    setShowMergeModal(false);
+    setSelectedSourceStudent(null);
     setMergeTargetId('');
   };
 
@@ -212,52 +214,25 @@ export default function Students({
                       <span className="deletions-text">-{Math.round(student.deletions)}</span>
                     </td>
                     <td>
-                      {mergingSourceId === student.id ? (
-                        <form 
-                          className="inline-merge-form"
-                          onSubmit={(e) => handleMergeSubmit(e, student.id)}
-                        >
-                          <select 
-                            className="select-field select-sm"
-                            value={mergeTargetId}
-                            onChange={(e) => setMergeTargetId(e.target.value)}
-                            required
-                          >
-                            <option value="">Merge into...</option>
-                            {students
-                              .filter(s => s.id !== student.id)
-                              .map(s => (
-                                <option key={s.id} value={s.id}>{s.name} ({s.email})</option>
-                              ))}
-                          </select>
-                          <button type="submit" className="btn btn-primary btn-sm confirm-merge-btn">
-                            Confirm
-                          </button>
-                          <button 
-                            type="button" 
-                            className="close-merge-btn"
-                            onClick={() => setMergingSourceId(null)}
-                          >
-                            <X size={14} />
-                          </button>
-                        </form>
-                      ) : (
-                        <button 
-                          className="btn btn-outline btn-sm merge-btn-icon"
-                          onClick={() => setMergingSourceId(student.id)}
-                          title="Merge aliases/duplicate profiles for this user"
-                        >
-                          <GitMerge size={14} />
-                          <span>Merge Alias</span>
-                        </button>
-                      )}
+                      <button 
+                        className="btn btn-outline btn-sm merge-btn-icon"
+                        onClick={() => {
+                          setSelectedSourceStudent(student);
+                          setMergeTargetId('');
+                          setShowMergeModal(true);
+                        }}
+                        title="Merge aliases/duplicate profiles for this user"
+                      >
+                        <GitMerge size={14} />
+                        <span>Merge Alias</span>
+                      </button>
                     </td>
                   </tr>
                 );
               })}
               {sortedStudents.length === 0 && (
                 <tr>
-                  <td colSpan="6" className="empty-table-cell">
+                  <td colSpan="5" className="empty-table-cell">
                     <p>No students match your query filters.</p>
                   </td>
                 </tr>
@@ -266,6 +241,82 @@ export default function Students({
           </table>
         </div>
       </div>
+
+      {showMergeModal && selectedSourceStudent && (
+        <div className="modal-overlay">
+          <div className="modal-card card">
+            <div className="modal-header">
+              <div className="modal-title-box">
+                <GitMerge size={20} className="primary-text" />
+                <h2>Merge Student Profile</h2>
+              </div>
+              <button 
+                className="close-btn" 
+                onClick={() => { setShowMergeModal(false); setSelectedSourceStudent(null); }}
+              >
+                <X size={18} />
+              </button>
+            </div>
+            
+            <form onSubmit={handleMergeSubmit} className="modal-form">
+              <div style={{ marginBottom: '16px', fontSize: '0.9rem', color: 'var(--text-muted)', textAlign: 'left' }}>
+                Merge all commits, branch activity, and files from <strong>{selectedSourceStudent.name}</strong> ({selectedSourceStudent.email}) into the target student below.
+              </div>
+              
+              <div className="form-group" style={{ textAlign: 'left' }}>
+                <label className="form-label">Target Student (Same Project Only)</label>
+                <select
+                  className="select-field"
+                  value={mergeTargetId}
+                  onChange={(e) => setMergeTargetId(e.target.value)}
+                  required
+                  style={{ width: '100%' }}
+                >
+                  <option value="">Select target student...</option>
+                  {students
+                    .filter((s) => {
+                      if (s.id === selectedSourceStudent.id) return false;
+                      const sourceProjects = selectedSourceStudent.projects || [];
+                      const targetProjects = s.projects || [];
+                      return sourceProjects.some(id => targetProjects.includes(id));
+                    })
+                    .map(s => (
+                      <option key={s.id} value={s.id}>{s.name} ({s.email})</option>
+                    ))
+                  }
+                </select>
+                {students.filter((s) => {
+                  if (s.id === selectedSourceStudent.id) return false;
+                  const sourceProjects = selectedSourceStudent.projects || [];
+                  const targetProjects = s.projects || [];
+                  return sourceProjects.some(id => targetProjects.includes(id));
+                }).length === 0 && (
+                  <p className="help-text error-text" style={{ marginTop: '8px', color: 'var(--color-danger)', fontSize: '0.8rem' }}>
+                    No other authors belong to this project.
+                  </p>
+                )}
+              </div>
+              
+              <div className="form-actions" style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px', marginTop: '24px' }}>
+                <button 
+                  type="button" 
+                  className="btn btn-secondary" 
+                  onClick={() => { setShowMergeModal(false); setSelectedSourceStudent(null); }}
+                >
+                  Cancel
+                </button>
+                <button 
+                  type="submit" 
+                  className="btn btn-primary"
+                  disabled={!mergeTargetId}
+                >
+                  Merge Profiles
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
