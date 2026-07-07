@@ -104,5 +104,6 @@ class GetProjectAnalyticsUseCase:
             "total_commits": total_commits,
             "total_insertions": total_insertions,
             "distribution_status": status,
-            "contributions": contributions_list
+            "contributions": contributions_list,
+            "language_distribution": self.project_repo.get_language_distribution(project_id)
         }

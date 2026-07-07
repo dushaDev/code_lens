@@ -13,6 +13,7 @@ import './Analytics.css';
 
 export default function Analytics({ project, onBack }) {
   const [analytics, setAnalytics] = useState(null);
+  const [commits, setCommits] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -23,14 +24,20 @@ export default function Analytics({ project, onBack }) {
       const token = localStorage.getItem('token');
 
       try {
-        const response = await fetch(`/api/v1/projects/${project.id}/analytics`, {
-          headers: {
-            'Authorization': `Bearer ${token}`
-          }
-        });
-        if (!response.ok) throw new Error('Failed to load project analytics.');
-        const data = await response.json();
-        setAnalytics(data);
+        const [analyticsRes, commitsRes] = await Promise.all([
+          fetch(`/api/v1/projects/${project.id}/analytics`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+          }),
+          fetch(`/api/v1/projects/${project.id}/commits`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+          })
+        ]);
+        if (!analyticsRes.ok) throw new Error('Failed to load project analytics.');
+        const analyticsData = await analyticsRes.json();
+        const commitsData = commitsRes.ok ? await commitsRes.json() : { commits: [] };
+        
+        setAnalytics(analyticsData);
+        setCommits(commitsData.commits || []);
       } catch (err) {
         setError(err.message || 'Failed to load project analytics from database.');
       } finally {
@@ -54,6 +61,109 @@ export default function Analytics({ project, onBack }) {
     if (gini > 0.7) return 'badge-danger';
     if (gini > 0.4) return 'badge-warning';
     return 'badge-success';
+  };
+
+  const renderCommitChart = () => {
+    if (!commits || commits.length === 0) {
+      return (
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '140px', color: 'var(--text-muted)', fontSize: '0.85rem' }}>
+          No commits recorded to plot activity history.
+        </div>
+      );
+    }
+
+    const sorted = [...commits].sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+    const groups = {};
+    sorted.forEach(c => {
+      const dateStr = new Date(c.timestamp).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+      groups[dateStr] = (groups[dateStr] || 0) + 1;
+    });
+
+    const chartData = Object.entries(groups).slice(-8);
+    if (chartData.length === 0) {
+      return (
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '140px', color: 'var(--text-muted)', fontSize: '0.85rem' }}>
+          No activity logs to render graph.
+        </div>
+      );
+    }
+
+    const maxVal = Math.max(...chartData.map(([_, count]) => count), 1);
+    const width = 360;
+    const height = 130;
+    const paddingLeft = 30;
+    const paddingRight = 10;
+    const paddingTop = 15;
+    const paddingBottom = 20;
+
+    const chartWidth = width - paddingLeft - paddingRight;
+    const chartHeight = height - paddingTop - paddingBottom;
+    const barSpacing = chartWidth / chartData.length;
+    const barWidth = Math.max(barSpacing * 0.5, 8);
+
+    return (
+      <div style={{ position: 'relative', width: '100%', height: '140px' }}>
+        <svg viewBox={`0 0 ${width} ${height}`} style={{ width: '100%', height: '100%', overflow: 'visible' }}>
+          {[0, 0.5, 1].map((ratio, index) => {
+            const y = paddingTop + chartHeight * (1 - ratio);
+            return (
+              <g key={index}>
+                <line 
+                  x1={paddingLeft} 
+                  y1={y} 
+                  x2={width - paddingRight} 
+                  y2={y} 
+                  stroke="var(--border-color)" 
+                  strokeWidth="1" 
+                  strokeDasharray="4 4"
+                />
+                <text 
+                  x={paddingLeft - 8} 
+                  y={y + 4} 
+                  textAnchor="end" 
+                  fontSize="9px" 
+                  fill="var(--text-muted)"
+                  fontWeight="bold"
+                >
+                  {Math.round(maxVal * ratio)}
+                </text>
+              </g>
+            );
+          })}
+
+          {chartData.map(([date, count], index) => {
+            const x = paddingLeft + (index * barSpacing) + (barSpacing - barWidth) / 2;
+            const barHeight = (count / maxVal) * chartHeight;
+            const y = paddingTop + chartHeight - barHeight;
+
+            return (
+              <g key={date}>
+                <rect
+                  x={x}
+                  y={y}
+                  width={barWidth}
+                  height={Math.max(barHeight, 3)}
+                  rx="3"
+                  ry="3"
+                  fill="var(--primary)"
+                  style={{ transition: 'all 0.3s ease' }}
+                  title={`${date}: ${count} commits`}
+                />
+                <text
+                  x={x + barWidth / 2}
+                  y={height - 4}
+                  textAnchor="middle"
+                  fontSize="9px"
+                  fill="var(--text-muted)"
+                >
+                  {date}
+                </text>
+              </g>
+            );
+          })}
+        </svg>
+      </div>
+    );
   };
 
   const getContributionColorClass = (percentage, totalContributors) => {
@@ -159,7 +269,56 @@ export default function Analytics({ project, onBack }) {
             </div>
           </div>
 
+          {/* Visualizations Section */}
+          <div className="analytics-visualization-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: '20px', marginBottom: '24px', marginTop: '24px' }}>
+            
+            {/* Language Distribution Card */}
+            <div className="card" style={{ padding: '24px', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+              <div>
+                <h3 style={{ fontSize: '1rem', fontWeight: '600', color: 'var(--text-main)', marginBottom: '16px', textAlign: 'left' }}>Codebase Languages</h3>
+                
+                {/* Segmented language distribution bar */}
+                <div style={{ display: 'flex', height: '12px', width: '100%', borderRadius: '6px', overflow: 'hidden', backgroundColor: 'var(--bg-app)', marginBottom: '20px' }}>
+                  {Object.entries(analytics.language_distribution || {}).map(([lang, pct], idx) => {
+                    const colors = ['#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#374151'];
+                    const color = colors[idx % colors.length];
+                    return (
+                      <div 
+                        key={lang} 
+                        style={{ 
+                          width: `${pct}%`, 
+                          backgroundColor: color, 
+                          height: '100%' 
+                        }} 
+                        title={`${lang}: ${pct}%`}
+                      />
+                    );
+                  })}
+                </div>
+              </div>
 
+              {/* Language labels list */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '12px', textAlign: 'left' }}>
+                {Object.entries(analytics.language_distribution || {}).map(([lang, pct], idx) => {
+                  const colors = ['#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#374151'];
+                  const color = colors[idx % colors.length];
+                  return (
+                    <div key={lang} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: color }} />
+                      <span style={{ fontSize: '0.85rem', fontWeight: '600', color: 'var(--text-main)' }}>{lang}</span>
+                      <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>{pct}%</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Commit History Chart Card */}
+            <div className="card" style={{ padding: '24px' }}>
+              <h3 style={{ fontSize: '1rem', fontWeight: '600', color: 'var(--text-main)', marginBottom: '16px', textAlign: 'left' }}>Commit Activity History</h3>
+              {renderCommitChart()}
+            </div>
+          </div>
 
           {/* Contribution table */}
           <div className="recent-projects-section card">

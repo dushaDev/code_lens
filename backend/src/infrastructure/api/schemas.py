@@ -194,6 +194,7 @@ class ProjectAnalyticsResponse(BaseModel):
     total_insertions: int
     distribution_status: str
     contributions: List[AuthorContributionResponse]
+    language_distribution: dict
 
 class MergeAuthorsRequest(BaseModel):
     source_author_id: int

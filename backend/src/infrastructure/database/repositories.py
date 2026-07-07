@@ -66,6 +66,67 @@ class ProjectRepository(IProjectRepository):
             
         return [tech for tech, count in counter.most_common(4)]
 
+    def get_language_distribution(self, project_id: int) -> dict:
+        results = (
+            self.db.query(FileChangeModel.filename, FileChangeModel.lines_added)
+            .join(CommitModel)
+            .filter(CommitModel.project_id == project_id)
+            .all()
+        )
+        extension_map = {
+            '.py': 'Python',
+            '.js': 'JavaScript',
+            '.jsx': 'JavaScript',
+            '.ts': 'TypeScript',
+            '.tsx': 'TypeScript',
+            '.java': 'Java',
+            '.cpp': 'C++',
+            '.cc': 'C++',
+            '.cxx': 'C++',
+            '.c': 'C',
+            '.h': 'C/C++',
+            '.cs': 'C#',
+            '.go': 'Go',
+            '.rs': 'Rust',
+            '.rb': 'Ruby',
+            '.php': 'PHP',
+            '.swift': 'Swift',
+            '.kt': 'Kotlin',
+            '.kts': 'Kotlin',
+            '.dart': 'Dart',
+            '.html': 'HTML',
+            '.css': 'CSS',
+            '.scss': 'CSS',
+            '.sql': 'SQL',
+            '.sh': 'Shell'
+        }
+        counter = Counter()
+        for filename, lines_added in results:
+            ext = os.path.splitext(filename)[1].lower()
+            if ext in extension_map:
+                counter[extension_map[ext]] += lines_added
+                
+        if not counter:
+            techs = self._detect_tech_stack(project_id)
+            if techs:
+                return {techs[0]: 100.0}
+            return {'Python': 100.0}
+            
+        total_lines = sum(counter.values())
+        if total_lines == 0:
+            techs = self._detect_tech_stack(project_id)
+            if techs:
+                return {techs[0]: 100.0}
+            return {'Python': 100.0}
+            
+        distribution = {}
+        for tech, lines in counter.items():
+            pct = round((lines / total_lines) * 100, 1)
+            if pct > 0:
+                distribution[tech] = pct
+                
+        return dict(sorted(distribution.items(), key=lambda x: x[1], reverse=True))
+
     def get_by_id(self, project_id: int) -> Optional[ProjectEntity]:
         project_model = self.db.query(ProjectModel).filter(ProjectModel.id == project_id).first()
         if not project_model:

@@ -31,6 +31,10 @@ class IProjectRepository(ABC):
     def get_branches(self, project_id: int) -> List[BranchEntity]:
         pass
 
+    @abstractmethod
+    def get_language_distribution(self, project_id: int) -> dict:
+        pass
+
 class IAuthorRepository(ABC):
     @abstractmethod
     def get_by_id(self, author_id: int) -> Optional[AuthorEntity]:
