@@ -6,7 +6,8 @@ import {
   Scale, 
   AlertCircle, 
   BarChart4, 
-  User 
+  User,
+  Info
 } from 'lucide-react';
 import './Analytics.css';
 
@@ -103,12 +104,25 @@ export default function Analytics({ project, onBack }) {
         <div className="analytics-content-grid">
           {/* Summary metrics */}
           <div className="analytics-summary-cards">
-            <div className="stat-card card">
-              <div className="stat-card-header">
-                <div className="stat-icon-wrapper blue-icon">
-                  <Scale size={22} />
+            <div className="stat-card card" style={{ position: 'relative' }}>
+              <div className="stat-card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                  <div className="stat-icon-wrapper blue-icon">
+                    <Scale size={22} />
+                  </div>
+                  <span className="stat-label">Gini Coefficient (Inequality)</span>
                 </div>
-                <span className="stat-label">Gini Coefficient (Inequality)</span>
+                <div className="gini-tooltip-trigger" style={{ cursor: 'pointer', color: 'var(--text-light)' }}>
+                  <Info size={16} />
+                  <div className="gini-tooltip-content">
+                    <strong style={{ display: 'block', fontSize: '0.85rem', marginBottom: '4px' }}>Gini Coefficient Explanation</strong>
+                    <p style={{ margin: 0, lineHeight: '1.4', fontWeight: 'normal', color: 'var(--text-muted)' }}>
+                      A Gini coefficient near <strong>0.0</strong> indicates perfectly equal contribution (all members contributed equally).
+                      A Gini coefficient near <strong>1.0</strong> indicates completely unequal contribution (one student did all the work).
+                      A coefficient above <strong>0.6</strong> usually indicates that other group members are sliding by without significant coding contribution.
+                    </p>
+                  </div>
+                </div>
               </div>
               <div className="stat-card-body">
                 <h2 className="stat-value">{analytics.gini_coefficient?.toFixed(2)}</h2>
@@ -145,18 +159,7 @@ export default function Analytics({ project, onBack }) {
             </div>
           </div>
 
-          {/* Gini index explanation alert */}
-          <div className="gini-explanation-banner card">
-            <AlertCircle size={22} className="explanation-icon" />
-            <div>
-              <h4>Gini Coefficient Explanation</h4>
-              <p>
-                A Gini coefficient near <strong>0.0</strong> indicates perfectly equal contribution (all members contributed equally). 
-                A Gini coefficient near <strong>1.0</strong> indicates completely unequal contribution (one student did all the work). 
-                A coefficient above <strong>0.6</strong> usually indicates that other group members are sliding by without significant coding contribution.
-              </p>
-            </div>
-          </div>
+
 
           {/* Contribution table */}
           <div className="recent-projects-section card">

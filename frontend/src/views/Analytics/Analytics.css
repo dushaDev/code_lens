@@ -36,32 +36,36 @@
   gap: 20px;
 }
 
-/* Gini explanation info box */
-.gini-explanation-banner {
-  background-color: var(--color-info-bg);
-  border-color: rgba(59, 130, 246, 0.15);
-  color: #1e3a8a;
-  padding: 20px;
-  display: flex;
-  gap: 16px;
-  align-items: flex-start;
+/* Tooltip styling for Gini Coefficient card */
+.gini-tooltip-trigger {
+  position: relative;
 }
 
-.explanation-icon {
-  color: var(--color-info);
-  flex-shrink: 0;
+.gini-tooltip-content {
+  visibility: hidden;
+  width: 300px;
+  background-color: var(--bg-card);
+  color: var(--text-main);
+  border: 1px solid var(--border-color);
+  box-shadow: var(--shadow-lg);
+  border-radius: var(--radius-md);
+  padding: 12px;
+  position: absolute;
+  z-index: 50;
+  top: 100%;
+  right: 0;
+  margin-top: 8px;
+  font-size: 0.8rem;
+  opacity: 0;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+  transform: translateY(4px);
+  pointer-events: none;
 }
 
-.gini-explanation-banner h4 {
-  font-size: 0.95rem;
-  font-weight: 600;
-  color: #1e3a8a;
-  margin-bottom: 4px;
-}
-
-.gini-explanation-banner p {
-  font-size: 0.85rem;
-  line-height: 1.5;
+.gini-tooltip-trigger:hover .gini-tooltip-content {
+  visibility: visible;
+  opacity: 1;
+  transform: translateY(0);
 }
 
 /* Progress bar */

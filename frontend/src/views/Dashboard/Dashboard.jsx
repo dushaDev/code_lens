@@ -203,7 +203,7 @@ export default function Dashboard({
           <PlusCircle size={24} />
         </div>
         <div className="cta-text">
-          <h3>Create a New Project</h3>
+          <h3>Create New Project</h3>
           <p>Clone a student repository and parse its git history logs.</p>
         </div>
       </div>
