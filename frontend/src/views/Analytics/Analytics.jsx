@@ -12,6 +12,7 @@ import {
   Bot
 } from 'lucide-react';
 import Tag from '../../components/Tag';
+import Tooltip from '../../components/Tooltip';
 import './Analytics.css';
 
 export default function Analytics({ project, onBack }) {
@@ -476,15 +477,10 @@ export default function Analytics({ project, onBack }) {
                   </div>
                   <span className="stat-label">Gini Coefficient (Inequality)</span>
                 </div>
-                <div className="card-tooltip-trigger" style={{ cursor: 'pointer', color: 'var(--text-light)' }}>
-                  <Info size={16} />
-                  <div className="card-tooltip-content">
-                    <strong style={{ display: 'block', fontSize: '0.85rem', marginBottom: '4px' }}>Gini Coefficient</strong>
-                    <p style={{ margin: 0, lineHeight: '1.4', fontWeight: 'normal', color: 'var(--text-muted)' }}>
-                      Measures workload division: <strong>0.0</strong> is perfectly equal, <strong>1.0</strong> is single-member dominant. A value above <strong>0.6</strong> indicates others may not be contributing significantly.
-                    </p>
-                  </div>
-                </div>
+                <Tooltip 
+                  title="Gini Coefficient" 
+                  content="Measures workload division: 0.0 is perfectly equal, 1.0 is single-member dominant. A value above 0.6 indicates others may not be contributing significantly." 
+                />
               </div>
               <div className="stat-card-body">
                 <h2 className="stat-value">{analytics.gini_coefficient?.toFixed(2)}</h2>
@@ -502,15 +498,10 @@ export default function Analytics({ project, onBack }) {
                   </div>
                   <span className="stat-label">Total Commits Analyzed</span>
                 </div>
-                <div className="card-tooltip-trigger" style={{ cursor: 'pointer', color: 'var(--text-light)' }}>
-                  <Info size={16} />
-                  <div className="card-tooltip-content">
-                    <strong style={{ display: 'block', fontSize: '0.85rem', marginBottom: '4px' }}>Total Commits</strong>
-                    <p style={{ margin: 0, lineHeight: '1.4', fontWeight: 'normal', color: 'var(--text-muted)' }}>
-                      The total number of commits extracted and parsed from the repository across all active git branches.
-                    </p>
-                  </div>
-                </div>
+                <Tooltip 
+                  title="Total Commits" 
+                  content="The total number of commits extracted and parsed from the repository across all active git branches." 
+                />
               </div>
               <div className="stat-card-body">
                 <h2 className="stat-value">{analytics.total_commits}</h2>
@@ -526,15 +517,10 @@ export default function Analytics({ project, onBack }) {
                   </div>
                   <span className="stat-label">Total Insertions</span>
                 </div>
-                <div className="card-tooltip-trigger" style={{ cursor: 'pointer', color: 'var(--text-light)' }}>
-                  <Info size={16} />
-                  <div className="card-tooltip-content">
-                    <strong style={{ display: 'block', fontSize: '0.85rem', marginBottom: '4px' }}>Total Insertions</strong>
-                    <p style={{ margin: 0, lineHeight: '1.4', fontWeight: 'normal', color: 'var(--text-muted)' }}>
-                      The cumulative number of lines of source code added across all commits. This measures the overall volume of work.
-                    </p>
-                  </div>
-                </div>
+                <Tooltip 
+                  title="Total Insertions" 
+                  content="The cumulative number of lines of source code added across all commits. This measures the overall volume of work." 
+                />
               </div>
               <div className="stat-card-body">
                 <h2 className="stat-value">{analytics.total_insertions}</h2>
@@ -551,15 +537,10 @@ export default function Analytics({ project, onBack }) {
               <div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
                   <h3 style={{ fontSize: '1rem', fontWeight: '600', color: 'var(--text-main)', margin: 0, textAlign: 'left' }}>Codebase Languages</h3>
-                  <div className="card-tooltip-trigger" style={{ cursor: 'pointer', color: 'var(--text-light)' }}>
-                    <Info size={16} />
-                    <div className="card-tooltip-content">
-                      <strong style={{ display: 'block', fontSize: '0.85rem', marginBottom: '4px' }}>Codebase Languages</strong>
-                      <p style={{ margin: 0, lineHeight: '1.4', fontWeight: 'normal', color: 'var(--text-muted)' }}>
-                        The percentage distribution of different programming languages in the project, calculated based on the total lines of code added.
-                      </p>
-                    </div>
-                  </div>
+                  <Tooltip 
+                    title="Codebase Languages" 
+                    content="The percentage distribution of different programming languages in the project, calculated based on the total lines of code added." 
+                  />
                 </div>
                 
                 {/* Segmented language distribution bar */}
@@ -602,15 +583,10 @@ export default function Analytics({ project, onBack }) {
             <div className="card" style={{ padding: '24px', flex: '2 1 500px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
                 <h3 style={{ fontSize: '1rem', fontWeight: '600', color: 'var(--text-main)', margin: 0, textAlign: 'left' }}>Commit Activity History</h3>
-                <div className="card-tooltip-trigger" style={{ cursor: 'pointer', color: 'var(--text-light)' }}>
-                  <Info size={16} />
-                  <div className="card-tooltip-content">
-                    <strong style={{ display: 'block', fontSize: '0.85rem', marginBottom: '4px' }}>Commit Activity History</strong>
-                    <p style={{ margin: 0, lineHeight: '1.4', fontWeight: 'normal', color: 'var(--text-muted)' }}>
-                      A historical timeline of commit logs grouped by daily, weekly, or monthly intervals, showing git activity over the selected range.
-                    </p>
-                  </div>
-                </div>
+                <Tooltip 
+                  title="Commit Activity History" 
+                  content="A historical timeline of commit logs grouped by daily, weekly, or monthly intervals, showing git activity over the selected range." 
+                />
               </div>
               {renderCommitChart()}
             </div>

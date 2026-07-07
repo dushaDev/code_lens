@@ -31,7 +31,7 @@ export default function Sidebar({
     <aside className="app-sidebar">
       <div className="sidebar-header">
         <div className="sidebar-logo">
-          <img src="/code_lens_logo.svg" className="logo-icon-img" alt="Code Lens Logo" style={{ width: '135px', height: '60px', objectFit: 'contain' }} />
+          <img src="/code_lens_logo.svg" className="logo-icon-img" alt="Code Lens Logo" style={{ width: '155px', height: '60px', objectFit: 'contain' }} />
         </div>
       </div>
 

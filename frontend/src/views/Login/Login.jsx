@@ -65,7 +65,7 @@ export default function Login({ onLoginSuccess }) {
     <div className="login-page">
       <div className="login-card">
         <div className="login-header">
-          <img src="/code_lens_logo.svg" alt="Code Lens Logo" style={{ width: '150px', height: '110px', objectFit: 'contain', marginBottom: '8px' }} />
+          <img src="/code_lens_logo.svg" alt="Code Lens Logo" style={{ width: '180px', height: '80px', objectFit: 'contain', marginBottom: '8px' }} />
           <h1>{isRegister ? 'Create Account' : 'Welcome Back'}</h1>
           <p className="subtitle">
             {isRegister 
