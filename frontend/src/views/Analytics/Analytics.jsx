@@ -7,7 +7,8 @@ import {
   AlertCircle, 
   BarChart4, 
   User,
-  Info
+  Info,
+  MessageSquare
 } from 'lucide-react';
 import './Analytics.css';
 
@@ -19,6 +20,7 @@ export default function Analytics({ project, onBack }) {
   const [chartInterval, setChartInterval] = useState('weekly');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
+  const [activeTab, setActiveTab] = useState('quantitative');
 
   useEffect(() => {
     const fetchAnalytics = async () => {
@@ -402,7 +404,47 @@ export default function Analytics({ project, onBack }) {
           <p className="subtitle">Repository metadata, contribution inequality, and git log history metrics.</p>
       </div>
 
-      {analytics && (
+      {/* Switcher Tab */}
+      <div style={{ display: 'flex', borderBottom: '1px solid var(--border-color)', marginBottom: '8px' }}>
+        <button
+          type="button"
+          onClick={() => setActiveTab('quantitative')}
+          style={{
+            padding: '12px 24px',
+            background: 'transparent',
+            border: 'none',
+            borderBottom: activeTab === 'quantitative' ? '2.5px solid var(--primary)' : '2.5px solid transparent',
+            color: activeTab === 'quantitative' ? 'var(--primary)' : 'var(--text-muted)',
+            fontWeight: activeTab === 'quantitative' ? '600' : '500',
+            fontSize: '0.95rem',
+            cursor: 'pointer',
+            transition: 'all 0.2s ease',
+            marginBottom: '-1px'
+          }}
+        >
+          Quantitative Analysis
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveTab('qualitative')}
+          style={{
+            padding: '12px 24px',
+            background: 'transparent',
+            border: 'none',
+            borderBottom: activeTab === 'qualitative' ? '2.5px solid var(--primary)' : '2.5px solid transparent',
+            color: activeTab === 'qualitative' ? 'var(--primary)' : 'var(--text-muted)',
+            fontWeight: activeTab === 'qualitative' ? '600' : '500',
+            fontSize: '0.95rem',
+            cursor: 'pointer',
+            transition: 'all 0.2s ease',
+            marginBottom: '-1px'
+          }}
+        >
+          Qualitative Analysis
+        </button>
+      </div>
+
+      {analytics && activeTab === 'quantitative' && (
         <div className="analytics-content-grid">
           {/* Summary metrics */}
           <div className="analytics-summary-cards">
@@ -559,6 +601,22 @@ export default function Analytics({ project, onBack }) {
           </div>
         </div>
       )}
+
+      {analytics && activeTab === 'qualitative' && (
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '320px', backgroundColor: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: '12px', padding: '40px', textAlign: 'center', marginTop: '24px' }}>
+          <div style={{ padding: '16px', borderRadius: '50%', backgroundColor: 'var(--primary-alpha)', color: 'var(--primary)', marginBottom: '16px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <MessageSquare size={32} />
+          </div>
+          <h2 style={{ fontSize: '1.25rem', fontWeight: '600', color: 'var(--text-main)', marginBottom: '8px' }}>Qualitative Code Review Analysis</h2>
+          <p style={{ fontSize: '0.9rem', color: 'var(--text-muted)', maxWidth: '460px', lineHeight: '1.6', margin: '0 auto' }}>
+            This section will house qualitative analysis metrics including code styling check results, code duplication ratios, structural design complexity, and instructor peer reviews.
+          </p>
+          <div style={{ marginTop: '20px', display: 'inline-block', fontSize: '0.75rem', color: 'var(--primary)', fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '0.05em', backgroundColor: 'var(--primary-alpha)', padding: '6px 16px', borderRadius: '100px' }}>
+            Feature Coming Soon
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }
