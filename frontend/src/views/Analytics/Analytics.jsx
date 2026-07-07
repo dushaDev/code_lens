@@ -117,7 +117,7 @@ export default function Analytics({ project, onBack }) {
       let curr = new Date(start.getFullYear(), start.getMonth(), 1);
       const endMonth = new Date(end.getFullYear(), end.getMonth(), 1);
       while (curr <= endMonth) {
-        const label = curr.toLocaleDateString(undefined, { month: 'short', year: '2d' });
+        const label = curr.toLocaleDateString(undefined, { month: 'short', year: '2-digit' });
         const nextMonth = new Date(curr.getFullYear(), curr.getMonth() + 1, 1);
         const count = filteredCommits.filter(c => {
           const d = new Date(c.timestamp);
