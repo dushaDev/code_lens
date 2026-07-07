@@ -118,7 +118,10 @@ export default function Students({
                   backgroundColor: projectFilter !== 'all' ? 'var(--primary-alpha)' : 'var(--bg-card)',
                   color: projectFilter !== 'all' ? 'var(--primary)' : 'var(--text-main)',
                   fontWeight: projectFilter !== 'all' ? '600' : 'normal',
-                  paddingRight: projectFilter !== 'all' ? '30px' : '12px'
+                  paddingRight: projectFilter !== 'all' ? '30px' : '12px',
+                  appearance: 'none',
+                  WebkitAppearance: 'none',
+                  MozAppearance: 'none'
                 }}
               >
                 <option value="all">All Projects</option>
