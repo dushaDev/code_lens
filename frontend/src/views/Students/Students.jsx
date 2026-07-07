@@ -98,10 +98,11 @@ export default function Students({
   return (
     <div className="students-view">
       <div className="view-header" style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: '14px', borderBottom: '1px solid var(--border-color)', paddingBottom: '16px', marginBottom: '8px' }}>
-        <div>
-          <h1 style={{ margin: 0 }}>Students Directory</h1>
-          <p className="subtitle" style={{ margin: '4px 0 0 0' }}>Overview of students, their total commit activities, and contribution logs.</p>
-        </div>
+        <h1 style={{ display: 'flex', alignItems: 'center', gap: '8px', margin: 0, textAlign: 'left', flexWrap: 'wrap' }}>
+          <span>Students Directory</span>
+          <span style={{ width: '1px', height: '18px', backgroundColor: 'var(--border-color)', display: 'inline-block', margin: '0 4px', alignSelf: 'center' }} />
+          <span style={{ fontSize: '0.82rem', fontWeight: '400', color: 'var(--text-muted)', letterSpacing: 'normal' }}>Overview of students, their total commit activities, and contribution logs.</span>
+        </h1>
         
         {/* Project selector relocated to top left */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
