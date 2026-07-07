@@ -259,7 +259,7 @@ export default function App() {
   };
 
   const handleProjectCreated = (newProject) => {
-    setProjects([newProject, ...projects]);
+    window.location.reload();
   };
 
   const handleDeleteProject = async (id) => {
