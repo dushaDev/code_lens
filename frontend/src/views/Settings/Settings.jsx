@@ -98,7 +98,6 @@ export default function Settings({ course, onCourseReset }) {
           <form onSubmit={handleResetCourse} className="card-body-form">
             <p className="danger-notice">
               Resetting course data deletes all projects, extracted commit logs, and student analysis metrics under <strong>"{course?.name}"</strong>. 
-              Other courses and user accounts remain completely untouched.
             </p>
             
             <div className="form-group">
