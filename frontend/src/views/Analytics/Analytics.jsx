@@ -15,6 +15,7 @@ import {
 import Tag from '../../components/Tag';
 import Tooltip from '../../components/Tooltip';
 import CommitActivityChart from '../../components/CommitActivityChart';
+import CommitCodeViewModal from '../../components/CommitCodeViewModal';
 import './Analytics.css';
 
 export default function Analytics({ project, onBack }) {
@@ -25,6 +26,7 @@ export default function Analytics({ project, onBack }) {
   const [activeTab, setActiveTab] = useState('quantitative');
   const [showCommitsModal, setShowCommitsModal] = useState(false);
   const [selectedAuthor, setSelectedAuthor] = useState(null); // { id, name }
+  const [selectedCommitHash, setSelectedCommitHash] = useState(null);
 
   const isBot = (name, email) => {
     const nameLower = name.toLowerCase();
@@ -452,17 +454,19 @@ export default function Analytics({ project, onBack }) {
             <div className="table-container">
               <table className="custom-table" style={{ tableLayout: 'fixed', width: '100%' }}>
                 <colgroup>
-                  <col style={{ width: '45%' }} />
+                  <col style={{ width: '40%' }} />
                   <col style={{ width: '18%' }} />
                   <col style={{ width: '22%' }} />
-                  <col style={{ width: '15%' }} />
+                  <col style={{ width: '12%' }} />
+                  <col style={{ width: '8%' }} />
                 </colgroup>
                 <thead>
                   <tr>
-                    <th style={{ width: '45%' }}>Commit Message</th>
+                    <th style={{ width: '40%' }}>Commit Message</th>
                     <th>Author</th>
                     <th>Date/Time</th>
                     <th>Impact Changes</th>
+                    <th>Code</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -520,6 +524,16 @@ export default function Analytics({ project, onBack }) {
                             borderRadius: '4px',
                             letterSpacing: '0.02em'
                           }}>-{c.deletions}</span>
+                        </td>
+                        <td>
+                          <button 
+                            className="btn btn-secondary btn-sm"
+                            style={{ padding: '6px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
+                            onClick={() => setSelectedCommitHash(c.hash)}
+                            title="View Code Diffs"
+                          >
+                            <Code size={14} />
+                          </button>
                         </td>
                       </tr>
                     );
@@ -580,13 +594,21 @@ export default function Analytics({ project, onBack }) {
                   </button>
                 </div>
                 <div style={{ overflowY: 'auto', flex: 1, paddingRight: '4px' }}>
-                  <table className="custom-table" style={{ width: '100%' }}>
+                  <table className="custom-table" style={{ tableLayout: 'fixed', width: '100%' }}>
+                    <colgroup>
+                      <col style={{ width: '40%' }} />
+                      <col style={{ width: '18%' }} />
+                      <col style={{ width: '22%' }} />
+                      <col style={{ width: '12%' }} />
+                      <col style={{ width: '8%' }} />
+                    </colgroup>
                     <thead>
                       <tr>
-                        <th style={{ width: '50%' }}>Commit Message</th>
+                        <th style={{ width: '40%' }}>Commit Message</th>
                         <th>Author</th>
                         <th>Date/Time</th>
                         <th>Impact Changes</th>
+                        <th>Code</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -633,6 +655,16 @@ export default function Analytics({ project, onBack }) {
                                 letterSpacing: '0.02em'
                               }}>-{c.deletions}</span>
                             </td>
+                            <td>
+                              <button 
+                                className="btn btn-secondary btn-sm"
+                                style={{ padding: '6px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
+                                onClick={() => setSelectedCommitHash(c.hash)}
+                                title="View Code Diffs"
+                              >
+                                <Code size={14} />
+                              </button>
+                            </td>
                           </tr>
                         );
                       })}
@@ -660,6 +692,13 @@ export default function Analytics({ project, onBack }) {
             Feature Coming Soon
           </div>
         </div>
+      )}
+
+      {selectedCommitHash && (
+        <CommitCodeViewModal 
+          commitHash={selectedCommitHash}
+          onClose={() => setSelectedCommitHash(null)}
+        />
       )}
 
     </div>

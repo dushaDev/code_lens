@@ -656,6 +656,66 @@ def get_project_analytics(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 
+@router.get(
+    "/commits/{commit_hash}",
+    response_model=CommitWithProjectAndFilesResponse,
+    tags=["Commits"],
+    responses={401: {"model": ErrorResponse}, 404: {"model": ErrorResponse}, 500: {"model": ErrorResponse}}
+)
+def get_commit_by_hash(
+    commit_hash: str,
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_user)
+):
+    """Retrieve detailed commit information, including the project and the list of file changes."""
+    from src.infrastructure.database.models import CommitModel
+    commit = db.query(CommitModel).filter(CommitModel.hash == commit_hash).first()
+    if not commit:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Commit with hash {commit_hash} not found."
+        )
+    
+    proj = commit.project
+    project_resp = ProjectResponse(
+        id=proj.id,
+        name=proj.name,
+        description=proj.description,
+        git_url=proj.git_url,
+        local_saved_path=proj.local_saved_path,
+        group_no=proj.group_no,
+        tech_stack=proj.tech_stack or [],
+        created_at=proj.created_at,
+        course_id=proj.course_id
+    ) if proj else None
+
+    file_changes_resp = [
+        FileChangeResponse(
+            id=fc.id,
+            filename=fc.filename,
+            status=fc.status,
+            lines_added=fc.lines_added,
+            lines_removed=fc.lines_removed,
+            raw_diff=fc.raw_diff
+        )
+        for fc in commit.file_changes
+    ]
+
+    return CommitWithProjectAndFilesResponse(
+        hash=commit.hash,
+        project_id=commit.project_id,
+        author_id=commit.author_id,
+        timestamp=commit.timestamp,
+        message=commit.message,
+        insertions=commit.insertions,
+        deletions=commit.deletions,
+        is_squash_suspected=commit.is_squash_suspected,
+        branches=",".join([b.short_name for b in commit.branches]) if commit.branches else None,
+        project=project_resp,
+        file_changes=file_changes_resp
+    )
+
+
 # ---------------------------------------------------------------------------
 # Author endpoints (PROTECTED)
 # ---------------------------------------------------------------------------
