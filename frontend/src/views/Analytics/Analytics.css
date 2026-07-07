@@ -71,6 +71,14 @@
   transform: translateY(0);
 }
 
+/* Table cell overflow protection for fixed-layout table */
+.custom-table td,
+.custom-table th {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* Progress bar */
 .progress-bar-cell {
   display: flex;
@@ -92,7 +100,6 @@
   background-color: var(--bg-hover);
   border-radius: 4px;
   overflow: hidden;
-  max-width: 160px;
 }
 
 .progress-fill {
