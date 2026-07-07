@@ -213,7 +213,7 @@ export default function Students({
                     </td>
                     <td>
                       <span className={`badge ${studentIsBot ? 'badge-danger' : 'badge-success'}`}>
-                        {studentIsBot ? 'System Bot' : 'Student'}
+                        {studentIsBot ? 'Bot' : 'Student'}
                       </span>
                     </td>
                     <td>
