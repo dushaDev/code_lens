@@ -193,18 +193,10 @@ export default function Students({
                 const studentIsBot = isBot(student);
                 return (
                   <tr key={student.id} className={studentIsBot ? 'row-bot' : ''}>
-                    <td>
-                      <div className="student-info-cell-content">
-                        <div className={`student-avatar ${studentIsBot ? 'avatar-bot' : ''}`}>
-                          {studentIsBot ? <Bot size={16} /> : student.name.slice(0, 2).toUpperCase()}
-                        </div>
-                        <div>
-                          <div className="student-name-row">
-                            <span className="student-name">{student.name}</span>
-                            {studentIsBot && <Tag text="BOT" variant="danger" style={{ fontSize: '9px', padding: '1.5px 4px' }} />}
-                          </div>
-                          <span className="student-id">ID: {student.studentId || `CS-${1000 + student.id}`}</span>
-                        </div>
+                    <td style={{ padding: '8px 12px' }}>
+                      <div className="student-name-row" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <span className="student-name">{student.name}</span>
+                        {studentIsBot && <Tag text="BOT" variant="danger" style={{ fontSize: '9px', padding: '1.5px 4px' }} />}
                       </div>
                     </td>
                     <td className="muted-cell">{student.email}</td>
