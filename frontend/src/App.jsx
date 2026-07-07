@@ -302,6 +302,28 @@ export default function App() {
     }
   };
 
+  const handleSelectProjectById = async (projectId) => {
+    let proj = projects.find(p => p.id === projectId);
+    if (!proj) {
+      try {
+        const token = localStorage.getItem('token');
+        const res = await fetch(`/api/v1/projects/${projectId}`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (res.ok) {
+          proj = await res.json();
+        }
+      } catch (err) {
+        console.error('Failed to load project details:', err);
+      }
+    }
+    if (proj) {
+      setSelectedProject(proj);
+    } else {
+      alert('Could not open project analytics.');
+    }
+  };
+
   if (authLoading) {
     return (
       <div className="loader-box" style={{ height: '100vh', justifyContent: 'center' }}>
@@ -347,6 +369,10 @@ export default function App() {
           user={user}
           searchTerm={searchTerm}
           setSearchTerm={setSearchTerm}
+          currentCourse={currentCourse}
+          onSelectProject={handleSelectProjectById}
+          onNavigateTab={setCurrentTab}
+          onSelectCourse={setCurrentCourse}
           onLogout={handleLogout}
         />
 

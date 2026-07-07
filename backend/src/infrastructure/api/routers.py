@@ -1052,3 +1052,86 @@ def reset_course(
         return {"status": "success", "message": f"Course projects and data cleared successfully."}
     except Exception as e:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+@router.get(
+    "/search",
+    response_model=SearchResponse,
+    tags=["Search"]
+)
+def global_search(
+    q: str,
+    course_id: Optional[int] = None,
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_user)
+):
+    """Global search projects, students (authors), commits, and courses by query string."""
+    if not q or len(q.strip()) < 2:
+        return SearchResponse(results=[])
+
+    query_str = f"%{q.strip()}%"
+    results = []
+
+    # 1. Search projects
+    proj_query = db.query(ProjectModel)
+    if course_id:
+        proj_query = proj_query.filter(ProjectModel.course_id == course_id)
+    projects = proj_query.filter(ProjectModel.name.ilike(query_str)).limit(5).all()
+    for p in projects:
+        results.append(
+            SearchResultItem(
+                id=f"project-{p.id}",
+                type="project",
+                title=p.name,
+                subtitle=f"Git URL: {p.git_url}",
+                project_id=p.id
+            )
+        )
+
+    # 2. Search students (authors)
+    author_query = db.query(AuthorModel).join(CommitModel).join(ProjectModel)
+    if course_id:
+        author_query = author_query.filter(ProjectModel.course_id == course_id)
+    authors = author_query.filter(
+        (AuthorModel.name.ilike(query_str)) | (AuthorModel.email.ilike(query_str))
+    ).distinct().limit(5).all()
+    for a in authors:
+        results.append(
+            SearchResultItem(
+                id=f"student-{a.id}",
+                type="student",
+                title=a.name,
+                subtitle=a.email
+            )
+        )
+
+    # 3. Search commits
+    commit_query = db.query(CommitModel).join(ProjectModel)
+    if course_id:
+        commit_query = commit_query.filter(ProjectModel.course_id == course_id)
+    commits = commit_query.filter(
+        (CommitModel.message.ilike(query_str)) | (CommitModel.hash.ilike(query_str))
+    ).limit(5).all()
+    for c in commits:
+        results.append(
+            SearchResultItem(
+                id=f"commit-{c.hash}",
+                type="commit",
+                title=c.message,
+                subtitle=f"Commit: {c.hash[:8]} in project {c.project.name}",
+                project_id=c.project_id
+            )
+        )
+
+    # 4. Search courses (global context)
+    courses = db.query(CourseModel).filter(CourseModel.name.ilike(query_str)).limit(3).all()
+    for co in courses:
+        results.append(
+            SearchResultItem(
+                id=f"course-{co.id}",
+                type="course",
+                title=co.name,
+                subtitle=co.description or "No description"
+            )
+        )
+
+    return SearchResponse(results=results)

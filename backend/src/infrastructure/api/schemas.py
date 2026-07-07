@@ -245,4 +245,14 @@ class FileChangeASTResponse(BaseModel):
     filename: str
     language: str
     ast: Optional[ASTNodeResponse] = None
+
+class SearchResultItem(BaseModel):
+    id: str
+    type: str  # "project", "student", "commit", "course"
+    title: str
+    subtitle: str
+    project_id: Optional[int] = None
+
+class SearchResponse(BaseModel):
+    results: List[SearchResultItem]
     error: Optional[str] = None
