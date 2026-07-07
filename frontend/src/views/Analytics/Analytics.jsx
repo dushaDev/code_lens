@@ -110,7 +110,7 @@ export default function Analytics({ project, onBack }) {
   return (
     <div className="analytics-view">
       {/* Switcher Tab Row */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '24px', position: 'relative', minHeight: '40px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px', position: 'relative', minHeight: '40px' }}>
         {/* Left Side: Back Button */}
         <button 
           type="button"
@@ -163,8 +163,8 @@ export default function Analytics({ project, onBack }) {
         </div>
       </div>
 
-      <div className="analytics-header" style={{ borderBottom: '1px solid var(--border-color)', paddingBottom: '20px', marginBottom: '24px' }}>
-          <h1 style={{ display: 'flex', alignItems: 'center', gap: '8px', margin: '0 0 8px 0', textAlign: 'left' }}>
+      <div className="analytics-header" style={{ borderBottom: '1px solid var(--border-color)', paddingBottom: '10px', marginBottom: '14px' }}>
+          <h1 style={{ display: 'flex', alignItems: 'center', gap: '8px', margin: 0, textAlign: 'left', flexWrap: 'wrap' }}>
             <span className="group-tag" style={{
               backgroundColor: 'var(--bg-app)',
               border: '1px solid var(--border-color)',
@@ -177,8 +177,9 @@ export default function Analytics({ project, onBack }) {
               textTransform: 'uppercase'
             }}>{project.group_no || project.groupNo || 'G-00'}</span>
             <span>{project.name}</span>
+            <span style={{ width: '1px', height: '18px', backgroundColor: 'var(--border-color)', display: 'inline-block', margin: '0 4px', alignSelf: 'center' }} />
+            <span style={{ fontSize: '0.82rem', fontWeight: '400', color: 'var(--text-muted)', letterSpacing: 'normal' }}>Repository metadata, contribution inequality, and git log history metrics.</span>
           </h1>
-          <p className="subtitle" style={{ margin: 0, textAlign: 'left' }}>Repository metadata, contribution inequality, and git log history metrics.</p>
       </div>
 
       {analytics && activeTab === 'quantitative' && (
@@ -551,8 +552,8 @@ export default function Analytics({ project, onBack }) {
                 className="modal-content card" 
                 onClick={(e) => e.stopPropagation()} 
                 style={{ 
-                  maxWidth: '850px', 
-                  width: '90%', 
+                  maxWidth: '1100px', 
+                  width: '95%', 
                   maxHeight: '85vh', 
                   display: 'flex', 
                   flexDirection: 'column',

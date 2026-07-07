@@ -96,7 +96,7 @@
 
 .progress-track {
   flex: 1;
-  height: 8px;
+  height: 5px;
   background-color: var(--bg-hover);
   border-radius: 4px;
   overflow: hidden;
