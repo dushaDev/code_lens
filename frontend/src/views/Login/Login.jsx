@@ -65,8 +65,8 @@ export default function Login({ onLoginSuccess }) {
     <div className="login-page">
       <div className="login-card">
         <div className="login-header">
-          <div className="logo-badge">
-            <ShieldCheck size={28} />
+          <div className="logo-badge" style={{ backgroundColor: 'transparent', boxShadow: 'none' }}>
+            <img src="/code_lens_logo.svg" alt="Code Lens Logo" style={{ width: '48px', height: '48px', objectFit: 'contain' }} />
           </div>
           <h1>{isRegister ? 'Create Account' : 'Welcome Back'}</h1>
           <p className="subtitle">

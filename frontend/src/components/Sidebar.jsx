@@ -31,7 +31,7 @@ export default function Sidebar({
     <aside className="app-sidebar">
       <div className="sidebar-header">
         <div className="sidebar-logo">
-          <span className="logo-icon">C</span>
+          <img src="/code_lens_logo.svg" className="logo-icon-img" alt="Code Lens Logo" style={{ width: '36px', height: '36px', objectFit: 'contain' }} />
           <div className="logo-text">
             <h2>Code Lens</h2>
             <p>Academic Git Analyzer</p>
