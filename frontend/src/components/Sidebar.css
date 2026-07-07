@@ -48,10 +48,10 @@
 
 /* Selected Course Area */
 .sidebar-course-card {
-  background-color: #fafbfc;
-  border: 1px solid var(--border-color);
+  background-color: var(--primary-alpha);
+  border: 1.5px solid hsl(var(--primary-hue), var(--primary-sat), 80%);
   border-radius: var(--radius-md);
-  padding: 12px;
+  padding: 14px 12px;
   margin-bottom: 24px;
   display: flex;
   flex-direction: column;
@@ -71,11 +71,12 @@
 }
 
 .course-name {
-  font-size: 0.85rem;
-  font-weight: 500;
+  font-size: 0.9rem;
+  font-weight: 700;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  color: var(--primary);
 }
 
 .sidebar-create-btn {
@@ -163,8 +164,20 @@
   gap: 4px;
 }
 
-.logout-btn:hover,
-.close-course-btn:hover {
+.logout-btn:hover {
   background-color: var(--color-danger-bg);
   color: var(--color-danger);
+}
+
+.close-course-btn {
+  background-color: var(--color-danger-bg) !important;
+  color: var(--color-danger) !important;
+  border: 1px solid hsl(0, 100%, 92%) !important;
+  margin-bottom: 4px;
+}
+
+.close-course-btn:hover {
+  background-color: var(--color-danger) !important;
+  color: var(--text-white) !important;
+  border-color: var(--color-danger) !important;
 }

@@ -91,7 +91,7 @@ export default function CreateProjectModal({
         <div className="modal-header">
           <div className="modal-title-box">
             <FolderGit2 size={20} className="blue-text" />
-            <h2>Import Git Project</h2>
+            <h2>Create Git Project</h2>
           </div>
           <button className="close-btn" onClick={onClose} disabled={loading}>
             <X size={18} />
@@ -103,7 +103,7 @@ export default function CreateProjectModal({
         {loading ? (
           <div className="modal-loader-box">
             <RefreshCw size={36} className="loader-spin icon-spin" />
-            <h3>Importing Project</h3>
+            <h3>Creating Project</h3>
             <p className="pulse">{progressMsg}</p>
             <div className="loader-tip">
               <Info size={14} />
@@ -165,7 +165,7 @@ export default function CreateProjectModal({
                 Cancel
               </button>
               <button type="submit" className="btn btn-primary">
-                Import and Parse
+                Create and Parse
               </button>
             </div>
           </form>
