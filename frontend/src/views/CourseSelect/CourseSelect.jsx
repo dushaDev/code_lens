@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { LogOut, Plus, GraduationCap, Trash2, Database, AlertOctagon, X } from 'lucide-react';
+import { LogOut, Plus, GraduationCap, Trash2, Database, AlertTriangle, X } from 'lucide-react';
 import './CourseSelect.css';
 
 export default function CourseSelect({ user, onSelectCourse, onLogout }) {
@@ -263,7 +263,7 @@ export default function CourseSelect({ user, onSelectCourse, onLogout }) {
           <div className="modal-card card danger-border">
             <div className="modal-header">
               <div className="modal-title-box">
-                <AlertOctagon size={20} className="red-text" />
+                <AlertTriangle size={20} className="red-text" />
                 <h2>Full System Reset</h2>
               </div>
               <button className="close-btn" onClick={() => { setShowWipeModal(false); setWipePassword(''); }} disabled={wipeLoading}>

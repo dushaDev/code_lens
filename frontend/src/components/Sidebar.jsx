@@ -3,7 +3,7 @@ import {
   LayoutDashboard, 
   FolderGit2, 
   Users, 
-  AlertOctagon, 
+  AlertTriangle, 
   Settings, 
   LogOut, 
   GraduationCap, 
@@ -23,7 +23,7 @@ export default function Sidebar({
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
     { id: 'projects', label: 'Projects', icon: FolderGit2 },
     { id: 'students', label: 'Students', icon: Users },
-    { id: 'plagiarism', label: 'Plagiarism Alerts', icon: AlertOctagon },
+    { id: 'plagiarism', label: 'Plagiarism Alerts', icon: AlertTriangle },
     { id: 'settings', label: 'Settings', icon: Settings },
   ];
 
