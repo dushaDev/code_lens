@@ -10,7 +10,7 @@ from src.infrastructure.auth.dependencies import get_current_user
 from src.infrastructure.auth.user_repository import UserRepository
 from src.infrastructure.auth.hashing import verify_password
 from src.infrastructure.auth.jwt import create_access_token
-from src.infrastructure.database.models import UserModel
+from src.infrastructure.database.models import UserModel, CourseModel, ProjectModel, AuthorModel, CommitModel
 from src.infrastructure.api.schemas import (
     ProjectCreateRequest, ProjectCreateResponse, ExtractResponse, ErrorResponse,
     CommitResponse, AuthorFullProfileResponse, ProjectResponse, FileChangeResponse, CommitWithProjectAndFilesResponse,
