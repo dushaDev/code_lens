@@ -391,9 +391,21 @@ export default function Analytics({ project, onBack }) {
 
   return (
     <div className="analytics-view">
-      {/* Switcher Tab */}
-      <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '24px' }}>
-        <div style={{ display: 'flex', gap: '4px', backgroundColor: 'var(--bg-app)', padding: '4px', borderRadius: '30px', border: '1px solid var(--border-color)', boxShadow: 'var(--shadow-sm)' }}>
+      {/* Switcher Tab Row */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '24px', position: 'relative', minHeight: '40px' }}>
+        {/* Left Side: Back Button */}
+        <button 
+          type="button"
+          className="btn btn-secondary back-btn" 
+          onClick={onBack}
+          style={{ margin: 0, zIndex: 10, display: 'flex', alignItems: 'center', gap: '8px' }}
+        >
+          <ArrowLeft size={16} />
+          <span>Back to Projects</span>
+        </button>
+
+        {/* Center: Switcher Pill */}
+        <div style={{ position: 'absolute', left: '50%', transform: 'translateX(-50%)', display: 'flex', gap: '4px', backgroundColor: 'var(--bg-app)', padding: '4px', borderRadius: '30px', border: '1px solid var(--border-color)', boxShadow: 'var(--shadow-sm)', zIndex: 5 }}>
           <button
             type="button"
             onClick={() => setActiveTab('quantitative')}
@@ -433,12 +445,8 @@ export default function Analytics({ project, onBack }) {
         </div>
       </div>
 
-      <div className="analytics-header">
-        <button className="btn btn-secondary back-btn" onClick={onBack}>
-          <ArrowLeft size={16} />
-          <span>Back to Projects</span>
-        </button>
-          <h1 style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+      <div className="analytics-header" style={{ borderBottom: '1px solid var(--border-color)', paddingBottom: '20px', marginBottom: '24px' }}>
+          <h1 style={{ display: 'flex', alignItems: 'center', gap: '8px', margin: '0 0 8px 0', textAlign: 'left' }}>
             <span className="group-tag" style={{
               backgroundColor: 'var(--bg-app)',
               border: '1px solid var(--border-color)',
@@ -452,7 +460,7 @@ export default function Analytics({ project, onBack }) {
             }}>{project.group_no || project.groupNo || 'G-00'}</span>
             <span>{project.name}</span>
           </h1>
-          <p className="subtitle">Repository metadata, contribution inequality, and git log history metrics.</p>
+          <p className="subtitle" style={{ margin: 0, textAlign: 'left' }}>Repository metadata, contribution inequality, and git log history metrics.</p>
       </div>
 
       {analytics && activeTab === 'quantitative' && (
