@@ -462,10 +462,10 @@ export default function Analytics({ project, onBack }) {
           </div>
 
           {/* Visualizations Section */}
-          <div className="analytics-visualization-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: '20px' }}>
+          <div className="analytics-visualization-grid" style={{ display: 'flex', flexWrap: 'wrap', gap: '24px' }}>
             
             {/* Language Distribution Card */}
-            <div className="card" style={{ padding: '24px', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+            <div className="card" style={{ padding: '24px', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', flex: '1 1 320px', maxWidth: '420px' }}>
               <div>
                 <h3 style={{ fontSize: '1rem', fontWeight: '600', color: 'var(--text-main)', marginBottom: '16px', textAlign: 'left' }}>Codebase Languages</h3>
                 
@@ -506,7 +506,7 @@ export default function Analytics({ project, onBack }) {
             </div>
 
             {/* Commit History Chart Card */}
-            <div className="card" style={{ padding: '24px' }}>
+            <div className="card" style={{ padding: '24px', flex: '2 1 500px' }}>
               <h3 style={{ fontSize: '1rem', fontWeight: '600', color: 'var(--text-main)', marginBottom: '16px', textAlign: 'left' }}>Commit Activity History</h3>
               {renderCommitChart()}
             </div>
