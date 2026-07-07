@@ -181,8 +181,8 @@ export default function Students({
           <table className="custom-table">
             <thead>
               <tr>
-                <th>Student Details</th>
-                <th>Primary Email</th>
+                <th>Name/Username</th>
+                <th>Email</th>
                 <th>Commits</th>
                 <th>Impact Lines</th>
                 <th>Actions</th>
