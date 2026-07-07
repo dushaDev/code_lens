@@ -85,7 +85,7 @@ export default function Dashboard({
     <div className="dashboard-view">
       <div className="dashboard-greeting">
         <h1>{getGreeting()}, {user?.username || 'Professor'}</h1>
-        <p className="subtitle">Today is {getFormattedDate()}. Here is the latest overview of your academic analysis metrics.</p>
+        <p className="subtitle"><strong>Today is {getFormattedDate()}.</strong> Here is the latest overview of your academic analysis metrics.</p>
       </div>
 
       {/* Stat Cards Grid */}
