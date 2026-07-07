@@ -37,14 +37,16 @@
   align-items: start;
 }
 
-/* Tooltip styling for Gini Coefficient card */
-.gini-tooltip-trigger {
+/* Card Tooltip hover hint styling */
+.card-tooltip-trigger {
   position: relative;
+  display: inline-flex;
+  align-items: center;
 }
 
-.gini-tooltip-content {
+.card-tooltip-content {
   visibility: hidden;
-  width: 300px;
+  width: 280px;
   background-color: var(--bg-card);
   color: var(--text-main);
   border: 1px solid var(--border-color);
@@ -63,7 +65,7 @@
   pointer-events: none;
 }
 
-.gini-tooltip-trigger:hover .gini-tooltip-content {
+.card-tooltip-trigger:hover .card-tooltip-content {
   visibility: visible;
   opacity: 1;
   transform: translateY(0);

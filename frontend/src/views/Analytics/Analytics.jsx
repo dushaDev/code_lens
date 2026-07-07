@@ -8,8 +8,10 @@ import {
   BarChart4, 
   User,
   Info,
-  MessageSquare
+  MessageSquare,
+  Bot
 } from 'lucide-react';
+import Tag from '../../components/Tag';
 import './Analytics.css';
 
 export default function Analytics({ project, onBack }) {
@@ -21,6 +23,13 @@ export default function Analytics({ project, onBack }) {
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [activeTab, setActiveTab] = useState('quantitative');
+
+  const isBot = (name, email) => {
+    const nameLower = name.toLowerCase();
+    const emailLower = email.toLowerCase();
+    const botKeywords = ['bot', 'actions', 'workflow', 'ci', 'support', 'helper', 'automated', 'npm-owner', 'greenkeeper', 'snyk'];
+    return botKeywords.some(keyword => nameLower.includes(keyword) || emailLower.includes(keyword));
+  };
 
   useEffect(() => {
     const fetchAnalytics = async () => {
@@ -456,14 +465,12 @@ export default function Analytics({ project, onBack }) {
                   </div>
                   <span className="stat-label">Gini Coefficient (Inequality)</span>
                 </div>
-                <div className="gini-tooltip-trigger" style={{ cursor: 'pointer', color: 'var(--text-light)' }}>
+                <div className="card-tooltip-trigger" style={{ cursor: 'pointer', color: 'var(--text-light)' }}>
                   <Info size={16} />
-                  <div className="gini-tooltip-content">
-                    <strong style={{ display: 'block', fontSize: '0.85rem', marginBottom: '4px' }}>Gini Coefficient Explanation</strong>
+                  <div className="card-tooltip-content">
+                    <strong style={{ display: 'block', fontSize: '0.85rem', marginBottom: '4px' }}>Gini Coefficient</strong>
                     <p style={{ margin: 0, lineHeight: '1.4', fontWeight: 'normal', color: 'var(--text-muted)' }}>
-                      A Gini coefficient near <strong>0.0</strong> indicates perfectly equal contribution (all members contributed equally).
-                      A Gini coefficient near <strong>1.0</strong> indicates completely unequal contribution (one student did all the work).
-                      A coefficient above <strong>0.6</strong> usually indicates that other group members are sliding by without significant coding contribution.
+                      Measures workload division: <strong>0.0</strong> is perfectly equal, <strong>1.0</strong> is single-member dominant. A value above <strong>0.6</strong> indicates others may not be contributing significantly.
                     </p>
                   </div>
                 </div>
@@ -477,11 +484,22 @@ export default function Analytics({ project, onBack }) {
             </div>
 
             <div className="stat-card card">
-              <div className="stat-card-header">
-                <div className="stat-icon-wrapper purple-icon">
-                  <GitCommit size={22} />
+              <div className="stat-card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                  <div className="stat-icon-wrapper purple-icon">
+                    <GitCommit size={22} />
+                  </div>
+                  <span className="stat-label">Total Commits Analyzed</span>
                 </div>
-                <span className="stat-label">Total Commits Analyzed</span>
+                <div className="card-tooltip-trigger" style={{ cursor: 'pointer', color: 'var(--text-light)' }}>
+                  <Info size={16} />
+                  <div className="card-tooltip-content">
+                    <strong style={{ display: 'block', fontSize: '0.85rem', marginBottom: '4px' }}>Total Commits</strong>
+                    <p style={{ margin: 0, lineHeight: '1.4', fontWeight: 'normal', color: 'var(--text-muted)' }}>
+                      The total number of commits extracted and parsed from the repository across all active git branches.
+                    </p>
+                  </div>
+                </div>
               </div>
               <div className="stat-card-body">
                 <h2 className="stat-value">{analytics.total_commits}</h2>
@@ -490,11 +508,22 @@ export default function Analytics({ project, onBack }) {
             </div>
 
             <div className="stat-card card">
-              <div className="stat-card-header">
-                <div className="stat-icon-wrapper red-icon">
-                  <Percent size={22} />
+              <div className="stat-card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                  <div className="stat-icon-wrapper red-icon">
+                    <Percent size={22} />
+                  </div>
+                  <span className="stat-label">Total Insertions</span>
                 </div>
-                <span className="stat-label">Total Insertions</span>
+                <div className="card-tooltip-trigger" style={{ cursor: 'pointer', color: 'var(--text-light)' }}>
+                  <Info size={16} />
+                  <div className="card-tooltip-content">
+                    <strong style={{ display: 'block', fontSize: '0.85rem', marginBottom: '4px' }}>Total Insertions</strong>
+                    <p style={{ margin: 0, lineHeight: '1.4', fontWeight: 'normal', color: 'var(--text-muted)' }}>
+                      The cumulative number of lines of source code added across all commits. This measures the overall volume of work.
+                    </p>
+                  </div>
+                </div>
               </div>
               <div className="stat-card-body">
                 <h2 className="stat-value">{analytics.total_insertions}</h2>
@@ -509,7 +538,18 @@ export default function Analytics({ project, onBack }) {
             {/* Language Distribution Card */}
             <div className="card" style={{ padding: '24px', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', flex: '1 1 320px', maxWidth: '420px' }}>
               <div>
-                <h3 style={{ fontSize: '1rem', fontWeight: '600', color: 'var(--text-main)', marginBottom: '16px', textAlign: 'left' }}>Codebase Languages</h3>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                  <h3 style={{ fontSize: '1rem', fontWeight: '600', color: 'var(--text-main)', margin: 0, textAlign: 'left' }}>Codebase Languages</h3>
+                  <div className="card-tooltip-trigger" style={{ cursor: 'pointer', color: 'var(--text-light)' }}>
+                    <Info size={16} />
+                    <div className="card-tooltip-content">
+                      <strong style={{ display: 'block', fontSize: '0.85rem', marginBottom: '4px' }}>Codebase Languages</strong>
+                      <p style={{ margin: 0, lineHeight: '1.4', fontWeight: 'normal', color: 'var(--text-muted)' }}>
+                        The percentage distribution of different programming languages in the project, calculated based on the total lines of code added.
+                      </p>
+                    </div>
+                  </div>
+                </div>
                 
                 {/* Segmented language distribution bar */}
                 <div style={{ display: 'flex', height: '12px', width: '100%', borderRadius: '6px', overflow: 'hidden', backgroundColor: 'var(--bg-app)', marginBottom: '20px' }}>
@@ -549,7 +589,18 @@ export default function Analytics({ project, onBack }) {
 
             {/* Commit History Chart Card */}
             <div className="card" style={{ padding: '24px', flex: '2 1 500px' }}>
-              <h3 style={{ fontSize: '1rem', fontWeight: '600', color: 'var(--text-main)', marginBottom: '16px', textAlign: 'left' }}>Commit Activity History</h3>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                <h3 style={{ fontSize: '1rem', fontWeight: '600', color: 'var(--text-main)', margin: 0, textAlign: 'left' }}>Commit Activity History</h3>
+                <div className="card-tooltip-trigger" style={{ cursor: 'pointer', color: 'var(--text-light)' }}>
+                  <Info size={16} />
+                  <div className="card-tooltip-content">
+                    <strong style={{ display: 'block', fontSize: '0.85rem', marginBottom: '4px' }}>Commit Activity History</strong>
+                    <p style={{ margin: 0, lineHeight: '1.4', fontWeight: 'normal', color: 'var(--text-muted)' }}>
+                      A historical timeline of commit logs grouped by daily, weekly, or monthly intervals, showing git activity over the selected range.
+                    </p>
+                  </div>
+                </div>
+              </div>
               {renderCommitChart()}
             </div>
           </div>
@@ -574,10 +625,13 @@ export default function Analytics({ project, onBack }) {
                   {analytics.contributions?.map((contrib) => (
                     <tr key={contrib.author_id}>
                       <td className="student-info-cell">
-                        <div className="student-avatar">
-                          {contrib.name.slice(0, 2).toUpperCase()}
+                        <div className={`student-avatar ${isBot(contrib.name, contrib.email) ? 'avatar-bot' : ''}`}>
+                          {isBot(contrib.name, contrib.email) ? <Bot size={16} /> : contrib.name.slice(0, 2).toUpperCase()}
                         </div>
-                        <span className="student-name">{contrib.name}</span>
+                        <span className="student-name" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          {contrib.name}
+                          {isBot(contrib.name, contrib.email) && <Tag text="Bot" variant="danger" style={{ fontSize: '9px', padding: '1.5px 4px' }} />}
+                        </span>
                       </td>
                       <td className="muted-cell">{contrib.email}</td>
                       <td className="bold-cell">{contrib.commit_count}</td>
