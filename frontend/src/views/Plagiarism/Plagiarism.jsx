@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { AlertTriangle, HelpCircle, User, CheckCircle2, XCircle } from 'lucide-react';
+import { AlertTriangle, AlertOctagon, HelpCircle, User, CheckCircle2, XCircle } from 'lucide-react';
 import './Plagiarism.css';
 
 export default function Plagiarism({ alerts, onResolveAlert }) {
@@ -12,11 +12,12 @@ export default function Plagiarism({ alerts, onResolveAlert }) {
 
   return (
     <div className="plagiarism-view">
-      <div className="view-header">
-        <div>
-          <h1>Plagiarism Alerts</h1>
-          <p className="subtitle">Cross-repository code similarity flags and duplication detection logs.</p>
-        </div>
+      <div className="view-header" style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: '14px', borderBottom: '1px solid var(--border-color)', paddingBottom: '16px', marginBottom: '8px' }}>
+        <h1 style={{ display: 'flex', alignItems: 'center', gap: '8px', margin: 0, textAlign: 'left', flexWrap: 'wrap' }}>
+          <span>Plagiarism Alerts</span>
+          <span style={{ width: '1px', height: '18px', backgroundColor: 'var(--border-color)', display: 'inline-block', margin: '0 4px', alignSelf: 'center' }} />
+          <span style={{ fontSize: '0.82rem', fontWeight: '400', color: 'var(--text-muted)', letterSpacing: 'normal' }}>Cross-repository code similarity flags and duplication detection logs.</span>
+        </h1>
       </div>
 
       {/* Main warning card */}
