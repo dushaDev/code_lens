@@ -684,7 +684,7 @@ def get_commit_by_hash(
         git_url=proj.git_url,
         local_saved_path=proj.local_saved_path,
         group_no=proj.group_no,
-        tech_stack=proj.tech_stack or [],
+        tech_stack=[],
         created_at=proj.created_at,
         course_id=proj.course_id
     ) if proj else None
