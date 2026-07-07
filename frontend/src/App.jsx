@@ -28,6 +28,22 @@ export default function App() {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [authLoading, setAuthLoading] = useState(true);
 
+  // Global 401 interceptor to redirect to login on unauthorized access
+  useEffect(() => {
+    const originalFetch = window.fetch;
+    window.fetch = async (...args) => {
+      const response = await originalFetch(...args);
+      if (response.status === 401) {
+        localStorage.removeItem('token');
+        setUser(null);
+      }
+      return response;
+    };
+    return () => {
+      window.fetch = originalFetch;
+    };
+  }, []);
+
   // 1. Initial auth check
   useEffect(() => {
     const checkAuth = async () => {
