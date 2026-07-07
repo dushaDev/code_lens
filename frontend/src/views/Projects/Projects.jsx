@@ -94,7 +94,7 @@ export default function Projects({
           <Search size={18} />
           <input 
             type="text" 
-            placeholder="Search projects by name..."
+            placeholder="Search projects by Group Id, Name..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
