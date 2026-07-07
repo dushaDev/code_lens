@@ -391,6 +391,48 @@ export default function Analytics({ project, onBack }) {
 
   return (
     <div className="analytics-view">
+      {/* Switcher Tab */}
+      <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '24px' }}>
+        <div style={{ display: 'flex', gap: '4px', backgroundColor: 'var(--bg-app)', padding: '4px', borderRadius: '30px', border: '1px solid var(--border-color)', boxShadow: 'var(--shadow-sm)' }}>
+          <button
+            type="button"
+            onClick={() => setActiveTab('quantitative')}
+            style={{
+              padding: '8px 24px',
+              background: activeTab === 'quantitative' ? 'var(--bg-card)' : 'transparent',
+              border: 'none',
+              borderRadius: '20px',
+              color: activeTab === 'quantitative' ? 'var(--primary)' : 'var(--text-muted)',
+              fontWeight: activeTab === 'quantitative' ? '600' : '500',
+              fontSize: '0.9rem',
+              cursor: 'pointer',
+              transition: 'all 0.2s ease',
+              boxShadow: activeTab === 'quantitative' ? 'var(--shadow-sm)' : 'none'
+            }}
+          >
+            Quantitative Analysis
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab('qualitative')}
+            style={{
+              padding: '8px 24px',
+              background: activeTab === 'qualitative' ? 'var(--bg-card)' : 'transparent',
+              border: 'none',
+              borderRadius: '20px',
+              color: activeTab === 'qualitative' ? 'var(--primary)' : 'var(--text-muted)',
+              fontWeight: activeTab === 'qualitative' ? '600' : '500',
+              fontSize: '0.9rem',
+              cursor: 'pointer',
+              transition: 'all 0.2s ease',
+              boxShadow: activeTab === 'qualitative' ? 'var(--shadow-sm)' : 'none'
+            }}
+          >
+            Qualitative Analysis
+          </button>
+        </div>
+      </div>
+
       <div className="analytics-header">
         <button className="btn btn-secondary back-btn" onClick={onBack}>
           <ArrowLeft size={16} />
@@ -411,46 +453,6 @@ export default function Analytics({ project, onBack }) {
             <span>{project.name}</span>
           </h1>
           <p className="subtitle">Repository metadata, contribution inequality, and git log history metrics.</p>
-      </div>
-
-      {/* Switcher Tab */}
-      <div style={{ display: 'flex', borderBottom: '1px solid var(--border-color)', marginBottom: '8px' }}>
-        <button
-          type="button"
-          onClick={() => setActiveTab('quantitative')}
-          style={{
-            padding: '12px 24px',
-            background: 'transparent',
-            border: 'none',
-            borderBottom: activeTab === 'quantitative' ? '2.5px solid var(--primary)' : '2.5px solid transparent',
-            color: activeTab === 'quantitative' ? 'var(--primary)' : 'var(--text-muted)',
-            fontWeight: activeTab === 'quantitative' ? '600' : '500',
-            fontSize: '0.95rem',
-            cursor: 'pointer',
-            transition: 'all 0.2s ease',
-            marginBottom: '-1px'
-          }}
-        >
-          Quantitative Analysis
-        </button>
-        <button
-          type="button"
-          onClick={() => setActiveTab('qualitative')}
-          style={{
-            padding: '12px 24px',
-            background: 'transparent',
-            border: 'none',
-            borderBottom: activeTab === 'qualitative' ? '2.5px solid var(--primary)' : '2.5px solid transparent',
-            color: activeTab === 'qualitative' ? 'var(--primary)' : 'var(--text-muted)',
-            fontWeight: activeTab === 'qualitative' ? '600' : '500',
-            fontSize: '0.95rem',
-            cursor: 'pointer',
-            transition: 'all 0.2s ease',
-            marginBottom: '-1px'
-          }}
-        >
-          Qualitative Analysis
-        </button>
       </div>
 
       {analytics && activeTab === 'quantitative' && (
