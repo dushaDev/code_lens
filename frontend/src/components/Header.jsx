@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Search, Bell, HelpCircle, User, LogOut, ChevronDown } from 'lucide-react';
+import Tag from './Tag';
 import './Header.css';
 
 export default function Header({ 
@@ -103,7 +104,14 @@ export default function Header({
                     className="search-item" 
                     onClick={() => handleItemClick(item)}
                   >
-                    <span className={`search-badge-tag tag-${item.type}`}>{item.type}</span>
+                    <Tag 
+                      text={item.type} 
+                      variant={
+                        item.type === 'project' ? 'primary' : 
+                        item.type === 'student' ? 'success' : 
+                        item.type === 'commit' ? 'warning' : 'info'
+                      } 
+                    />
                     <div className="search-item-info">
                       <p className="search-item-title">{item.title}</p>
                       <p className="search-item-subtitle">{item.subtitle}</p>

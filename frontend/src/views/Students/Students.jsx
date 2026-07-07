@@ -10,6 +10,7 @@ import {
   X, 
   ArrowUpDown 
 } from 'lucide-react';
+import Tag from '../../components/Tag';
 import './Students.css';
 
 export default function Students({ 
@@ -199,7 +200,7 @@ export default function Students({
                         <div>
                           <div className="student-name-row">
                             <span className="student-name">{student.name}</span>
-                            {studentIsBot && <span className="bot-tag">BOT</span>}
+                            {studentIsBot && <Tag text="BOT" variant="danger" style={{ fontSize: '9px', padding: '1.5px 4px' }} />}
                           </div>
                           <span className="student-id">ID: {student.studentId || `CS-${1000 + student.id}`}</span>
                         </div>
@@ -212,9 +213,7 @@ export default function Students({
                       <span className="deletions-text">-{Math.round(student.deletions)}</span>
                     </td>
                     <td>
-                      <span className={`badge ${studentIsBot ? 'badge-danger' : 'badge-success'}`}>
-                        {studentIsBot ? 'Bot' : 'Student'}
-                      </span>
+                      <Tag text={studentIsBot ? 'Bot' : 'Student'} variant={studentIsBot ? 'danger' : 'success'} />
                     </td>
                     <td>
                       {mergingSourceId === student.id ? (

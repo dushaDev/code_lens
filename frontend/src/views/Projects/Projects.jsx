@@ -9,6 +9,7 @@ import {
   Trash2 
 } from 'lucide-react';
 import { getTechDetails } from '../../utils/techIcons';
+import Tag from '../../components/Tag';
 import './Projects.css';
 
 export default function Projects({ 
@@ -148,17 +149,7 @@ export default function Projects({
                     <td>
                       <div className="project-name-cell-content" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                         <FolderGit2 size={16} className="project-icon" />
-                        <span className="group-tag" style={{
-                          backgroundColor: 'var(--bg-app)',
-                          border: '1px solid var(--border-color)',
-                          color: 'var(--text-muted)',
-                          padding: '2px 6px',
-                          borderRadius: '4px',
-                          fontSize: '0.75rem',
-                          fontWeight: '700',
-                          letterSpacing: '0.02em',
-                          textTransform: 'uppercase'
-                        }}>{project.group_no || project.groupNo || 'G-00'}</span>
+                        <Tag text={project.group_no || project.groupNo || 'G-00'} variant="muted" style={{ fontSize: '0.75rem', padding: '2px 6px' }} />
                         <span className="project-title">{project.name}</span>
                       </div>
                     </td>
@@ -180,11 +171,7 @@ export default function Projects({
                       )}
                     </td>
                     <td>
-                      {isHighRisk ? (
-                        <span className="badge badge-danger">High Risk</span>
-                      ) : (
-                        <span className="badge badge-success">Good</span>
-                      )}
+                      <Tag text={isHighRisk ? 'High Risk' : 'Good'} variant={isHighRisk ? 'danger' : 'success'} />
                     </td>
                     <td>
                       <div className="actions-cell">
