@@ -3,10 +3,10 @@ import {
   LayoutDashboard, 
   FolderGit2, 
   Users, 
-  ShieldAlert, 
+  AlertOctagon, 
   Settings, 
   LogOut, 
-  BookOpen, 
+  GraduationCap, 
   PlusCircle 
 } from 'lucide-react';
 import './Sidebar.css';
@@ -23,7 +23,7 @@ export default function Sidebar({
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
     { id: 'projects', label: 'Projects', icon: FolderGit2 },
     { id: 'students', label: 'Students', icon: Users },
-    { id: 'plagiarism', label: 'Plagiarism Alerts', icon: ShieldAlert },
+    { id: 'plagiarism', label: 'Plagiarism Alerts', icon: AlertOctagon },
     { id: 'settings', label: 'Settings', icon: Settings },
   ];
 
@@ -31,18 +31,14 @@ export default function Sidebar({
     <aside className="app-sidebar">
       <div className="sidebar-header">
         <div className="sidebar-logo">
-          <img src="/code_lens_logo.svg" className="logo-icon-img" alt="Code Lens Logo" style={{ width: '36px', height: '36px', objectFit: 'contain' }} />
-          <div className="logo-text">
-            <h2>Code Lens</h2>
-            <p>Academic Git Analyzer</p>
-          </div>
+          <img src="/code_lens_logo.svg" className="logo-icon-img" alt="Code Lens Logo" style={{ width: '86px', height: '46px', objectFit: 'contain' }} />
         </div>
       </div>
 
       {currentCourse && (
         <div className="sidebar-course-card">
           <div className="course-info">
-            <BookOpen size={16} className="course-icon" />
+            <GraduationCap size={16} className="course-icon" />
             <span className="course-name" title={currentCourse.name}>
               {currentCourse.name}
             </span>
@@ -77,7 +73,7 @@ export default function Sidebar({
       <div className="sidebar-footer">
         {currentCourse ? (
           <button className="nav-link close-course-btn" onClick={onCloseCourse}>
-            <BookOpen size={18} />
+            <GraduationCap size={18} />
             <span>Close Course</span>
           </button>
         ) : (

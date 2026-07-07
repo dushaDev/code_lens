@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { LogOut, Plus, BookOpen, Trash2, Database, ShieldAlert, X } from 'lucide-react';
+import { LogOut, Plus, GraduationCap, Trash2, Database, AlertOctagon, X } from 'lucide-react';
 import './CourseSelect.css';
 
 export default function CourseSelect({ user, onSelectCourse, onLogout }) {
@@ -223,7 +223,7 @@ export default function CourseSelect({ user, onSelectCourse, onLogout }) {
                 >
                   <div className="course-card-header">
                     <div className="course-card-icon">
-                      <BookOpen size={20} />
+                      <GraduationCap size={20} />
                     </div>
                     <button 
                       className="delete-course-btn" 
@@ -243,7 +243,7 @@ export default function CourseSelect({ user, onSelectCourse, onLogout }) {
 
               {courses.length === 0 && (
                 <div className="empty-courses card">
-                  <BookOpen size={48} className="empty-icon" />
+                  <GraduationCap size={48} className="empty-icon" />
                   <h3>No Courses Yet</h3>
                   <p>Create your first course to begin importing git repositories.</p>
                   <button className="btn btn-primary" onClick={() => setShowAddForm(true)}>
@@ -263,7 +263,7 @@ export default function CourseSelect({ user, onSelectCourse, onLogout }) {
           <div className="modal-card card danger-border">
             <div className="modal-header">
               <div className="modal-title-box">
-                <ShieldAlert size={20} className="red-text" />
+                <AlertOctagon size={20} className="red-text" />
                 <h2>Full System Reset</h2>
               </div>
               <button className="close-btn" onClick={() => { setShowWipeModal(false); setWipePassword(''); }} disabled={wipeLoading}>

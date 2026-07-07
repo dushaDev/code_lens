@@ -65,12 +65,12 @@ export default function Login({ onLoginSuccess }) {
     <div className="login-page">
       <div className="login-card">
         <div className="login-header">
-          <img src="/code_lens_logo.svg" alt="Code Lens Logo" style={{ width: '72px', height: '72px', objectFit: 'contain', marginBottom: '16px' }} />
+          <img src="/code_lens_logo.svg" alt="Code Lens Logo" style={{ width: '92px', height: '72px', objectFit: 'contain', marginBottom: '8px' }} />
           <h1>{isRegister ? 'Create Account' : 'Welcome Back'}</h1>
           <p className="subtitle">
             {isRegister 
               ? 'Join Code Lens Git Analyzer' 
-              : 'Sign in to access your dashboard'}
+              : 'Sign in to access your projects '}
           </p>
         </div>
 

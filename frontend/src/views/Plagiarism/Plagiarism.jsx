@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ShieldAlert, AlertOctagon, HelpCircle, User, CheckCircle2, XCircle } from 'lucide-react';
+import { AlertOctagon, HelpCircle, User, CheckCircle2, XCircle } from 'lucide-react';
 import './Plagiarism.css';
 
 export default function Plagiarism({ alerts, onResolveAlert }) {
@@ -21,7 +21,7 @@ export default function Plagiarism({ alerts, onResolveAlert }) {
 
       {/* Main warning card */}
       <div className="plagiarism-banner card">
-        <ShieldAlert size={28} className="banner-icon" />
+        <AlertOctagon size={28} className="banner-icon" />
         <div className="banner-text">
           <h3>Plagiarism Detection Engine Active</h3>
           <p>
