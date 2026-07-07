@@ -185,6 +185,7 @@ class AuthorContributionResponse(BaseModel):
     email: str
     commit_count: int
     lines_added: int
+    lines_removed: int = 0
     contribution_percentage: float
 
 class ProjectAnalyticsResponse(BaseModel):

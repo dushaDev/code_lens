@@ -627,7 +627,8 @@ export default function Analytics({ project, onBack }) {
                     <th>Contributor</th>
                     <th>Email Address</th>
                     <th>Commits</th>
-                    <th>Lines Contributed</th>
+                    <th>Lines Added</th>
+                    <th>Lines Removed (Refactoring)</th>
                     <th>Overall Share</th>
                   </tr>
                 </thead>
@@ -643,6 +644,7 @@ export default function Analytics({ project, onBack }) {
                       <td className="muted-cell">{contrib.email}</td>
                       <td className="bold-cell">{contrib.commit_count}</td>
                       <td className="bold-cell text-success">+{contrib.lines_added}</td>
+                      <td className="bold-cell text-danger">-{contrib.lines_removed || 0}</td>
                       <td>
                         <div className="progress-bar-cell">
                           <span className="progress-text">{contrib.contribution_percentage?.toFixed(1)}%</span>
@@ -660,8 +662,69 @@ export default function Analytics({ project, onBack }) {
               </table>
             </div>
           </div>
+
+          {/* Commit Message Quality Analysis */}
+          <div className="recent-projects-section card" style={{ marginTop: '24px' }}>
+            <div className="recent-projects-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <h2>Recent Commit Message Quality Analysis</h2>
+              <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Showing last 10 commits</span>
+            </div>
+            <div className="table-container">
+              <table className="custom-table">
+                <thead>
+                  <tr>
+                    <th>Commit Message</th>
+                    <th>Author</th>
+                    <th>Date/Time</th>
+                    <th>Impact Changes</th>
+                    <th>Quality Assessment</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {commits.slice(0, 10).map((c) => {
+                    const getAuthorName = (authorId) => {
+                      const contrib = analytics.contributions?.find(a => a.author_id === authorId);
+                      return contrib ? contrib.name : 'Unknown';
+                    };
+                    const checkQuality = (msg) => {
+                      const msgLower = msg.toLowerCase().trim();
+                      const lazyWords = ['fix', 'update', 'wip', 'test', 'commit', 'changes', 'done', 'temp', 'working', 'bug', 'debug', 'code'];
+                      if (msg.length < 8 || lazyWords.includes(msgLower)) {
+                        return { text: 'Non-descriptive / Short', color: 'danger' };
+                      }
+                      const words = msgLower.split(/\s+/).filter(w => w.length > 0);
+                      if (words.length >= 3) {
+                        return { text: 'Descriptive / Informative', color: 'success' };
+                      }
+                      return { text: 'Neutral', color: 'warning' };
+                    };
+                    const quality = checkQuality(c.message);
+                    return (
+                      <tr key={c.hash}>
+                        <td style={{ fontWeight: '500', color: 'var(--text-main)', textAlign: 'left', padding: '10px 12px' }}>
+                          <code>{c.message}</code>
+                        </td>
+                        <td className="muted-cell" style={{ fontSize: '0.85rem' }}>{getAuthorName(c.author_id)}</td>
+                        <td className="muted-cell" style={{ fontSize: '0.85rem' }}>
+                          {new Date(c.timestamp).toLocaleString()}
+                        </td>
+                        <td style={{ fontSize: '0.85rem' }}>
+                          <span style={{ color: 'var(--text-success)', marginRight: '6px' }}>+{c.insertions}</span>
+                          <span style={{ color: 'var(--text-danger)' }}>-{c.deletions}</span>
+                        </td>
+                        <td>
+                          <Tag text={quality.text} variant={quality.color} style={{ fontSize: '10px', padding: '3.5px 8px' }} />
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
         </div>
       )}
+
 
       {analytics && activeTab === 'qualitative' && (
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '320px', backgroundColor: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: '12px', padding: '40px', textAlign: 'center', marginTop: '24px' }}>
