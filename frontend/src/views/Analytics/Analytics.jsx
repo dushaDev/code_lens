@@ -462,7 +462,7 @@ export default function Analytics({ project, onBack }) {
           </div>
 
           {/* Visualizations Section */}
-          <div className="analytics-visualization-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: '20px', marginBottom: '24px', marginTop: '24px' }}>
+          <div className="analytics-visualization-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: '20px' }}>
             
             {/* Language Distribution Card */}
             <div className="card" style={{ padding: '24px', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>

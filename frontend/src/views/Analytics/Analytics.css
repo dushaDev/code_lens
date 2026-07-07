@@ -27,7 +27,7 @@
 .analytics-content-grid {
   display: flex;
   flex-direction: column;
-  gap: 24px;
+  gap: 20px;
 }
 
 .analytics-summary-cards {
