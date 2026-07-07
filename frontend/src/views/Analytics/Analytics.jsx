@@ -10,7 +10,8 @@ import {
   Info,
   MessageSquare,
   Bot,
-  X
+  X,
+  Code
 } from 'lucide-react';
 import Tag from '../../components/Tag';
 import Tooltip from '../../components/Tooltip';
