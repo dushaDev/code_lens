@@ -97,7 +97,7 @@ export default function Students({
 
   return (
     <div className="students-view">
-      <div className="view-header" style={{ display: 'flex', flexDirection: 'column', gap: '14px', borderBottom: '1px solid var(--border-color)', paddingBottom: '16px', marginBottom: '8px' }}>
+      <div className="view-header" style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: '14px', borderBottom: '1px solid var(--border-color)', paddingBottom: '16px', marginBottom: '8px' }}>
         <div>
           <h1 style={{ margin: 0 }}>Students Directory</h1>
           <p className="subtitle" style={{ margin: '4px 0 0 0' }}>Overview of students, their total commit activities, and contribution logs.</p>
