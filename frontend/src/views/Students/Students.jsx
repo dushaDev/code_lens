@@ -183,7 +183,6 @@ export default function Students({
                 <th>Primary Email</th>
                 <th>Commits</th>
                 <th>Impact Lines</th>
-                <th>Identifier</th>
                 <th>Actions</th>
               </tr>
             </thead>
@@ -211,9 +210,6 @@ export default function Students({
                     <td>
                       <span className="additions-text">+{Math.round(student.additions)}</span>
                       <span className="deletions-text">-{Math.round(student.deletions)}</span>
-                    </td>
-                    <td>
-                      <Tag text={studentIsBot ? 'Bot' : 'Student'} variant={studentIsBot ? 'danger' : 'success'} />
                     </td>
                     <td>
                       {mergingSourceId === student.id ? (
