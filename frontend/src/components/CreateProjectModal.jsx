@@ -91,7 +91,7 @@ export default function CreateProjectModal({
         <div className="modal-header">
           <div className="modal-title-box">
             <FolderGit2 size={20} className="blue-text" />
-            <h2>Create Git Project</h2>
+            <h2>Create New Project</h2>
           </div>
           <button className="close-btn" onClick={onClose} disabled={loading}>
             <X size={18} />
