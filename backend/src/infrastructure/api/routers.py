@@ -20,7 +20,7 @@ from src.infrastructure.api.schemas import (
     FileChangeMetricsResponse, FileChangeASTResponse, ASTNodeResponse,
     CourseCreateRequest, CourseResponse, CoursesListResponse,
     UserRegisterRequest, UserResponse, UserUpdateRequest, UsersListResponse, TokenResponse, LoginRequest,
-    CourseResetRequest, SystemResetRequest
+    CourseResetRequest, SystemResetRequest, SearchResultItem, SearchResponse
 )
 from src.use_cases.extract_git_history import ExtractGitHistoryUseCase
 from src.use_cases.get_author_commits import (
