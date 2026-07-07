@@ -97,10 +97,73 @@ export default function Students({
 
   return (
     <div className="students-view">
-      <div className="view-header">
+      <div className="view-header" style={{ display: 'flex', flexDirection: 'column', gap: '14px', borderBottom: '1px solid var(--border-color)', paddingBottom: '16px', marginBottom: '8px' }}>
         <div>
-          <h1>Students Directory</h1>
-          <p className="subtitle">Overview of students, their total commit activities, and contribution logs.</p>
+          <h1 style={{ margin: 0 }}>Students Directory</h1>
+          <p className="subtitle" style={{ margin: '4px 0 0 0' }}>Overview of students, their total commit activities, and contribution logs.</p>
+        </div>
+        
+        {/* Project selector relocated to top left */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+          <div className="select-wrapper">
+            <span className="select-label" style={{ fontWeight: '600' }}>Filter by Project:</span>
+            <div style={{ position: 'relative', display: 'inline-flex', alignItems: 'center' }}>
+              <select 
+                className="select-field"
+                value={projectFilter}
+                onChange={(e) => setProjectFilter(e.target.value)}
+                style={{
+                  borderColor: projectFilter !== 'all' ? 'var(--primary)' : 'var(--border-color)',
+                  backgroundColor: projectFilter !== 'all' ? 'var(--primary-alpha)' : 'var(--bg-card)',
+                  color: projectFilter !== 'all' ? 'var(--primary)' : 'var(--text-main)',
+                  fontWeight: projectFilter !== 'all' ? '600' : 'normal',
+                  paddingRight: projectFilter !== 'all' ? '30px' : '12px'
+                }}
+              >
+                <option value="all">All Projects</option>
+                {projects.map(p => (
+                  <option key={p.id} value={p.id}>{p.name}</option>
+                ))}
+              </select>
+              {projectFilter !== 'all' && (
+                <button
+                  type="button"
+                  onClick={() => setProjectFilter('all')}
+                  style={{
+                    position: 'absolute',
+                    right: '8px',
+                    background: 'transparent',
+                    border: 'none',
+                    cursor: 'pointer',
+                    color: 'var(--primary)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    padding: 0
+                  }}
+                  title="Clear filter"
+                >
+                  <X size={14} />
+                </button>
+              )}
+            </div>
+          </div>
+          {projectFilter !== 'all' && (
+            <span style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '6px',
+              fontSize: '0.78rem',
+              color: 'var(--primary)',
+              fontWeight: '600',
+              backgroundColor: 'var(--primary-alpha)',
+              padding: '4px 10px',
+              borderRadius: '20px',
+              border: '1px solid hsl(var(--primary-hue), var(--primary-sat), 85%)'
+            }}>
+              <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: 'var(--primary)' }} />
+              Filter Active
+            </span>
+          )}
         </div>
       </div>
 
@@ -142,21 +205,6 @@ export default function Students({
         </div>
 
         <div className="action-filters-group">
-          {/* Project filter */}
-          <div className="select-wrapper">
-            <span className="select-label">Project:</span>
-            <select 
-              className="select-field"
-              value={projectFilter}
-              onChange={(e) => setProjectFilter(e.target.value)}
-            >
-              <option value="all">All Projects</option>
-              {projects.map(p => (
-                <option key={p.id} value={p.id}>{p.name}</option>
-              ))}
-            </select>
-          </div>
-
           {/* Sort order */}
           <div className="select-wrapper">
             <span className="select-label">Sort:</span>
