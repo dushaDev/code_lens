@@ -1,3 +1,5 @@
+import os
+from collections import Counter
 from typing import List, Optional
 from sqlalchemy.orm import Session, selectinload, joinedload, defer
 from src.domain.entities import ProjectEntity, AuthorEntity, CommitEntity, FileChangeEntity, BranchEntity, CourseEntity
@@ -10,8 +12,6 @@ class ProjectRepository(IProjectRepository):
         self.db = db
 
     def _detect_tech_stack(self, project_id: int) -> List[str]:
-        from collections import Counter
-        import os
         results = (
             self.db.query(FileChangeModel.filename)
             .join(CommitModel)
