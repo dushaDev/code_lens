@@ -624,10 +624,7 @@ export default function Analytics({ project, onBack }) {
                 <tbody>
                   {analytics.contributions?.map((contrib) => (
                     <tr key={contrib.author_id}>
-                      <td className="student-info-cell">
-                        <div className={`student-avatar ${isBot(contrib.name, contrib.email) ? 'avatar-bot' : ''}`}>
-                          {isBot(contrib.name, contrib.email) ? <Bot size={16} /> : contrib.name.slice(0, 2).toUpperCase()}
-                        </div>
+                      <td className="student-info-cell" style={{ padding: '8px 12px' }}>
                         <span className="student-name" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                           {contrib.name}
                           {isBot(contrib.name, contrib.email) && <Tag text="Bot" variant="danger" style={{ fontSize: '9px', padding: '1.5px 4px' }} />}
