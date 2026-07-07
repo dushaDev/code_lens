@@ -111,16 +111,9 @@ export default function Analytics({ project, onBack }) {
 
     const start = new Date(startDate || new Date());
     const end = new Date(endDate || new Date());
-    const diffTime = Math.abs(end - start);
-    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-    
-    let interval = chartInterval;
-    if (interval === 'daily' && diffDays > 60) {
-      interval = 'weekly';
-    }
 
     const chartData = [];
-    if (interval === 'monthly') {
+    if (chartInterval === 'monthly') {
       let curr = new Date(start.getFullYear(), start.getMonth(), 1);
       const endMonth = new Date(end.getFullYear(), end.getMonth(), 1);
       while (curr <= endMonth) {
@@ -133,7 +126,7 @@ export default function Analytics({ project, onBack }) {
         chartData.push({ label, count, tooltip: `${label}: ${count} commits` });
         curr = nextMonth;
       }
-    } else if (interval === 'weekly') {
+    } else if (chartInterval === 'weekly') {
       let curr = new Date(start);
       curr.setDate(curr.getDate() - curr.getDay());
       while (curr <= end) {
@@ -230,8 +223,6 @@ export default function Analytics({ project, onBack }) {
                   boxShadow: chartInterval === t ? 'var(--shadow-sm)' : 'none'
                 }}
                 onClick={() => setChartInterval(t)}
-                disabled={t === 'daily' && diffDays > 60}
-                title={t === 'daily' && diffDays > 60 ? 'Daily interval only available for spans under 60 days' : ''}
               >
                 {t.charAt(0).toUpperCase() + t.slice(1)}
               </button>
