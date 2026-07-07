@@ -29,7 +29,8 @@ export default function Projects({
     const matchesSearch = 
       project.name.toLowerCase().includes(search.toLowerCase()) ||
       project.description?.toLowerCase().includes(search.toLowerCase()) ||
-      project.techStack?.some(tech => tech.toLowerCase().includes(search.toLowerCase()));
+      project.techStack?.some(tech => tech.toLowerCase().includes(search.toLowerCase())) ||
+      (project.group_no || project.groupNo || '').toLowerCase().includes(search.toLowerCase());
     
     return matchesSearch;
   });
