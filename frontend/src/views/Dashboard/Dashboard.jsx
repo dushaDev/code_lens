@@ -89,12 +89,23 @@ export default function Dashboard({
         <p className="subtitle"><strong>Today is {getFormattedDate()}.</strong> Here is the latest overview of your academic analysis metrics.</p>
       </div>
 
+      {/* Create Project CTA block */}
+      <div className="create-project-cta card" onClick={onCreateProjectClick} style={{ cursor: 'pointer' }}>
+        <div className="cta-icon-box">
+          <PlusCircle size={24} />
+        </div>
+        <div className="cta-text">
+          <h3>Create New Project</h3>
+          <p>Clone a student repository and parse its git history logs.</p>
+        </div>
+      </div>
+
       {/* Stat Cards Grid */}
       <div className="stats-grid">
         <div className="stat-card card">
           <div className="stat-card-header">
             <div className="stat-icon-wrapper blue-icon">
-              <Folder size={22} />
+              <Folder size={18} />
             </div>
             <span className="stat-label">Total Active Projects</span>
           </div>
@@ -109,7 +120,7 @@ export default function Dashboard({
         <div className="stat-card card">
           <div className="stat-card-header">
             <div className="stat-icon-wrapper purple-icon">
-              <Users size={22} />
+              <Users size={18} />
             </div>
             <span className="stat-label">Total Students Evaluated</span>
           </div>
@@ -122,7 +133,7 @@ export default function Dashboard({
         <div className="stat-card card warning-card">
           <div className="stat-card-header">
             <div className="stat-icon-wrapper red-icon">
-              <AlertTriangle size={22} />
+              <AlertTriangle size={18} />
             </div>
             <span className="stat-label">High-Risk Plagiarism Alerts</span>
           </div>
@@ -194,17 +205,6 @@ export default function Dashboard({
               )}
             </tbody>
           </table>
-        </div>
-      </div>
-
-      {/* Bottom CTA block */}
-      <div className="create-project-cta card" onClick={onCreateProjectClick}>
-        <div className="cta-icon-box">
-          <PlusCircle size={24} />
-        </div>
-        <div className="cta-text">
-          <h3>Create New Project</h3>
-          <p>Clone a student repository and parse its git history logs.</p>
         </div>
       </div>
     </div>

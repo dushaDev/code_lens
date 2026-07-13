@@ -15,7 +15,12 @@ class UserModel(Base):
     email: Mapped[str] = mapped_column(String, unique=True, nullable=False)
     hashed_password: Mapped[str] = mapped_column(String, nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    github_username: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    courses: Mapped[List["CourseModel"]] = relationship(
+        "CourseModel", back_populates="owner", cascade="all, delete-orphan", passive_deletes=True
+    )
 
 
 class CourseModel(Base):
@@ -25,7 +30,11 @@ class CourseModel(Base):
     name: Mapped[str] = mapped_column(String, nullable=False)
     description: Mapped[Optional[str]] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    user_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
 
+    owner: Mapped["UserModel"] = relationship("UserModel", back_populates="courses")
     projects: Mapped[List["ProjectModel"]] = relationship(
         "ProjectModel", back_populates="course",
         cascade="all, delete-orphan", passive_deletes=True

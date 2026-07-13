@@ -365,6 +365,7 @@ export default function App() {
         user={user} 
         onSelectCourse={setCurrentCourse} 
         onLogout={handleLogout} 
+        onUserUpdate={(updatedUser) => setUser(updatedUser)}
       />
     );
   }
@@ -394,6 +395,7 @@ export default function App() {
           onNavigateTab={setCurrentTab}
           onSelectCourse={setCurrentCourse}
           onLogout={handleLogout}
+          onUserUpdate={(updatedUser) => setUser(updatedUser)}
         />
 
         <div className="content-body">
@@ -443,6 +445,9 @@ export default function App() {
                   course={currentCourse}
                   onCourseReset={() => {
                     setCurrentCourse({ ...currentCourse });
+                  }}
+                  onCourseDeleted={() => {
+                    setCurrentCourse(null);
                   }}
                 />
               )}

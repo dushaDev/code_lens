@@ -20,13 +20,13 @@ from src.infrastructure.api.schemas import (
     FileChangeMetricsResponse, FileChangeASTResponse, ASTNodeResponse,
     CourseCreateRequest, CourseResponse, CoursesListResponse,
     UserRegisterRequest, UserResponse, UserUpdateRequest, UsersListResponse, TokenResponse, LoginRequest,
-    CourseResetRequest, SystemResetRequest, SearchResultItem, SearchResponse
+    CourseResetRequest, SearchResultItem, SearchResponse
 )
 from src.use_cases.extract_git_history import ExtractGitHistoryUseCase
 from src.use_cases.get_author_commits import (
     GetAuthorCommitsUseCase, GetAuthorFullProfileUseCase,
     GetAllProjectsUseCase, GetProjectsByAuthorUseCase, GetProjectAuthorsUseCase,
-    ResetDatabaseUseCase, ResetCourseUseCase, MergeAuthorsUseCase
+    ResetCourseUseCase, MergeAuthorsUseCase
 )
 from src.use_cases.get_project_analytics import GetProjectAnalyticsUseCase
 from src.use_cases.get_project_details import (
@@ -77,6 +77,7 @@ def register(request: UserRegisterRequest, db: Session = Depends(get_db)):
         username=user.username,
         email=user.email,
         is_active=user.is_active,
+        github_username=user.github_username,
         created_at=user.created_at
     )
 
@@ -129,7 +130,8 @@ def get_all_users(
         total_users=len(users),
         users=[
             UserResponse(id=u.id, username=u.username, email=u.email,
-                         is_active=u.is_active, created_at=u.created_at)
+                         is_active=u.is_active, github_username=u.github_username,
+                         created_at=u.created_at)
             for u in users
         ]
     )
@@ -148,6 +150,7 @@ def get_me(current_user: UserModel = Depends(get_current_user)):
         username=current_user.username,
         email=current_user.email,
         is_active=current_user.is_active,
+        github_username=current_user.github_username,
         created_at=current_user.created_at
     )
 
@@ -170,7 +173,8 @@ def get_user_by_id(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found.")
     return UserResponse(
         id=user.id, username=user.username, email=user.email,
-        is_active=user.is_active, created_at=user.created_at
+        is_active=user.is_active, github_username=user.github_username,
+        created_at=user.created_at
     )
 
 
@@ -210,14 +214,16 @@ def update_user(
         username=request.username,
         email=request.email,
         password=request.password,
-        is_active=request.is_active
+        is_active=request.is_active,
+        github_username=request.github_username
     )
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found.")
 
     return UserResponse(
         id=user.id, username=user.username, email=user.email,
-        is_active=user.is_active, created_at=user.created_at
+        is_active=user.is_active, github_username=user.github_username,
+        created_at=user.created_at
     )
 
 
@@ -258,7 +264,7 @@ def create_course(
     course_repo = CourseRepository(db)
     use_case = CreateCourseUseCase(course_repo)
     try:
-        course = use_case.execute(name=request.name, description=request.description)
+        course = use_case.execute(name=request.name, description=request.description, user_id=current_user.id)
         return CourseResponse(
             id=course.id,
             name=course.name,
@@ -282,7 +288,7 @@ def get_all_courses(
     course_repo = CourseRepository(db)
     use_case = GetAllCoursesUseCase(course_repo)
     try:
-        courses = use_case.execute()
+        courses = use_case.execute(user_id=current_user.id)
         courses_list = [
             CourseResponse(id=c.id, name=c.name, description=c.description, created_at=c.created_at)
             for c in courses
@@ -306,7 +312,7 @@ def get_course_by_id(
     course_repo = CourseRepository(db)
     use_case = GetCourseByIdUseCase(course_repo)
     try:
-        course = use_case.execute(course_id)
+        course = use_case.execute(course_id, user_id=current_user.id)
         return CourseResponse(
             id=course.id,
             name=course.name,
@@ -327,19 +333,34 @@ def get_course_by_id(
 )
 def delete_course(
     course_id: int,
+    request: CourseResetRequest,
     db: Session = Depends(get_db),
     current_user: UserModel = Depends(get_current_user)
 ):
     course_repo = CourseRepository(db)
+    
+    # 1. Verify ownership
+    if not course_repo.get_by_id(course_id, user_id=current_user.id):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Course with ID {course_id} not found."
+        )
+
+    # 2. Verify password
+    if not verify_password(request.password, current_user.hashed_password):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect password verification."
+        )
+
     use_case = DeleteCourseUseCase(course_repo)
     try:
-        use_case.execute(course_id)
+        use_case.execute(course_id, user_id=current_user.id)
         return None
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
-
 
 @router.get(
     "/courses/{course_id}/projects",
@@ -355,7 +376,7 @@ def get_course_projects(
     course_repo = CourseRepository(db)
     use_case = GetCourseProjectsUseCase(course_repo)
     try:
-        projects = use_case.execute(course_id)
+        projects = use_case.execute(course_id, user_id=current_user.id)
         projects_list = [
             ProjectResponse(
                 id=p.id,
@@ -381,6 +402,20 @@ def get_course_projects(
 # Project endpoints (PROTECTED)
 # ---------------------------------------------------------------------------
 
+def _get_project_for_user(project_id: int, user_id: int, db: Session) -> ProjectModel:
+    """Returns the project if it exists and belongs to the current user's course.
+    Raises HTTP 404 if not found or not owned."""
+    project = (
+        db.query(ProjectModel)
+        .join(CourseModel)
+        .filter(ProjectModel.id == project_id, CourseModel.user_id == user_id)
+        .first()
+    )
+    if not project:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found.")
+    return project
+
+
 @router.post(
     "/projects",
     response_model=ProjectCreateResponse,
@@ -395,8 +430,8 @@ def create_project(
     course_repo = CourseRepository(db)
     repo = ProjectRepository(db)
 
-    # Validate course exists before creating project
-    course = course_repo.get_by_id(request.course_id)
+    # Validate course exists AND belongs to the current user
+    course = course_repo.get_by_id(request.course_id, user_id=current_user.id)
     if not course:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -436,6 +471,8 @@ def extract_git_data(
     db: Session = Depends(get_db),
     current_user: UserModel = Depends(get_current_user)
 ):
+    _get_project_for_user(project_id, current_user.id, db)
+
     project_repo = ProjectRepository(db)
     extractor_service = PyDrillerService(db)
     use_case = ExtractGitHistoryUseCase(project_repo, extractor_service)
@@ -446,7 +483,6 @@ def extract_git_data(
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     except RuntimeError as e:
-        # Human-readable errors raised by PyDrillerService (clone failure, etc.)
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
     except Exception as e:
         raise HTTPException(
@@ -466,6 +502,7 @@ def delete_project(
     db: Session = Depends(get_db),
     current_user: UserModel = Depends(get_current_user)
 ):
+    _get_project_for_user(project_id, current_user.id, db)
     repo = ProjectRepository(db)
     success = repo.delete(project_id)
     if not success:
@@ -483,10 +520,15 @@ def get_all_projects(
     db: Session = Depends(get_db),
     current_user: UserModel = Depends(get_current_user)
 ):
-    project_repo = ProjectRepository(db)
-    use_case = GetAllProjectsUseCase(project_repo)
     try:
-        projects = use_case.execute()
+        # Only return projects belonging to this user's courses
+        projects = (
+            db.query(ProjectModel)
+            .join(CourseModel)
+            .filter(CourseModel.user_id == current_user.id)
+            .all()
+        )
+        project_repo = ProjectRepository(db)
         projects_list = [
             ProjectResponse(
                 id=p.id,
@@ -494,6 +536,8 @@ def get_all_projects(
                 description=p.description,
                 git_url=p.git_url,
                 local_saved_path=p.local_saved_path,
+                group_no=p.group_no,
+                tech_stack=project_repo._detect_tech_stack(p.id),
                 created_at=p.created_at,
                 course_id=p.course_id
             )
@@ -515,23 +559,19 @@ def get_project_by_id(
     db: Session = Depends(get_db),
     current_user: UserModel = Depends(get_current_user)
 ):
+    proj = _get_project_for_user(project_id, current_user.id, db)
     project_repo = ProjectRepository(db)
-    use_case = GetProjectByIdUseCase(project_repo)
-    try:
-        p = use_case.execute(project_id)
-        return ProjectResponse(
-            id=p.id,
-            name=p.name,
-            description=p.description,
-            git_url=p.git_url,
-            local_saved_path=p.local_saved_path,
-            created_at=p.created_at,
-            course_id=p.course_id
-        )
-    except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+    return ProjectResponse(
+        id=proj.id,
+        name=proj.name,
+        description=proj.description,
+        git_url=proj.git_url,
+        local_saved_path=proj.local_saved_path,
+        group_no=proj.group_no,
+        tech_stack=project_repo._detect_tech_stack(proj.id),
+        created_at=proj.created_at,
+        course_id=proj.course_id
+    )
 
 
 @router.get(
@@ -545,6 +585,7 @@ def get_project_branches(
     db: Session = Depends(get_db),
     current_user: UserModel = Depends(get_current_user)
 ):
+    _get_project_for_user(project_id, current_user.id, db)
     project_repo = ProjectRepository(db)
     commit_repo = CommitRepository(db)
     use_case = GetProjectBranchesUseCase(project_repo, commit_repo)
@@ -579,6 +620,7 @@ def get_project_commits(
     db: Session = Depends(get_db),
     current_user: UserModel = Depends(get_current_user)
 ):
+    _get_project_for_user(project_id, current_user.id, db)
     project_repo = ProjectRepository(db)
     commit_repo = CommitRepository(db)
     use_case = GetProjectCommitsUseCase(project_repo, commit_repo)
@@ -617,6 +659,7 @@ def get_project_authors(
     db: Session = Depends(get_db),
     current_user: UserModel = Depends(get_current_user)
 ):
+    _get_project_for_user(project_id, current_user.id, db)
     project_repo = ProjectRepository(db)
     author_repo = AuthorRepository(db)
     use_case = GetProjectAuthorsUseCase(project_repo, author_repo)
@@ -644,6 +687,7 @@ def get_project_analytics(
     db: Session = Depends(get_db),
     current_user: UserModel = Depends(get_current_user)
 ):
+    _get_project_for_user(project_id, current_user.id, db)
     project_repo = ProjectRepository(db)
     author_repo = AuthorRepository(db)
     commit_repo = CommitRepository(db)
@@ -1046,36 +1090,8 @@ def get_supported_languages(
 
 
 # ---------------------------------------------------------------------------
-# System endpoints (PROTECTED)
+# Course and Project operations (PROTECTED)
 # ---------------------------------------------------------------------------
-
-@router.post(
-    "/system/reset",
-    status_code=status.HTTP_200_OK,
-    tags=["System"],
-    responses={401: {"model": ErrorResponse}, 500: {"model": ErrorResponse}}
-)
-def reset_database(
-    request: SystemResetRequest,
-    db: Session = Depends(get_db),
-    current_user: UserModel = Depends(get_current_user)
-):
-    """Full database wipe (deletes all courses, projects, authors, commits, file changes).
-    Verifies user password. Does NOT delete users table."""
-    if not verify_password(request.password, current_user.hashed_password):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect password verification."
-        )
-
-    db_service = DatabaseService(db)
-    use_case = ResetDatabaseUseCase(db_service)
-    try:
-        use_case.execute()
-        return {"status": "success", "message": "Full database has been reset successfully."}
-    except Exception as e:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
-
 
 @router.post(
     "/courses/{course_id}/reset",
@@ -1089,11 +1105,11 @@ def reset_course(
     db: Session = Depends(get_db),
     current_user: UserModel = Depends(get_current_user)
 ):
-    """Clear all projects and related commits, branches, file changes for a specific course.
+    """Clear all projects and related data for a specific course owned by the current user.
     Verifies user password."""
-    # Verify course exists
+    # Verify course exists AND belongs to current user
     course_repo = CourseRepository(db)
-    if not course_repo.get_by_id(course_id):
+    if not course_repo.get_by_id(course_id, user_id=current_user.id):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Course with ID {course_id} not found."
@@ -1108,7 +1124,7 @@ def reset_course(
     db_service = DatabaseService(db)
     use_case = ResetCourseUseCase(db_service)
     try:
-        use_case.execute(course_id)
+        use_case.execute(course_id, user_id=current_user.id)
         return {"status": "success", "message": f"Course projects and data cleared successfully."}
     except Exception as e:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
@@ -1124,15 +1140,19 @@ def global_search(
     db: Session = Depends(get_db),
     current_user: UserModel = Depends(get_current_user)
 ):
-    """Global search projects, students (authors), commits, and courses by query string."""
+    """Global search projects, students (authors), commits, and courses — scoped to current user's data."""
     if not q or len(q.strip()) < 2:
         return SearchResponse(results=[])
 
     query_str = f"%{q.strip()}%"
     results = []
 
-    # 1. Search projects
-    proj_query = db.query(ProjectModel)
+    # 1. Search projects (only within current user's courses)
+    proj_query = (
+        db.query(ProjectModel)
+        .join(CourseModel)
+        .filter(CourseModel.user_id == current_user.id)
+    )
     if course_id:
         proj_query = proj_query.filter(ProjectModel.course_id == course_id)
     projects = proj_query.filter(ProjectModel.name.ilike(query_str)).limit(5).all()
@@ -1147,8 +1167,14 @@ def global_search(
             )
         )
 
-    # 2. Search students (authors)
-    author_query = db.query(AuthorModel).join(CommitModel).join(ProjectModel)
+    # 2. Search students (authors) within current user's projects
+    author_query = (
+        db.query(AuthorModel)
+        .join(CommitModel)
+        .join(ProjectModel)
+        .join(CourseModel)
+        .filter(CourseModel.user_id == current_user.id)
+    )
     if course_id:
         author_query = author_query.filter(ProjectModel.course_id == course_id)
     authors = author_query.filter(
@@ -1164,8 +1190,13 @@ def global_search(
             )
         )
 
-    # 3. Search commits
-    commit_query = db.query(CommitModel).join(ProjectModel)
+    # 3. Search commits within current user's projects
+    commit_query = (
+        db.query(CommitModel)
+        .join(ProjectModel)
+        .join(CourseModel)
+        .filter(CourseModel.user_id == current_user.id)
+    )
     if course_id:
         commit_query = commit_query.filter(ProjectModel.course_id == course_id)
     commits = commit_query.filter(
@@ -1182,8 +1213,11 @@ def global_search(
             )
         )
 
-    # 4. Search courses (global context)
-    courses = db.query(CourseModel).filter(CourseModel.name.ilike(query_str)).limit(3).all()
+    # 4. Search courses (only current user's courses)
+    courses = db.query(CourseModel).filter(
+        CourseModel.user_id == current_user.id,
+        CourseModel.name.ilike(query_str)
+    ).limit(3).all()
     for co in courses:
         results.append(
             SearchResultItem(

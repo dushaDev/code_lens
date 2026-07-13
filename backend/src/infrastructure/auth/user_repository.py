@@ -55,6 +55,7 @@ class UserRepository:
         email: Optional[str] = None,
         password: Optional[str] = None,
         is_active: Optional[bool] = None,
+        github_username: Optional[str] = None,
     ) -> Optional[UserModel]:
         """Partial update — only fields that are not None are changed."""
         user = self.get_by_id(user_id)
@@ -68,6 +69,9 @@ class UserRepository:
             user.hashed_password = hash_password(password)
         if is_active is not None:
             user.is_active = is_active
+        if github_username is not None:
+            # Clean empty strings to None/null in DB
+            user.github_username = github_username if github_username.strip() != "" else None
         self.db.commit()
         self.db.refresh(user)
         return user

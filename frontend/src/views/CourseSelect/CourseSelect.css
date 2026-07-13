@@ -141,6 +141,10 @@
 
 .course-card-footer {
   margin-top: auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
 }
 
 .open-link {
@@ -148,6 +152,7 @@
   font-weight: 600;
   color: var(--primary);
   transition: var(--transition);
+  margin-left: auto;
 }
 
 .course-card:hover .open-link {

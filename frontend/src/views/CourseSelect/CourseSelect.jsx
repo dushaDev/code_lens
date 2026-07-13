@@ -1,20 +1,16 @@
 import React, { useState, useEffect } from 'react';
-import { LogOut, Plus, GraduationCap, Trash2, Database, AlertTriangle, X } from 'lucide-react';
+import { Plus, GraduationCap, X } from 'lucide-react';
+import ProfileDropdown from '../../components/ProfileDropdown';
 import './CourseSelect.css';
+import '../../components/Header.css';
 
-export default function CourseSelect({ user, onSelectCourse, onLogout }) {
+export default function CourseSelect({ user, onSelectCourse, onLogout, onUserUpdate }) {
   const [courses, setCourses] = useState([]);
   const [newCourseName, setNewCourseName] = useState('');
   const [newCourseDesc, setNewCourseDesc] = useState('');
   const [showAddForm, setShowAddForm] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-
-  // Password reset modal states
-  const [showWipeModal, setShowWipeModal] = useState(false);
-  const [wipePassword, setWipePassword] = useState('');
-  const [wipeLoading, setWipeLoading] = useState(false);
-  const [wipeError, setWipeError] = useState('');
 
   const fetchCourses = async () => {
     setLoading(true);
@@ -31,7 +27,7 @@ export default function CourseSelect({ user, onSelectCourse, onLogout }) {
       const data = await response.json();
       setCourses(data.courses);
     } catch (err) {
-      setError('Could not retrieve courses from backend database.');
+      setError('Could not retrieve courses from database.');
       setCourses([]);
     } finally {
       setLoading(false);
@@ -71,65 +67,6 @@ export default function CourseSelect({ user, onSelectCourse, onLogout }) {
     }
   };
 
-  const handleDeleteCourse = async (id, e) => {
-    e.stopPropagation();
-    if (!window.confirm('Are you sure you want to delete this course? All belonging projects will be deleted.')) return;
-
-    const token = localStorage.getItem('token');
-
-    try {
-      const response = await fetch(`/api/v1/courses/${id}`, {
-        method: 'DELETE',
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
-      });
-      if (!response.ok) throw new Error('Failed to delete course');
-      fetchCourses();
-    } catch (err) {
-      alert('Delete failed: ' + err.message);
-    }
-  };
-
-  const handleWipeDatabase = async (e) => {
-    e.preventDefault();
-    if (!wipePassword) return;
-
-    setWipeLoading(true);
-    setWipeError('');
-
-    const token = localStorage.getItem('token');
-
-    try {
-      const response = await fetch('/api/v1/system/reset', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify({
-          password: wipePassword
-        })
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.detail || 'Wipe failed. Please check your password.');
-      }
-
-      alert('Database has been fully reset. All courses and history are cleared.');
-      setCourses([]);
-      setWipePassword('');
-      setShowWipeModal(false);
-      fetchCourses();
-    } catch (err) {
-      setWipeError(err.message || 'Wipe failed.');
-    } finally {
-      setWipeLoading(false);
-    }
-  };
-
   const getGreeting = () => {
     const hrs = new Date().getHours();
     if (hrs < 12) return 'Good Morning';
@@ -145,18 +82,12 @@ export default function CourseSelect({ user, onSelectCourse, onLogout }) {
             <h1>{getGreeting()}, {user?.username || 'Instructor'}</h1>
             <p className="subtitle">Welcome to Code Lens. Please select a course to begin.</p>
           </div>
-          <div className="header-button-group">
-            <button 
-              className="btn btn-outline wipe-db-btn" 
-              onClick={() => setShowWipeModal(true)}
-            >
-              <Database size={16} />
-              <span>Full System Reset</span>
-            </button>
-            <button className="btn btn-secondary logout-top-btn" onClick={onLogout}>
-              <LogOut size={16} />
-              <span>Logout</span>
-            </button>
+          <div className="header-actions">
+            <ProfileDropdown 
+              user={user} 
+              onLogout={onLogout} 
+              onUserUpdate={onUserUpdate} 
+            />
           </div>
         </header>
 
@@ -225,13 +156,6 @@ export default function CourseSelect({ user, onSelectCourse, onLogout }) {
                     <div className="course-card-icon">
                       <GraduationCap size={20} />
                     </div>
-                    <button 
-                      className="delete-course-btn" 
-                      onClick={(e) => handleDeleteCourse(course.id, e)}
-                      title="Delete Course"
-                    >
-                      <Trash2 size={16} />
-                    </button>
                   </div>
                   <h3>{course.name}</h3>
                   <p>{course.description || 'No description provided.'}</p>
@@ -257,57 +181,7 @@ export default function CourseSelect({ user, onSelectCourse, onLogout }) {
         </div>
       </div>
 
-      {/* FULL SYSTEM RESET PASSWORD MODAL */}
-      {showWipeModal && (
-        <div className="modal-overlay">
-          <div className="modal-card card danger-border">
-            <div className="modal-header">
-              <div className="modal-title-box">
-                <AlertTriangle size={20} className="red-text" />
-                <h2>Full System Reset</h2>
-              </div>
-              <button className="close-btn" onClick={() => { setShowWipeModal(false); setWipePassword(''); }} disabled={wipeLoading}>
-                <X size={18} />
-              </button>
-            </div>
-
-            {wipeError && <div className="modal-alert alert-error">{wipeError}</div>}
-
-            <form onSubmit={handleWipeDatabase} className="modal-form">
-              <p className="danger-notice">
-                WARNING: This action is permanent. It will delete all courses, projects, git commits, 
-                and author metrics. The users and authentication tables will NOT be deleted.
-              </p>
-
-              <div className="form-group">
-                <label className="form-label">Verify Instructor Password</label>
-                <input 
-                  type="password" 
-                  className="input-field" 
-                  placeholder="Enter your login password"
-                  value={wipePassword}
-                  onChange={(e) => setWipePassword(e.target.value)}
-                  required
-                />
-              </div>
-
-              <div className="form-actions">
-                <button 
-                  type="button" 
-                  className="btn btn-secondary" 
-                  onClick={() => { setShowWipeModal(false); setWipePassword(''); }}
-                  disabled={wipeLoading}
-                >
-                  Cancel
-                </button>
-                <button type="submit" className="btn btn-danger" disabled={wipeLoading}>
-                  {wipeLoading ? 'Wiping...' : 'Confirm System Wipe'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+      
     </div>
   );
 }

@@ -18,9 +18,6 @@ class LoginRequest(BaseModel):
 class CourseResetRequest(BaseModel):
     password: str
 
-class SystemResetRequest(BaseModel):
-    password: str
-
 class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
@@ -34,6 +31,7 @@ class UserResponse(BaseModel):
     username: str
     email: str
     is_active: bool
+    github_username: Optional[str] = None
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
@@ -43,6 +41,7 @@ class UserUpdateRequest(BaseModel):
     email: Optional[EmailStr] = None
     password: Optional[str] = None
     is_active: Optional[bool] = None
+    github_username: Optional[str] = None
 
 class UsersListResponse(BaseModel):
     total_users: int

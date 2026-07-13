@@ -151,7 +151,7 @@
   position: absolute;
   top: calc(100% + 8px);
   right: 0;
-  width: 220px;
+  width: 240px;
   background-color: var(--bg-card);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-md);
@@ -175,6 +175,7 @@
   padding: 12px;
   border-bottom: 1px solid var(--border-color);
   margin-bottom: 8px;
+  text-align: center;
 }
 
 .menu-username {
@@ -320,4 +321,143 @@
   white-space: nowrap;
   text-overflow: ellipsis;
   overflow: hidden;
+}
+
+.avatar img {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+.menu-avatar-container {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 12px;
+}
+
+.menu-avatar {
+  width: 56px !important;
+  height: 56px !important;
+  font-size: 1.25rem !important;
+  position: relative;
+  cursor: pointer;
+  border: 2px solid var(--border-color);
+  transition: var(--transition);
+  border-radius: 50%;
+  background-color: var(--primary-alpha);
+  color: var(--primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 600;
+}
+
+.menu-avatar:hover {
+  border-color: var(--primary);
+}
+
+.avatar-edit-overlay {
+  position: absolute;
+  bottom: 0px;
+  right: 0px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background-color: var(--primary);
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1.5px solid var(--bg-card);
+  box-shadow: var(--shadow-sm);
+  transition: var(--transition);
+}
+
+.menu-avatar:hover .avatar-edit-overlay {
+  transform: scale(1.15);
+  background-color: var(--primary-hover);
+}
+
+.logout-item {
+  color: #dc2626 !important;
+  font-weight: 600 !important;
+  border-radius: var(--radius-sm);
+}
+
+.logout-item:hover {
+  background-color: #fee2e2 !important;
+  color: #ef4444 !important;
+}
+
+.menu-github-form-inline {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border-color);
+  margin-bottom: 8px;
+  background-color: var(--bg-hover);
+  border-radius: var(--radius-sm);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  animation: slideUp 0.15s ease-out;
+}
+
+.menu-github-input-group {
+  display: flex;
+  gap: 6px;
+  width: 100%;
+}
+
+.menu-github-input {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-color);
+  background-color: var(--bg-card);
+  color: var(--text-main);
+  font-size: 0.8rem;
+  outline: none;
+}
+
+.menu-github-input:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 2px var(--primary-alpha);
+}
+
+.menu-github-btn {
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  border: none;
+  background-color: var(--primary);
+  color: white;
+  font-size: 0.8rem;
+  font-weight: 500;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.menu-github-btn:hover {
+  background-color: var(--primary-hover);
+}
+
+.menu-github-cancel-btn {
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-color);
+  background-color: transparent;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  font-weight: 500;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.menu-github-cancel-btn:hover {
+  background-color: var(--border-color);
+  color: var(--text-main);
 }

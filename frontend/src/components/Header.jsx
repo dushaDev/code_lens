@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Search, Bell, HelpCircle, User, LogOut, ChevronDown } from 'lucide-react';
+import { Search, Bell, HelpCircle } from 'lucide-react';
 import Tag from './Tag';
+import ProfileDropdown from './ProfileDropdown';
 import './Header.css';
 
 export default function Header({ 
@@ -11,9 +12,9 @@ export default function Header({
   onSelectProject,
   onNavigateTab,
   onSelectCourse,
-  onLogout 
+  onLogout,
+  onUserUpdate 
 }) {
-  const [showProfileMenu, setShowProfileMenu] = useState(false);
   const [results, setResults] = useState([]);
   const [loading, setLoading] = useState(false);
   const [showPopup, setShowPopup] = useState(false);
@@ -52,29 +53,29 @@ export default function Header({
           'Authorization': `Bearer ${token}`
         }
       });
-      if (response.ok) {
-        const data = await response.json();
-        setResults(data.results || []);
-      }
+      if (!response.ok) throw new Error('Search failed');
+      const data = await response.json();
+      setResults(data.results || []);
     } catch (err) {
-      console.error('Search error:', err);
+      console.error(err);
+      setResults([]);
     } finally {
       setLoading(false);
     }
   };
 
-  const handleItemClick = (item) => {
+  const handleResultClick = (item) => {
     setShowPopup(false);
     setSearchTerm('');
-    if (item.type === 'project' || item.type === 'commit') {
-      if (item.project_id) {
-        onSelectProject(item.project_id);
-      }
+    if (item.type === 'project' && item.project_id) {
+      onSelectProject(item.project_id);
     } else if (item.type === 'student') {
       onNavigateTab('students');
-    } else if (item.type === 'course') {
-      // Re-trigger course selection
-      onSelectCourse(null);
+    } else if (item.type === 'commit' && item.project_id) {
+      onSelectProject(item.project_id);
+    } else if (item.type === 'course' && onSelectCourse) {
+      const courseIdInt = parseInt(item.id.replace('course-', ''), 10);
+      onSelectCourse({ id: courseIdInt, name: item.title });
     }
   };
 
@@ -84,37 +85,30 @@ export default function Header({
         <Search size={18} className="search-icon" />
         <input 
           type="text" 
-          placeholder="Search projects, students, or commits..."
+          placeholder="Search projects, students..." 
           value={searchTerm}
           onChange={handleSearchChange}
-          onFocus={() => { if (searchTerm.trim().length >= 2) setShowPopup(true); }}
+          onFocus={() => searchTerm.trim().length >= 2 && setShowPopup(true)}
         />
 
         {showPopup && (
           <div className="search-popup">
-            {loading && <div className="search-loading">Searching...</div>}
-            {!loading && results.length === 0 && (
-              <div className="search-no-results">No results found for "{searchTerm}"</div>
-            )}
-            {!loading && results.length > 0 && (
+            {loading ? (
+              <div className="search-loading">Searching...</div>
+            ) : results.length === 0 ? (
+              <div className="search-no-results">No matching projects or students.</div>
+            ) : (
               <div className="search-results-list">
-                {results.map((item) => (
+                {results.map((item, index) => (
                   <div 
-                    key={item.id} 
+                    key={index} 
                     className="search-item" 
-                    onClick={() => handleItemClick(item)}
+                    onClick={() => handleResultClick(item)}
                   >
-                    <Tag 
-                      text={item.type} 
-                      variant={
-                        item.type === 'project' ? 'primary' : 
-                        item.type === 'student' ? 'success' : 
-                        item.type === 'commit' ? 'warning' : 'info'
-                      } 
-                    />
+                    <span className={`search-badge-tag tag-${item.type}`}>{item.type}</span>
                     <div className="search-item-info">
                       <p className="search-item-title">{item.title}</p>
-                      <p className="search-item-subtitle">{item.subtitle}</p>
+                      <p className="search-item-subtitle">{item.subtitle || ''}</p>
                     </div>
                   </div>
                 ))}
@@ -133,38 +127,11 @@ export default function Header({
           <span className="notification-badge"></span>
         </button>
 
-        <div className="profile-container">
-          <button 
-            className="profile-trigger" 
-            onClick={() => setShowProfileMenu(!showProfileMenu)}
-          >
-            <div className="avatar">
-              {user?.username ? user.username.slice(0, 2).toUpperCase() : <User size={16} />}
-            </div>
-            <div className="profile-info">
-              <span className="profile-name">{user?.username || 'Professor'}</span>
-              <span className="profile-role">Instructor</span>
-            </div>
-            <ChevronDown size={14} className="dropdown-arrow" />
-          </button>
-
-          {showProfileMenu && (
-            <div className="profile-menu">
-              <div className="menu-header">
-                <p className="menu-username">{user?.username}</p>
-                <p className="menu-email">{user?.email || 'instructor@codelens.edu'}</p>
-              </div>
-              <ul className="menu-list">
-                <li>
-                  <button className="menu-item" onClick={onLogout}>
-                    <LogOut size={16} />
-                    <span>Log Out</span>
-                  </button>
-                </li>
-              </ul>
-            </div>
-          )}
-        </div>
+        <ProfileDropdown 
+          user={user} 
+          onLogout={onLogout} 
+          onUserUpdate={onUserUpdate} 
+        />
       </div>
     </header>
   );

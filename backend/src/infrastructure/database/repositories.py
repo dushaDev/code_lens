@@ -556,37 +556,18 @@ class DatabaseService(IDatabaseService):
     def __init__(self, db: Optional[Session] = None):
         self.db = db
 
-    def reset_database(self) -> None:
-        from sqlalchemy import text
+    def reset_course(self, course_id: int, user_id: int) -> None:
         from src.infrastructure.database.session import SessionLocal
 
         session = self.db or SessionLocal()
         try:
-            # Delete/truncate data one by one in correct dependency order (leaves schema intact, resets PK sequences)
-            # CRITICAL: We do NOT delete/truncate the 'users' table. It remains untouched.
-            session.execute(text("TRUNCATE TABLE file_changes RESTART IDENTITY CASCADE;"))
-            session.execute(text("TRUNCATE TABLE commit_branches CASCADE;"))
-            session.execute(text("TRUNCATE TABLE commits RESTART IDENTITY CASCADE;"))
-            session.execute(text("TRUNCATE TABLE branches RESTART IDENTITY CASCADE;"))
-            session.execute(text("TRUNCATE TABLE projects RESTART IDENTITY CASCADE;"))
-            session.execute(text("TRUNCATE TABLE authors RESTART IDENTITY CASCADE;"))
-            session.execute(text("TRUNCATE TABLE courses RESTART IDENTITY CASCADE;"))
-            session.commit()
-        except Exception as e:
-            session.rollback()
-            raise e
-        finally:
-            if not self.db:
-                session.close()
-
-    def reset_course(self, course_id: int) -> None:
-        from src.infrastructure.database.session import SessionLocal
-
-        session = self.db or SessionLocal()
-        try:
-            # Fetch and delete all projects belonging to the course
-            # This triggers database cascades to delete related commits, branches, file changes
-            projects = session.query(ProjectModel).filter(ProjectModel.course_id == course_id).all()
+            # Verify ownership before resetting
+            projects = (
+                session.query(ProjectModel)
+                .join(CourseModel)
+                .filter(ProjectModel.course_id == course_id, CourseModel.user_id == user_id)
+                .all()
+            )
             for project in projects:
                 session.delete(project)
             session.commit()
@@ -602,50 +583,52 @@ class CourseRepository(ICourseRepository):
     def __init__(self, db: Session):
         self.db = db
 
-    def create(self, name: str, description: Optional[str]) -> CourseEntity:
-        course_model = CourseModel(name=name, description=description)
+    def _to_entity(self, m: CourseModel) -> CourseEntity:
+        return CourseEntity(
+            id=m.id,
+            name=m.name,
+            description=m.description,
+            created_at=m.created_at,
+            user_id=m.user_id
+        )
+
+    def create(self, name: str, description: Optional[str], user_id: int) -> CourseEntity:
+        course_model = CourseModel(name=name, description=description, user_id=user_id)
         self.db.add(course_model)
         self.db.commit()
         self.db.refresh(course_model)
-        return CourseEntity(
-            id=course_model.id,
-            name=course_model.name,
-            description=course_model.description,
-            created_at=course_model.created_at
-        )
+        return self._to_entity(course_model)
 
-    def get_by_id(self, course_id: int) -> Optional[CourseEntity]:
-        course_model = self.db.query(CourseModel).filter(CourseModel.id == course_id).first()
-        if not course_model:
-            return None
-        return CourseEntity(
-            id=course_model.id,
-            name=course_model.name,
-            description=course_model.description,
-            created_at=course_model.created_at
-        )
+    def get_by_id(self, course_id: int, user_id: int) -> Optional[CourseEntity]:
+        course_model = self.db.query(CourseModel).filter(
+            CourseModel.id == course_id,
+            CourseModel.user_id == user_id
+        ).first()
+        return self._to_entity(course_model) if course_model else None
 
-    def get_all(self) -> List[CourseEntity]:
-        course_models = self.db.query(CourseModel).all()
-        return [
-            CourseEntity(
-                id=m.id,
-                name=m.name,
-                description=m.description,
-                created_at=m.created_at
-            )
-            for m in course_models
-        ]
+    def get_all(self, user_id: int) -> List[CourseEntity]:
+        course_models = self.db.query(CourseModel).filter(CourseModel.user_id == user_id).all()
+        return [self._to_entity(m) for m in course_models]
 
-    def delete(self, course_id: int) -> bool:
-        course_model = self.db.query(CourseModel).filter(CourseModel.id == course_id).first()
+    def delete(self, course_id: int, user_id: int) -> bool:
+        course_model = self.db.query(CourseModel).filter(
+            CourseModel.id == course_id,
+            CourseModel.user_id == user_id
+        ).first()
         if not course_model:
             return False
         self.db.delete(course_model)
         self.db.commit()
         return True
 
-    def get_projects(self, course_id: int) -> List[ProjectEntity]:
+    def get_projects(self, course_id: int, user_id: int) -> List[ProjectEntity]:
+        # Strictly verify course ownership first
+        course = self.db.query(CourseModel).filter(
+            CourseModel.id == course_id,
+            CourseModel.user_id == user_id
+        ).first()
+        if not course:
+            return []
         project_models = self.db.query(ProjectModel).filter(ProjectModel.course_id == course_id).all()
         project_repo = ProjectRepository(self.db)
         return [

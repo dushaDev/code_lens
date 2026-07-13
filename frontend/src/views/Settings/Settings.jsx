@@ -1,12 +1,14 @@
 import React, { useState } from 'react';
-import { Database, AlertTriangle, ShieldCheck, Save, Settings as SettingsIcon } from 'lucide-react';
+import { Database, AlertTriangle, ShieldCheck, Save, Trash2, RotateCcw, Settings as SettingsIcon } from 'lucide-react';
 import './Settings.css';
 
-export default function Settings({ course, onCourseReset }) {
+export default function Settings({ course, onCourseReset, onCourseDeleted }) {
   const [loading, setLoading] = useState(false);
+  const [deleteLoading, setDeleteLoading] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const [password, setPassword] = useState('');
+  const [deletePassword, setDeletePassword] = useState('');
 
   const handleResetCourse = async (e) => {
     e.preventDefault();
@@ -50,6 +52,47 @@ export default function Settings({ course, onCourseReset }) {
     }
   };
 
+  const handleDeleteCourse = async (e) => {
+    e.preventDefault();
+    if (!deletePassword) return;
+
+    if (!window.confirm(`CRITICAL WARNING: This will permanently delete the course "${course?.name}" and ALL projects and git data belonging to it. This action is irreversible. Are you sure?`)) {
+      return;
+    }
+
+    setDeleteLoading(true);
+    setMessage('');
+    setError('');
+
+    const token = localStorage.getItem('token');
+
+    try {
+      const response = await fetch(`/api/v1/courses/${course.id}`, {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          password: deletePassword
+        })
+      });
+
+      if (!response.ok) {
+        const data = await response.json();
+        throw new Error(data.detail || 'Failed to verify password.');
+      }
+
+      alert(`Course "${course?.name}" has been permanently deleted.`);
+      setDeletePassword('');
+      if (onCourseDeleted) onCourseDeleted();
+    } catch (err) {
+      setError(err.message || 'Database connection error.');
+    } finally {
+      setDeleteLoading(false);
+    }
+  };
+
   return (
     <div className="settings-view">
       <div className="view-header">
@@ -82,7 +125,7 @@ export default function Settings({ course, onCourseReset }) {
               <input type="checkbox" id="co-authored" defaultChecked />
               <label htmlFor="co-authored">Flag Co-authored commits as squash suspected</label>
             </div>
-            <button className="btn btn-primary" onClick={() => alert('Settings saved!')}>
+            <button className="btn btn-primary btn-sm settings-action-btn" onClick={() => alert('Settings saved!')}>
               <Save size={16} />
               <span>Save Parameters</span>
             </button>
@@ -92,12 +135,12 @@ export default function Settings({ course, onCourseReset }) {
         {/* Course Database Control Card */}
         <div className="settings-card card danger-border">
           <div className="card-title-row">
-            <Database size={18} className="red-text" />
-            <h2>Reset Course Data</h2>
+            <RotateCcw size={18} className="red-text" />
+            <h2>Clear Course Data</h2>
           </div>
           <form onSubmit={handleResetCourse} className="card-body-form">
             <p className="danger-notice">
-              Resetting course data deletes all projects, extracted commit logs, and student analysis metrics under <strong>"{course?.name}"</strong>. 
+              Resetting course data permanently deletes all projects, extracted commit logs, and student metrics under <strong>"{course?.name}"</strong>.
             </p>
             
             <div className="form-group">
@@ -105,7 +148,7 @@ export default function Settings({ course, onCourseReset }) {
               <input 
                 type="password" 
                 className="input-field" 
-                placeholder="Enter password to authorize reset" 
+                placeholder="Enter password to clear data" 
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 required
@@ -114,12 +157,47 @@ export default function Settings({ course, onCourseReset }) {
 
             <button 
               type="submit" 
-              className="btn btn-danger" 
+              className="btn btn-danger btn-sm settings-action-btn" 
               disabled={loading}
               style={{ alignSelf: 'flex-start' }}
             >
-              <AlertTriangle size={16} />
-              <span>{loading ? 'Clearing course data...' : 'Clear Course Projects & Data'}</span>
+              <RotateCcw size={16} />
+              <span>{loading ? 'Clearing data...' : 'Clear Course Data'}</span>
+            </button>
+          </form>
+        </div>
+
+        {/* Delete Course Card */}
+        <div className="settings-card card danger-border">
+          <div className="card-title-row">
+            <Trash2 size={18} className="red-text" />
+            <h2>Delete Course</h2>
+          </div>
+          <form onSubmit={handleDeleteCourse} className="card-body-form">
+            <p className="danger-notice">
+              Deleting this course permanently removes <strong>"{course?.name}"</strong> and all related projects, commit history, and student metrics. This action cannot be undone.
+            </p>
+            
+            <div className="form-group">
+              <label className="form-label">Verify Instructor Password</label>
+              <input 
+                type="password" 
+                className="input-field" 
+                placeholder="Enter password to delete course" 
+                value={deletePassword}
+                onChange={(e) => setDeletePassword(e.target.value)}
+                required
+              />
+            </div>
+
+            <button 
+              type="submit" 
+              className="btn btn-danger btn-sm settings-action-btn" 
+              disabled={deleteLoading}
+              style={{ alignSelf: 'flex-start' }}
+            >
+              <Trash2 size={16} />
+              <span>{deleteLoading ? 'Deleting...' : 'Delete Course'}</span>
             </button>
           </form>
         </div>

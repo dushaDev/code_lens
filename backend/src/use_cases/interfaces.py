@@ -79,31 +79,28 @@ class IGitExtractorService(ABC):
         pass
 
 class IDatabaseService(ABC):
-    @abstractmethod
-    def reset_database(self) -> None:
-        pass
 
     @abstractmethod
-    def reset_course(self, course_id: int) -> None:
+    def reset_course(self, course_id: int, user_id: int) -> None:
         pass
 
 class ICourseRepository(ABC):
     @abstractmethod
-    def create(self, name: str, description: Optional[str]) -> CourseEntity:
+    def create(self, name: str, description: Optional[str], user_id: int) -> CourseEntity:
         pass
 
     @abstractmethod
-    def get_by_id(self, course_id: int) -> Optional[CourseEntity]:
+    def get_by_id(self, course_id: int, user_id: int) -> Optional[CourseEntity]:
         pass
 
     @abstractmethod
-    def get_all(self) -> List[CourseEntity]:
+    def get_all(self, user_id: int) -> List[CourseEntity]:
         pass
 
     @abstractmethod
-    def delete(self, course_id: int) -> bool:
+    def delete(self, course_id: int, user_id: int) -> bool:
         pass
 
     @abstractmethod
-    def get_projects(self, course_id: int) -> List[ProjectEntity]:
+    def get_projects(self, course_id: int, user_id: int) -> List[ProjectEntity]:
         pass

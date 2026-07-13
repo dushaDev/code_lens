@@ -61,6 +61,7 @@ class ProjectEntity:
 @dataclass
 class CourseEntity:
     name: str
+    user_id: int = 0
     description: Optional[str] = None
     created_at: Optional[datetime] = None
     id: Optional[int] = None
