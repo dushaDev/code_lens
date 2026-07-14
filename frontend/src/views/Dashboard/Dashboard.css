@@ -252,8 +252,8 @@
 }
 
 .create-project-cta:hover {
-  border-color: var(--primary);
-  background-color: var(--bg-hover);
+  border-color: var(--primary) !important;
+  background-color: var(--bg-hover) !important;
 }
 
 .cta-icon-box {
