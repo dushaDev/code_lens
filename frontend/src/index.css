@@ -302,7 +302,8 @@ p.subtitle {
 
 /* Dark Theme Override */
 :root.dark-theme {
-  --primary-light: 60%;
+  --primary-sat: 60%;
+  --primary-light: 62%;
   --bg-app: #121212;
   --bg-card: #1e1e1e;
   --bg-sidebar: #1e1e1e;
@@ -325,4 +326,13 @@ p.subtitle {
   --color-warning-bg: rgba(245, 158, 11, 0.12);
   --color-danger-bg: rgba(239, 68, 68, 0.12);
   --color-info-bg: rgba(59, 130, 246, 0.12);
+}
+
+/* Dynamic Logo Theme Switcher */
+.theme-logo {
+  content: url('/code_lens_logo_light.svg');
+}
+
+:root.dark-theme .theme-logo {
+  content: url('/code_lens_logo_dark.svg');
 }

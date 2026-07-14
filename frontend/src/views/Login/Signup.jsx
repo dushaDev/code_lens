@@ -72,7 +72,7 @@ export default function Signup({ onSwitchToLogin, onRegisterSuccess }) {
   return (
     <div className="login-card">
       <div className="login-header" style={{ marginBottom: '20px' }}>
-        <img src="/code_lens_logo.svg" alt="Code Lens Logo" style={{ width: '180px', height: '80px', objectFit: 'contain', marginBottom: '4px', marginTop: '0px' }} />
+        <img src="/code_lens_logo_light.svg" alt="Code Lens Logo" className="theme-logo signup-logo-img" style={{ width: '180px', height: '80px', objectFit: 'contain', marginBottom: '4px', marginTop: '0px' }} />
         <h1 style={{ marginTop: '0px' }}>Create Account</h1>
         <p className="subtitle">Join Code Lens Git Analyzer</p>
       </div>
