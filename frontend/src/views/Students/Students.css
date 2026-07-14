@@ -150,7 +150,7 @@
 }
 
 .row-bot td {
-  background-color: #fafbfc !important;
+  background-color: var(--bg-hover) !important;
 }
 
 .bold-cell {

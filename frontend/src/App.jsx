@@ -82,7 +82,16 @@ export default function App() {
     checkAuth();
   }, []);
 
-  // 2. Load projects and mock lists on course select
+  // 2. Apply dark mode theme class globally based on user preference
+  useEffect(() => {
+    if (user?.is_dark_mode) {
+      document.documentElement.classList.add('dark-theme');
+    } else {
+      document.documentElement.classList.remove('dark-theme');
+    }
+  }, [user]);
+
+  // 3. Load projects and mock lists on course select
   useEffect(() => {
     if (!currentCourse) {
       setProjects([]);

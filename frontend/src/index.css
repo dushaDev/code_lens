@@ -239,7 +239,7 @@ p.subtitle {
   color: var(--text-muted);
   border-bottom: 1px solid var(--border-color);
   letter-spacing: 0.05em;
-  background-color: #fafbfc;
+  background-color: var(--bg-app);
 }
 
 .custom-table td {
@@ -298,4 +298,31 @@ p.subtitle {
 
 @keyframes spin {
   to { transform: rotate(360deg); }
+}
+
+/* Dark Theme Override */
+:root.dark-theme {
+  --primary-light: 60%;
+  --bg-app: #121212;
+  --bg-card: #1e1e1e;
+  --bg-sidebar: #1e1e1e;
+  --bg-hover: #2d2d2d;
+  
+  --text-main: #f3f4f6;
+  --text-muted: #9ca3af;
+  --text-light: #6b7280;
+  
+  --border-color: #2a2a2a;
+  --border-focus: #444444;
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.4), 0 2px 4px -1px rgba(0, 0, 0, 0.3);
+  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.4), 0 4px 6px -2px rgba(0, 0, 0, 0.3);
+  --shadow-premium: 0 20px 25px -5px rgba(0, 0, 0, 0.5), 0 10px 10px -5px rgba(0, 0, 0, 0.4);
+
+  /* Status Colors Adjustments for Dark Mode */
+  --color-success-bg: rgba(16, 185, 129, 0.12);
+  --color-warning-bg: rgba(245, 158, 11, 0.12);
+  --color-danger-bg: rgba(239, 68, 68, 0.12);
+  --color-info-bg: rgba(59, 130, 246, 0.12);
 }

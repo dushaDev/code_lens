@@ -253,7 +253,7 @@
 
 .create-project-cta:hover {
   border-color: var(--primary);
-  background-color: #fafbfc;
+  background-color: var(--bg-hover);
 }
 
 .cta-icon-box {

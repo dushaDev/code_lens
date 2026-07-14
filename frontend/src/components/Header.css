@@ -15,7 +15,7 @@
   display: flex;
   align-items: center;
   gap: 12px;
-  background-color: #fafbfc;
+  background-color: var(--bg-app);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-md);
   padding: 8px 16px;
@@ -212,8 +212,8 @@
 }
 
 .menu-item:hover {
-  background-color: var(--color-danger-bg);
-  color: var(--color-danger);
+  background-color: var(--bg-hover);
+  color: var(--text-main);
 }
 
 /* Search Popup Styles */
@@ -466,4 +466,12 @@
 .menu-github-cancel-btn:hover {
   background-color: var(--border-color);
   color: var(--text-main);
+}
+
+.theme-toggle-icon-sun {
+  color: #f59e0b;
+}
+
+.theme-toggle-icon-moon {
+  color: #6366f1;
 }

@@ -16,6 +16,7 @@ class UserModel(Base):
     hashed_password: Mapped[str] = mapped_column(String, nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     github_username: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    is_dark_mode: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     courses: Mapped[List["CourseModel"]] = relationship(

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { User, LogOut, ChevronDown, Plus } from 'lucide-react';
+import { User, LogOut, ChevronDown, Plus, Sun, Moon } from 'lucide-react';
 import './Header.css'; // Reuses the shared header styles
 
 export default function ProfileDropdown({ user, onLogout, onUserUpdate }) {
@@ -58,6 +58,33 @@ export default function ProfileDropdown({ user, onLogout, onUserUpdate }) {
   const handleLogoutClick = () => {
     if (window.confirm('Are you sure you want to log out?')) {
       onLogout();
+    }
+  };
+
+  const handleToggleTheme = async () => {
+    if (!user) return;
+    setSaving(true);
+    const token = localStorage.getItem('token');
+    try {
+      const response = await fetch(`/api/v1/users/${user.id}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          is_dark_mode: !user.is_dark_mode
+        })
+      });
+      if (!response.ok) throw new Error('Failed to update theme preference.');
+      const updatedUser = await response.json();
+      if (onUserUpdate) {
+        onUserUpdate(updatedUser);
+      }
+    } catch (err) {
+      alert(err.message);
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -139,6 +166,12 @@ export default function ProfileDropdown({ user, onLogout, onUserUpdate }) {
           )}
 
           <ul className="menu-list">
+            <li>
+              <button className="menu-item theme-toggle-item" onClick={handleToggleTheme} disabled={saving}>
+                {user?.is_dark_mode ? <Sun size={16} className="theme-toggle-icon-sun" /> : <Moon size={16} className="theme-toggle-icon-moon" />}
+                <span>{user?.is_dark_mode ? 'Light Mode' : 'Dark Mode'}</span>
+              </button>
+            </li>
             <li>
               <button className="menu-item logout-item" onClick={handleLogoutClick}>
                 <LogOut size={16} />

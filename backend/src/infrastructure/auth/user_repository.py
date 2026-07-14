@@ -56,6 +56,7 @@ class UserRepository:
         password: Optional[str] = None,
         is_active: Optional[bool] = None,
         github_username: Optional[str] = None,
+        is_dark_mode: Optional[bool] = None,
     ) -> Optional[UserModel]:
         """Partial update — only fields that are not None are changed."""
         user = self.get_by_id(user_id)
@@ -72,6 +73,8 @@ class UserRepository:
         if github_username is not None:
             # Clean empty strings to None/null in DB
             user.github_username = github_username if github_username.strip() != "" else None
+        if is_dark_mode is not None:
+            user.is_dark_mode = is_dark_mode
         self.db.commit()
         self.db.refresh(user)
         return user

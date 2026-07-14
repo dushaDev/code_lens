@@ -78,6 +78,7 @@ def register(request: UserRegisterRequest, db: Session = Depends(get_db)):
         email=user.email,
         is_active=user.is_active,
         github_username=user.github_username,
+        is_dark_mode=user.is_dark_mode,
         created_at=user.created_at
     )
 
@@ -131,7 +132,7 @@ def get_all_users(
         users=[
             UserResponse(id=u.id, username=u.username, email=u.email,
                          is_active=u.is_active, github_username=u.github_username,
-                         created_at=u.created_at)
+                         is_dark_mode=u.is_dark_mode, created_at=u.created_at)
             for u in users
         ]
     )
@@ -151,6 +152,7 @@ def get_me(current_user: UserModel = Depends(get_current_user)):
         email=current_user.email,
         is_active=current_user.is_active,
         github_username=current_user.github_username,
+        is_dark_mode=current_user.is_dark_mode,
         created_at=current_user.created_at
     )
 
@@ -174,7 +176,7 @@ def get_user_by_id(
     return UserResponse(
         id=user.id, username=user.username, email=user.email,
         is_active=user.is_active, github_username=user.github_username,
-        created_at=user.created_at
+        is_dark_mode=user.is_dark_mode, created_at=user.created_at
     )
 
 
@@ -215,7 +217,8 @@ def update_user(
         email=request.email,
         password=request.password,
         is_active=request.is_active,
-        github_username=request.github_username
+        github_username=request.github_username,
+        is_dark_mode=request.is_dark_mode
     )
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found.")
@@ -223,7 +226,7 @@ def update_user(
     return UserResponse(
         id=user.id, username=user.username, email=user.email,
         is_active=user.is_active, github_username=user.github_username,
-        created_at=user.created_at
+        is_dark_mode=user.is_dark_mode, created_at=user.created_at
     )
 
 

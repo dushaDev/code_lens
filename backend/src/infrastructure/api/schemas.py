@@ -32,6 +32,7 @@ class UserResponse(BaseModel):
     email: str
     is_active: bool
     github_username: Optional[str] = None
+    is_dark_mode: bool = False
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
@@ -42,6 +43,7 @@ class UserUpdateRequest(BaseModel):
     password: Optional[str] = None
     is_active: Optional[bool] = None
     github_username: Optional[str] = None
+    is_dark_mode: Optional[bool] = None
 
 class UsersListResponse(BaseModel):
     total_users: int
