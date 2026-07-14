@@ -147,7 +147,7 @@ export default function App() {
               const authorsData = authorsRes.ok ? await authorsRes.json() : { authors: [] };
 
               const gini = analyticsData ? analyticsData.gini_coefficient : 0.35;
-              const plagiarismRisk = gini > 0.6 ? 'High Risk' : 'Good';
+              const plagiarismRisk = gini >= 0.5 ? 'High Risk' : gini >= 0.3 ? 'Medium Risk' : 'Good';
 
               return {
                 ...proj,

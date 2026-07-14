@@ -172,7 +172,13 @@ export default function Projects({
                       )}
                     </td>
                     <td>
-                      <Tag text={isHighRisk ? 'High Risk' : 'Good'} variant={isHighRisk ? 'danger' : 'success'} />
+                      <Tag 
+                        text={project.plagiarismRisk} 
+                        variant={
+                          project.plagiarismRisk === 'High Risk' ? 'danger' :
+                          project.plagiarismRisk === 'Medium Risk' ? 'warning' : 'success'
+                        } 
+                      />
                     </td>
                     <td>
                       <div className="actions-cell">

@@ -9,24 +9,24 @@ export default function Tag({ text, variant = 'primary', style = {}, className =
       border: '1px solid hsl(var(--primary-hue), var(--primary-sat), 80%)'
     },
     success: {
-      backgroundColor: '#f0fdf4',
-      color: '#16a34a',
-      border: '1px solid #bbf7d0'
+      backgroundColor: 'var(--color-success-bg)',
+      color: 'var(--color-success)',
+      border: '1px solid rgba(16, 185, 129, 0.25)'
     },
     danger: {
-      backgroundColor: '#fef2f2',
-      color: '#dc2626',
-      border: '1px solid #fecaca'
+      backgroundColor: 'var(--color-danger-bg)',
+      color: 'var(--color-danger)',
+      border: '1px solid rgba(239, 68, 68, 0.25)'
     },
     warning: {
-      backgroundColor: '#fffbeb',
-      color: '#d97706',
-      border: '1px solid #fef3c7'
+      backgroundColor: 'var(--color-warning-bg)',
+      color: 'var(--color-warning)',
+      border: '1px solid rgba(245, 158, 11, 0.25)'
     },
     info: {
-      backgroundColor: '#f5f3ff',
-      color: '#7c3aed',
-      border: '1px solid #ddd6fe'
+      backgroundColor: 'var(--color-info-bg)',
+      color: 'var(--color-info)',
+      border: '1px solid rgba(59, 130, 246, 0.25)'
     },
     muted: {
       backgroundColor: 'var(--bg-app)',
