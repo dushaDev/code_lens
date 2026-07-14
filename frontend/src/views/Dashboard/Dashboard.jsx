@@ -169,7 +169,7 @@ export default function Dashboard({
               {projects.slice(0, 5).map((project) => {
                 const isHighRisk = project.plagiarismRisk === 'High Risk';
                 return (
-                  <tr key={project.id} className={isHighRisk ? 'row-high-risk' : ''}>
+                  <tr key={project.id}>
                     <td>
                       <div className="project-name-cell-content" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                         <Tag text={project.group_no || project.groupNo || 'G-00'} variant="muted" style={{ fontSize: '0.75rem', padding: '2px 6px' }} />

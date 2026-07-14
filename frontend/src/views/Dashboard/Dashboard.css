@@ -215,14 +215,6 @@
   color: #059669;
 }
 
-/* High Risk row indicator */
-.row-high-risk td {
-  background-color: var(--color-danger-bg) !important;
-}
-
-.row-high-risk {
-  position: relative;
-}
 
 /* View Analytics Button */
 .view-analytics-btn {

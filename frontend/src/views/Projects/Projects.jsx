@@ -146,7 +146,7 @@ export default function Projects({
               {filteredProjects.map((project) => {
                 const isHighRisk = project.plagiarismRisk === 'High Risk';
                 return (
-                  <tr key={project.id} className={isHighRisk ? 'row-high-risk' : ''}>
+                  <tr key={project.id}>
                     <td>
                       <div className="project-name-cell-content" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                         <FolderGit2 size={16} className="project-icon" />
