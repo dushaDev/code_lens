@@ -94,7 +94,7 @@ export default function ProfileDropdown({ user, onLogout, onUserUpdate }) {
             <div 
               className="menu-avatar-container" 
               onClick={() => setShowGithubInput(!showGithubInput)}
-              title="Click to set GitHub profile picture"
+              title="Click to set profile picture"
             >
               <div className="avatar menu-avatar">
                 {user?.github_username ? (
@@ -110,9 +110,9 @@ export default function ProfileDropdown({ user, onLogout, onUserUpdate }) {
                 ) : (
                   <User size={20} />
                 )}
-                <div className="avatar-edit-overlay">
-                  <Plus size={12} />
-                </div>
+              </div>
+              <div className="avatar-edit-overlay">
+                <Plus size={12} />
               </div>
             </div>
             <p className="menu-username">{user?.username}</p>
