@@ -120,6 +120,10 @@
   border: 1px solid hsl(var(--primary-hue), var(--primary-sat), 80%);
 }
 
+.avatar:has(img) {
+  border: none !important;
+}
+
 .profile-info {
   display: flex;
   flex-direction: column;
@@ -352,6 +356,10 @@
   justify-content: center;
   font-weight: 600;
   overflow: hidden;
+}
+
+.menu-avatar:has(img) {
+  border: none !important;
 }
 
 .menu-avatar-container:hover .menu-avatar {

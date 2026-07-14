@@ -363,7 +363,7 @@ export default function Students({
               <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', backgroundColor: '#fffbeb', border: '1px solid #fef3c7', padding: '10px', borderRadius: '6px', display: 'flex', gap: '8px', alignItems: 'flex-start', marginBottom: '16px' }}>
                 <span>💡</span>
                 <div>
-                  <strong>What happens next?</strong> All commits, lines of code, and git activities from profile (1) will be consolidated into profile (2). Profile (1) will then be removed from the directory. <strong style={{ color: 'var(--color-danger)' }}>This action cannot be undone.</strong>
+                All commits, lines of code, and git activities from profile (1) will be consolidated into profile (2). Profile (1) will then be removed from the directory. <strong style={{ color: 'var(--color-danger)' }}>This action cannot be undone.</strong>
                 </div>
               </div>
               

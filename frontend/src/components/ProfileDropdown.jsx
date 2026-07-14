@@ -7,10 +7,12 @@ export default function ProfileDropdown({ user, onLogout, onUserUpdate }) {
   const [showGithubInput, setShowGithubInput] = useState(false);
   const [githubUsername, setGithubUsername] = useState(user?.github_username || '');
   const [saving, setSaving] = useState(false);
+  const [imgError, setImgError] = useState(false);
   const dropdownRef = useRef(null);
 
   useEffect(() => {
     setGithubUsername(user?.github_username || '');
+    setImgError(false);
   }, [user]);
 
   // Click outside to close dropdown
@@ -95,13 +97,11 @@ export default function ProfileDropdown({ user, onLogout, onUserUpdate }) {
         onClick={() => setShowProfileMenu(!showProfileMenu)}
       >
         <div className="avatar">
-          {user?.github_username ? (
+          {user?.github_username && !imgError ? (
             <img 
               src={`https://github.com/${user.github_username}.png`} 
               alt={user.username} 
-              onError={(e) => {
-                e.target.style.display = 'none';
-              }}
+              onError={() => setImgError(true)}
             />
           ) : user?.username ? (
             user.username.slice(0, 2).toUpperCase()
@@ -124,13 +124,11 @@ export default function ProfileDropdown({ user, onLogout, onUserUpdate }) {
               title="Click to set profile picture"
             >
               <div className="avatar menu-avatar">
-                {user?.github_username ? (
+                {user?.github_username && !imgError ? (
                   <img 
                     src={`https://github.com/${user.github_username}.png`} 
                     alt={user.username} 
-                    onError={(e) => {
-                      e.target.style.display = 'none';
-                    }}
+                    onError={() => setImgError(true)}
                   />
                 ) : user?.username ? (
                   user.username.slice(0, 2).toUpperCase()
