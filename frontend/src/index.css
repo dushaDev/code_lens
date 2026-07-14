@@ -302,8 +302,9 @@ p.subtitle {
 
 /* Dark Theme Override */
 :root.dark-theme {
-  --primary-sat: 60%;
-  --primary-light: 62%;
+  --primary-hue: 205;
+  --primary-sat: 100%;
+  --primary-light: 50%;
   --bg-app: #121212;
   --bg-card: #1e1e1e;
   --bg-sidebar: #1e1e1e;
