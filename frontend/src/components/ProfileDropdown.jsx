@@ -84,7 +84,6 @@ export default function ProfileDropdown({ user, onLogout, onUserUpdate }) {
         </div>
         <div className="profile-info">
           <span className="profile-name">{user?.username || 'Professor'}</span>
-          <span className="profile-role">Instructor</span>
         </div>
         <ChevronDown size={14} className="dropdown-arrow" />
       </button>
