@@ -7,6 +7,23 @@ from sqlalchemy.orm import declarative_base, Mapped, mapped_column, relationship
 Base = declarative_base()
 
 
+class UserModel(Base):
+    __tablename__ = "users"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    username: Mapped[str] = mapped_column(String, unique=True, nullable=False)
+    email: Mapped[str] = mapped_column(String, unique=True, nullable=False)
+    hashed_password: Mapped[str] = mapped_column(String, nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    github_username: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    is_dark_mode: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    courses: Mapped[List["CourseModel"]] = relationship(
+        "CourseModel", back_populates="owner", cascade="all, delete-orphan", passive_deletes=True
+    )
+
+
 class CourseModel(Base):
     __tablename__ = "courses"
 
@@ -14,7 +31,11 @@ class CourseModel(Base):
     name: Mapped[str] = mapped_column(String, nullable=False)
     description: Mapped[Optional[str]] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    user_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
 
+    owner: Mapped["UserModel"] = relationship("UserModel", back_populates="courses")
     projects: Mapped[List["ProjectModel"]] = relationship(
         "ProjectModel", back_populates="course",
         cascade="all, delete-orphan", passive_deletes=True
@@ -29,6 +50,7 @@ class ProjectModel(Base):
     description: Mapped[Optional[str]] = mapped_column(Text)
     git_url: Mapped[str] = mapped_column(String, nullable=False)
     local_saved_path: Mapped[str] = mapped_column(String, nullable=False)
+    group_no: Mapped[str] = mapped_column(String, nullable=False, server_default="G-00")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     course_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("courses.id", ondelete="CASCADE"), nullable=False

@@ -1,3 +1,5 @@
+import os
+from collections import Counter
 from typing import List, Optional
 from sqlalchemy.orm import Session, selectinload, joinedload, defer
 from src.domain.entities import ProjectEntity, AuthorEntity, CommitEntity, FileChangeEntity, BranchEntity, CourseEntity
@@ -9,6 +11,122 @@ class ProjectRepository(IProjectRepository):
     def __init__(self, db: Session):
         self.db = db
 
+    def _detect_tech_stack(self, project_id: int) -> List[str]:
+        results = (
+            self.db.query(FileChangeModel.filename)
+            .join(CommitModel)
+            .filter(CommitModel.project_id == project_id)
+            .all()
+        )
+        extension_map = {
+            '.py': 'Python',
+            '.js': 'JavaScript',
+            '.jsx': 'JavaScript',
+            '.ts': 'TypeScript',
+            '.tsx': 'TypeScript',
+            '.java': 'Java',
+            '.cpp': 'C++',
+            '.cc': 'C++',
+            '.cxx': 'C++',
+            '.c': 'C',
+            '.h': 'C/C++',
+            '.cs': 'C#',
+            '.go': 'Go',
+            '.rs': 'Rust',
+            '.rb': 'Ruby',
+            '.php': 'PHP',
+            '.swift': 'Swift',
+            '.kt': 'Kotlin',
+            '.kts': 'Kotlin',
+            '.dart': 'Dart',
+            '.html': 'HTML',
+            '.css': 'CSS',
+            '.scss': 'CSS',
+            '.sql': 'SQL',
+            '.sh': 'Shell'
+        }
+        counter = Counter()
+        for row in results:
+            filename = row[0]
+            ext = os.path.splitext(filename)[1].lower()
+            if ext in extension_map:
+                counter[extension_map[ext]] += 1
+                
+        if not counter:
+            project = self.db.query(ProjectModel).filter(ProjectModel.id == project_id).first()
+            if project:
+                name_lower = project.name.lower()
+                if any(x in name_lower for x in ['react', 'web', 'node', 'js']):
+                    return ['JavaScript']
+                if any(x in name_lower for x in ['structure', 'c++', 'cpp', 'tree']):
+                    return ['C++']
+                if any(x in name_lower for x in ['android', 'kotlin', 'mobile', 'app']):
+                    return ['Kotlin']
+            return ['Python']
+            
+        return [tech for tech, count in counter.most_common(4)]
+
+    def get_language_distribution(self, project_id: int) -> dict:
+        results = (
+            self.db.query(FileChangeModel.filename, FileChangeModel.lines_added)
+            .join(CommitModel)
+            .filter(CommitModel.project_id == project_id)
+            .all()
+        )
+        extension_map = {
+            '.py': 'Python',
+            '.js': 'JavaScript',
+            '.jsx': 'JavaScript',
+            '.ts': 'TypeScript',
+            '.tsx': 'TypeScript',
+            '.java': 'Java',
+            '.cpp': 'C++',
+            '.cc': 'C++',
+            '.cxx': 'C++',
+            '.c': 'C',
+            '.h': 'C/C++',
+            '.cs': 'C#',
+            '.go': 'Go',
+            '.rs': 'Rust',
+            '.rb': 'Ruby',
+            '.php': 'PHP',
+            '.swift': 'Swift',
+            '.kt': 'Kotlin',
+            '.kts': 'Kotlin',
+            '.dart': 'Dart',
+            '.html': 'HTML',
+            '.css': 'CSS',
+            '.scss': 'CSS',
+            '.sql': 'SQL',
+            '.sh': 'Shell'
+        }
+        counter = Counter()
+        for filename, lines_added in results:
+            ext = os.path.splitext(filename)[1].lower()
+            if ext in extension_map:
+                counter[extension_map[ext]] += lines_added
+                
+        if not counter:
+            techs = self._detect_tech_stack(project_id)
+            if techs:
+                return {techs[0]: 100.0}
+            return {'Python': 100.0}
+            
+        total_lines = sum(counter.values())
+        if total_lines == 0:
+            techs = self._detect_tech_stack(project_id)
+            if techs:
+                return {techs[0]: 100.0}
+            return {'Python': 100.0}
+            
+        distribution = {}
+        for tech, lines in counter.items():
+            pct = round((lines / total_lines) * 100, 1)
+            if pct > 0:
+                distribution[tech] = pct
+                
+        return dict(sorted(distribution.items(), key=lambda x: x[1], reverse=True))
+
     def get_by_id(self, project_id: int) -> Optional[ProjectEntity]:
         project_model = self.db.query(ProjectModel).filter(ProjectModel.id == project_id).first()
         if not project_model:
@@ -19,17 +137,20 @@ class ProjectRepository(IProjectRepository):
             description=project_model.description,
             git_url=project_model.git_url,
             local_saved_path=project_model.local_saved_path,
+            group_no=project_model.group_no or "G-00",
             created_at=project_model.created_at,
-            course_id=project_model.course_id
+            course_id=project_model.course_id,
+            tech_stack=self._detect_tech_stack(project_model.id)
         )
 
-    def create(self, name: str, description: Optional[str], git_url: str, course_id: int) -> ProjectEntity:
+    def create(self, name: str, description: Optional[str], git_url: str, course_id: int, group_no: str) -> ProjectEntity:
         # Initial saved path is empty, updated via update_local_path once ID is flushed/committed
         project_model = ProjectModel(
             name=name,
             description=description,
             git_url=git_url,
             local_saved_path="",
+            group_no=group_no,
             course_id=course_id
         )
         self.db.add(project_model)
@@ -41,8 +162,10 @@ class ProjectRepository(IProjectRepository):
             description=project_model.description,
             git_url=project_model.git_url,
             local_saved_path=project_model.local_saved_path,
+            group_no=project_model.group_no or "G-00",
             created_at=project_model.created_at,
-            course_id=project_model.course_id
+            course_id=project_model.course_id,
+            tech_stack=self._detect_tech_stack(project_model.id)
         )
 
     def update_local_path(self, project_id: int, local_path: str) -> None:
@@ -67,9 +190,11 @@ class ProjectRepository(IProjectRepository):
                 name=m.name,
                 git_url=m.git_url,
                 local_saved_path=m.local_saved_path,
+                group_no=m.group_no or "G-00",
                 description=m.description,
                 created_at=m.created_at,
-                course_id=m.course_id
+                course_id=m.course_id,
+                tech_stack=self._detect_tech_stack(m.id)
             )
             for m in project_models
         ]
@@ -88,9 +213,11 @@ class ProjectRepository(IProjectRepository):
                 name=m.name,
                 git_url=m.git_url,
                 local_saved_path=m.local_saved_path,
+                group_no=m.group_no or "G-00",
                 description=m.description,
                 created_at=m.created_at,
-                course_id=m.course_id
+                course_id=m.course_id,
+                tech_stack=self._detect_tech_stack(m.id)
             )
             for m in project_models
         ]
@@ -429,20 +556,20 @@ class DatabaseService(IDatabaseService):
     def __init__(self, db: Optional[Session] = None):
         self.db = db
 
-    def reset_database(self) -> None:
-        from sqlalchemy import text
+    def reset_course(self, course_id: int, user_id: int) -> None:
         from src.infrastructure.database.session import SessionLocal
 
         session = self.db or SessionLocal()
         try:
-            # Delete/truncate data one by one in correct dependency order (leaves schema intact, resets PK sequences)
-            session.execute(text("TRUNCATE TABLE file_changes RESTART IDENTITY CASCADE;"))
-            session.execute(text("TRUNCATE TABLE commit_branches CASCADE;"))
-            session.execute(text("TRUNCATE TABLE commits RESTART IDENTITY CASCADE;"))
-            session.execute(text("TRUNCATE TABLE branches RESTART IDENTITY CASCADE;"))
-            session.execute(text("TRUNCATE TABLE projects RESTART IDENTITY CASCADE;"))
-            session.execute(text("TRUNCATE TABLE authors RESTART IDENTITY CASCADE;"))
-            session.execute(text("TRUNCATE TABLE courses RESTART IDENTITY CASCADE;"))
+            # Verify ownership before resetting
+            projects = (
+                session.query(ProjectModel)
+                .join(CourseModel)
+                .filter(ProjectModel.course_id == course_id, CourseModel.user_id == user_id)
+                .all()
+            )
+            for project in projects:
+                session.delete(project)
             session.commit()
         except Exception as e:
             session.rollback()
@@ -456,60 +583,65 @@ class CourseRepository(ICourseRepository):
     def __init__(self, db: Session):
         self.db = db
 
-    def create(self, name: str, description: Optional[str]) -> CourseEntity:
-        course_model = CourseModel(name=name, description=description)
+    def _to_entity(self, m: CourseModel) -> CourseEntity:
+        return CourseEntity(
+            id=m.id,
+            name=m.name,
+            description=m.description,
+            created_at=m.created_at,
+            user_id=m.user_id
+        )
+
+    def create(self, name: str, description: Optional[str], user_id: int) -> CourseEntity:
+        course_model = CourseModel(name=name, description=description, user_id=user_id)
         self.db.add(course_model)
         self.db.commit()
         self.db.refresh(course_model)
-        return CourseEntity(
-            id=course_model.id,
-            name=course_model.name,
-            description=course_model.description,
-            created_at=course_model.created_at
-        )
+        return self._to_entity(course_model)
 
-    def get_by_id(self, course_id: int) -> Optional[CourseEntity]:
-        course_model = self.db.query(CourseModel).filter(CourseModel.id == course_id).first()
-        if not course_model:
-            return None
-        return CourseEntity(
-            id=course_model.id,
-            name=course_model.name,
-            description=course_model.description,
-            created_at=course_model.created_at
-        )
+    def get_by_id(self, course_id: int, user_id: int) -> Optional[CourseEntity]:
+        course_model = self.db.query(CourseModel).filter(
+            CourseModel.id == course_id,
+            CourseModel.user_id == user_id
+        ).first()
+        return self._to_entity(course_model) if course_model else None
 
-    def get_all(self) -> List[CourseEntity]:
-        course_models = self.db.query(CourseModel).all()
-        return [
-            CourseEntity(
-                id=m.id,
-                name=m.name,
-                description=m.description,
-                created_at=m.created_at
-            )
-            for m in course_models
-        ]
+    def get_all(self, user_id: int) -> List[CourseEntity]:
+        course_models = self.db.query(CourseModel).filter(CourseModel.user_id == user_id).all()
+        return [self._to_entity(m) for m in course_models]
 
-    def delete(self, course_id: int) -> bool:
-        course_model = self.db.query(CourseModel).filter(CourseModel.id == course_id).first()
+    def delete(self, course_id: int, user_id: int) -> bool:
+        course_model = self.db.query(CourseModel).filter(
+            CourseModel.id == course_id,
+            CourseModel.user_id == user_id
+        ).first()
         if not course_model:
             return False
         self.db.delete(course_model)
         self.db.commit()
         return True
 
-    def get_projects(self, course_id: int) -> List[ProjectEntity]:
+    def get_projects(self, course_id: int, user_id: int) -> List[ProjectEntity]:
+        # Strictly verify course ownership first
+        course = self.db.query(CourseModel).filter(
+            CourseModel.id == course_id,
+            CourseModel.user_id == user_id
+        ).first()
+        if not course:
+            return []
         project_models = self.db.query(ProjectModel).filter(ProjectModel.course_id == course_id).all()
+        project_repo = ProjectRepository(self.db)
         return [
             ProjectEntity(
                 id=m.id,
                 name=m.name,
                 git_url=m.git_url,
                 local_saved_path=m.local_saved_path,
+                group_no=m.group_no or "G-00",
                 description=m.description,
                 created_at=m.created_at,
-                course_id=m.course_id
+                course_id=m.course_id,
+                tech_stack=project_repo._detect_tech_stack(m.id)
             )
             for m in project_models
         ]

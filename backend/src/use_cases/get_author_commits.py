@@ -55,12 +55,12 @@ class GetProjectAuthorsUseCase:
             return self.author_repo.get_by_project_id_and_branch(project_id, branch)
         return self.author_repo.get_by_project_id(project_id)
 
-class ResetDatabaseUseCase:
+class ResetCourseUseCase:
     def __init__(self, db_service: IDatabaseService):
         self.db_service = db_service
 
-    def execute(self) -> None:
-        self.db_service.reset_database()
+    def execute(self, course_id: int, user_id: int) -> None:
+        self.db_service.reset_course(course_id, user_id=user_id)
 
 class MergeAuthorsUseCase:
     def __init__(self, author_repo: IAuthorRepository):

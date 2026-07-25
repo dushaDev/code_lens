@@ -8,7 +8,7 @@ class IProjectRepository(ABC):
         pass
 
     @abstractmethod
-    def create(self, name: str, description: Optional[str], git_url: str, course_id: int) -> ProjectEntity:
+    def create(self, name: str, description: Optional[str], git_url: str, course_id: int, group_no: str) -> ProjectEntity:
         pass
 
     @abstractmethod
@@ -29,6 +29,10 @@ class IProjectRepository(ABC):
 
     @abstractmethod
     def get_branches(self, project_id: int) -> List[BranchEntity]:
+        pass
+
+    @abstractmethod
+    def get_language_distribution(self, project_id: int) -> dict:
         pass
 
 class IAuthorRepository(ABC):
@@ -75,27 +79,28 @@ class IGitExtractorService(ABC):
         pass
 
 class IDatabaseService(ABC):
+
     @abstractmethod
-    def reset_database(self) -> None:
+    def reset_course(self, course_id: int, user_id: int) -> None:
         pass
 
 class ICourseRepository(ABC):
     @abstractmethod
-    def create(self, name: str, description: Optional[str]) -> CourseEntity:
+    def create(self, name: str, description: Optional[str], user_id: int) -> CourseEntity:
         pass
 
     @abstractmethod
-    def get_by_id(self, course_id: int) -> Optional[CourseEntity]:
+    def get_by_id(self, course_id: int, user_id: int) -> Optional[CourseEntity]:
         pass
 
     @abstractmethod
-    def get_all(self) -> List[CourseEntity]:
+    def get_all(self, user_id: int) -> List[CourseEntity]:
         pass
 
     @abstractmethod
-    def delete(self, course_id: int) -> bool:
+    def delete(self, course_id: int, user_id: int) -> bool:
         pass
 
     @abstractmethod
-    def get_projects(self, course_id: int) -> List[ProjectEntity]:
+    def get_projects(self, course_id: int, user_id: int) -> List[ProjectEntity]:
         pass

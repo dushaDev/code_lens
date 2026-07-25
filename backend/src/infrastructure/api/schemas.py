@@ -1,6 +1,57 @@
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, EmailStr
 from typing import List, Optional
 from datetime import datetime
+
+# ---------------------------------------------------------------------------
+# Auth schemas
+# ---------------------------------------------------------------------------
+
+class UserRegisterRequest(BaseModel):
+    username: str
+    email: EmailStr
+    password: str
+
+class LoginRequest(BaseModel):
+    email: EmailStr
+    password: str
+
+class CourseResetRequest(BaseModel):
+    password: str
+
+class TokenResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+
+# ---------------------------------------------------------------------------
+# User CRUD schemas
+# ---------------------------------------------------------------------------
+
+class UserResponse(BaseModel):
+    id: int
+    username: str
+    email: str
+    is_active: bool
+    github_username: Optional[str] = None
+    is_dark_mode: bool = False
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+class UserUpdateRequest(BaseModel):
+    username: Optional[str] = None
+    email: Optional[EmailStr] = None
+    password: Optional[str] = None
+    is_active: Optional[bool] = None
+    github_username: Optional[str] = None
+    is_dark_mode: Optional[bool] = None
+
+class UsersListResponse(BaseModel):
+    total_users: int
+    users: List[UserResponse]
+
+# ---------------------------------------------------------------------------
+# Course schemas
+# ---------------------------------------------------------------------------
 
 class CourseCreateRequest(BaseModel):
     name: str
@@ -21,11 +72,14 @@ class ProjectCreateRequest(BaseModel):
     description: Optional[str] = None
     git_url: str
     course_id: int
+    group_no: str
 
 class ProjectCreateResponse(BaseModel):
     project_id: int
     name: str
     course_id: int
+    group_no: Optional[str] = "G-00"
+    tech_stack: List[str] = []
 
 class ExtractResponse(BaseModel):
     status: str
@@ -53,6 +107,8 @@ class ProjectResponse(BaseModel):
     description: Optional[str] = None
     git_url: str
     local_saved_path: str
+    group_no: Optional[str] = "G-00"
+    tech_stack: List[str] = []
     created_at: datetime
     course_id: Optional[int] = None
 
@@ -130,6 +186,7 @@ class AuthorContributionResponse(BaseModel):
     email: str
     commit_count: int
     lines_added: int
+    lines_removed: int = 0
     contribution_percentage: float
 
 class ProjectAnalyticsResponse(BaseModel):
@@ -139,6 +196,7 @@ class ProjectAnalyticsResponse(BaseModel):
     total_insertions: int
     distribution_status: str
     contributions: List[AuthorContributionResponse]
+    language_distribution: dict
 
 class MergeAuthorsRequest(BaseModel):
     source_author_id: int
@@ -190,4 +248,14 @@ class FileChangeASTResponse(BaseModel):
     filename: str
     language: str
     ast: Optional[ASTNodeResponse] = None
+
+class SearchResultItem(BaseModel):
+    id: str
+    type: str  # "project", "student", "commit", "course"
+    title: str
+    subtitle: str
+    project_id: Optional[int] = None
+
+class SearchResponse(BaseModel):
+    results: List[SearchResultItem]
     error: Optional[str] = None

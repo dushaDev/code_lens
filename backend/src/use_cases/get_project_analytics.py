@@ -60,6 +60,7 @@ class GetProjectAnalyticsUseCase:
                 "email": a.email,
                 "commit_count": 0,
                 "lines_added": 0,
+                "lines_removed": 0,
                 "contribution_percentage": 0.0
             }
             for a in authors
@@ -71,6 +72,7 @@ class GetProjectAnalyticsUseCase:
             if canonical_author_id in contributions_map:
                 contributions_map[canonical_author_id]["commit_count"] += 1
                 contributions_map[canonical_author_id]["lines_added"] += c.insertions
+                contributions_map[canonical_author_id]["lines_removed"] += c.deletions or 0
 
         # 3. Calculate percentages
         contributions_list = list(contributions_map.values())
@@ -104,5 +106,6 @@ class GetProjectAnalyticsUseCase:
             "total_commits": total_commits,
             "total_insertions": total_insertions,
             "distribution_status": status,
-            "contributions": contributions_list
+            "contributions": contributions_list,
+            "language_distribution": self.project_repo.get_language_distribution(project_id)
         }
