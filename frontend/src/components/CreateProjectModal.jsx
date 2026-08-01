@@ -11,6 +11,7 @@ export default function CreateProjectModal({
   const [description, setDescription] = useState('');
   const [gitUrl, setGitUrl] = useState('');
   const [groupNo, setGroupNo] = useState('');
+  const [storeLocalCopy, setStoreLocalCopy] = useState(false);
   const [loading, setLoading] = useState(false);
   const [progressMsg, setProgressMsg] = useState('');
   const [error, setError] = useState('');
@@ -38,7 +39,8 @@ export default function CreateProjectModal({
           description,
           git_url: gitUrl,
           course_id: course.id,
-          group_no: groupNo
+          group_no: groupNo,
+          store_local_copy: storeLocalCopy
         })
       });
 
@@ -158,6 +160,22 @@ export default function CreateProjectModal({
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
               />
+            </div>
+
+            <div className="form-group local-copy-box">
+              <label className="local-copy-label">
+                <input 
+                  type="checkbox" 
+                  className="local-copy-checkbox"
+                  checked={storeLocalCopy} 
+                  onChange={(e) => setStoreLocalCopy(e.target.checked)}
+                />
+                <span>Keep Local Project Copy for Web File Browser</span>
+              </label>
+              <p className="local-copy-note">
+                <Info size={13} />
+                Enabling this will save the repository files on server disk to allow online file browsing. Uses additional storage space.
+              </p>
             </div>
 
             <div className="form-actions">

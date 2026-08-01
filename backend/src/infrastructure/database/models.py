@@ -51,7 +51,10 @@ class ProjectModel(Base):
     git_url: Mapped[str] = mapped_column(String, nullable=False)
     local_saved_path: Mapped[str] = mapped_column(String, nullable=False)
     group_no: Mapped[str] = mapped_column(String, nullable=False, server_default="G-00")
+    store_local_copy: Mapped[bool] = mapped_column(Boolean, default=False)
+    is_local_copy_stored: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    qualitative_report: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     course_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("courses.id", ondelete="CASCADE"), nullable=False
     )
@@ -151,6 +154,7 @@ class FileChangeModel(Base):
     lines_added: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     lines_removed: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     raw_diff: Mapped[Optional[str]] = mapped_column(Text)
+    blame_snapshot: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     # AST Qualitative Metrics (Phase 3)
     complexity_score: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)

@@ -8,11 +8,15 @@ class IProjectRepository(ABC):
         pass
 
     @abstractmethod
-    def create(self, name: str, description: Optional[str], git_url: str, course_id: int, group_no: str) -> ProjectEntity:
+    def create(self, name: str, description: Optional[str], git_url: str, course_id: int, group_no: str, store_local_copy: bool = False) -> ProjectEntity:
         pass
 
     @abstractmethod
     def update_local_path(self, project_id: int, local_path: str) -> None:
+        pass
+
+    @abstractmethod
+    def update_is_local_copy_stored(self, project_id: int, is_stored: bool) -> None:
         pass
 
     @abstractmethod

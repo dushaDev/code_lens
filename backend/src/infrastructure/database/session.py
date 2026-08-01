@@ -1,8 +1,11 @@
 import os
+from dotenv import load_dotenv
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.orm import sessionmaker
 
 from src.infrastructure.database.models import Base
+
+load_dotenv()
 
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:admin@localhost:5432/codelens_db")
 
@@ -18,6 +21,9 @@ def init_db():
         if 'group_no' not in columns:
             with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE projects ADD COLUMN group_no VARCHAR NOT NULL DEFAULT 'G-00';"))
+        if 'qualitative_report' not in columns:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE projects ADD COLUMN qualitative_report TEXT NULL;"))
     except Exception as e:
         print(f"Database migration check failed/skipped: {e}")
 

@@ -9,7 +9,7 @@ from pydriller import Repository
 
 from src.domain.entities import ProjectEntity
 from src.use_cases.interfaces import IGitExtractorService
-from src.infrastructure.database.models import AuthorModel, CommitModel, FileChangeModel, BranchModel
+from src.infrastructure.database.models import ProjectModel, AuthorModel, CommitModel, FileChangeModel, BranchModel
 from src.infrastructure.services.ast_parser import parse_source, get_language_for_file
 
 
@@ -101,14 +101,17 @@ class PyDrillerService(IGitExtractorService):
         self.db = db
 
     def extract_and_save(self, project: ProjectEntity) -> dict:
-        local_path = project.local_saved_path
-        temp_dir = os.path.dirname(local_path)  # e.g. temp_repos/2/
+        should_store_local = getattr(project, "store_local_copy", False)
+        if should_store_local:
+            target_dir = os.path.join("saved_repos", f"project_{project.id}")
+        else:
+            target_dir = os.path.join("temp_repos", f"project_{project.id}")
 
         # --- Clean up any stale directory from a previous failed run ---
-        if os.path.exists(temp_dir):
-            _safe_rmtree(temp_dir)
+        if os.path.exists(target_dir):
+            _safe_rmtree(target_dir)
 
-        os.makedirs(temp_dir, exist_ok=True)
+        os.makedirs(target_dir, exist_ok=True)
 
         total_commits = 0
         squash_warnings = 0
@@ -121,14 +124,12 @@ class PyDrillerService(IGitExtractorService):
             try:
                 repo = Repository(
                     project.git_url,
-                    clone_repo_to=temp_dir,
+                    clone_repo_to=target_dir,
                     only_no_merge=True,
                     include_refs=True,
                 )
             except Exception as clone_err:
-                # GitCommandError.str() is often just a path — unwrap it
                 err_str = str(clone_err).strip()
-                # Try to get the actual stderr from GitCommandError
                 stderr = getattr(clone_err, "stderr", None) or ""
                 if stderr:
                     err_str = stderr.strip()
@@ -139,29 +140,22 @@ class PyDrillerService(IGitExtractorService):
                     f"Details: {err_str}"
                 ) from clone_err
 
-            # ----------------------------------------------------------------
-            # Step 2 & 3: Traverse commits.
-            # PyDriller clones the repo LAZILY — the clone only happens when
-            # traverse_commits() starts iterating, NOT in the constructor.
-            # We detect the actual cloned directory and load .mailmap on the
-            # very first iteration, once the clone is guaranteed to exist.
-            # ----------------------------------------------------------------
             mailmap_data = {}
             branch_cache = {}  # key: (project_id, branch_name) -> BranchModel
             mailmap_loaded = False
+            cloned_subfolder = None
 
             for commit in repo.traverse_commits():
-                # Load .mailmap on the very first iteration — by now the clone
-                # directory is guaranteed to exist on disk.
                 if not mailmap_loaded:
                     mailmap_loaded = True
-                    for entry in os.listdir(temp_dir):
-                        candidate = os.path.join(temp_dir, entry)
+                    for entry in os.listdir(target_dir):
+                        candidate = os.path.join(target_dir, entry)
                         if os.path.isdir(candidate):
+                            cloned_subfolder = candidate
                             mf = os.path.join(candidate, ".mailmap")
                             if os.path.isfile(mf):
                                 mailmap_data = parse_mailmap(mf)
-                            break  # only one clone subdir
+                            break
 
                 # 1. Author Resolution
                 author_email = commit.author.email
@@ -277,22 +271,58 @@ class PyDrillerService(IGitExtractorService):
                         function_count=function_count,
                         ast_fingerprint=ast_fingerprint,
                     )
+                    
+                    # 6. Extract Git Blame (if file exists and is not deleted)
+                    if mod.change_type.name != "DELETE" and mod.new_path:
+                        try:
+                            import subprocess
+                            import json
+                            blame_res = subprocess.run(
+                                ['git', '-C', target_dir, 'blame', '-e', commit.hash, '--', mod.new_path],
+                                stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE,
+                                text=True,
+                                check=True
+                            )
+                            blame_counts = {}
+                            for line in blame_res.stdout.split('\n'):
+                                if not line:
+                                    continue
+                                match = re.search(r'<([^>]+)>', line)
+                                if match:
+                                    email = match.group(1).lower().strip()
+                                    if email in mailmap_data:
+                                        email = mailmap_data[email]["email"]
+                                    blame_counts[email] = blame_counts.get(email, 0) + 1
+                                    
+                            if blame_counts:
+                                file_change.blame_snapshot = json.dumps(blame_counts)
+                        except Exception:
+                            pass
+
                     self.db.add(file_change)
 
                 self.db.flush()
+
+            # Update project local_saved_path & is_local_copy_stored if enabled
+            if should_store_local:
+                actual_path = cloned_subfolder or target_dir
+                proj_model = self.db.query(ProjectModel).filter(ProjectModel.id == project.id).first()
+                if proj_model:
+                    proj_model.local_saved_path = os.path.abspath(actual_path)
+                    proj_model.is_local_copy_stored = True
 
             self.db.commit()
 
         except Exception as e:
             self.db.rollback()
-            # Re-raise with the original exception type preserved so callers
-            # can distinguish RuntimeError (our messages) from everything else
             raise
 
         finally:
-            # Always delete the cloned repo to keep disk clean
-            if os.path.exists(temp_dir):
-                _safe_rmtree(temp_dir)
+            # Delete directory ONLY if store_local_copy is False
+            if not should_store_local:
+                if os.path.exists(target_dir):
+                    _safe_rmtree(target_dir)
 
         return {
             "status": "success",

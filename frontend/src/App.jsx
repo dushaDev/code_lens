@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import Sidebar from './components/Sidebar';
 import Header from './components/Header';
 import Login from './views/Login/Login';
@@ -10,6 +10,7 @@ import Plagiarism from './views/Plagiarism/Plagiarism';
 import Settings from './views/Settings/Settings';
 import Analytics from './views/Analytics/Analytics';
 import CreateProjectModal from './components/CreateProjectModal';
+import QualitativeFloatingPill from './components/QualitativeFloatingPill';
 import './App.css';
 
 export default function App() {
@@ -28,6 +29,20 @@ export default function App() {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [authLoading, setAuthLoading] = useState(true);
 
+  // ── Global Qualitative Analysis State ──────────────────────────────────────
+  // Persists across tab switches so background processing continues
+  const [qualAnalysisState, setQualAnalysisState] = useState({
+    projectId: null,
+    status: 'idle',    // 'idle' | 'running' | 'cancelling' | 'complete' | 'cancelled'
+    progress: 0,
+    message: '',
+    logs: [],
+    data: null,
+  });
+  const [pillDismissed, setPillDismissed] = useState(false);
+  const qualAbortRef = useRef(null);  // AbortController for the streaming fetch
+  // ──────────────────────────────────────────────────────────────────────────
+
   // Global 401 interceptor to redirect to login on unauthorized access
   useEffect(() => {
     const originalFetch = window.fetch;
@@ -43,6 +58,116 @@ export default function App() {
       window.fetch = originalFetch;
     };
   }, []);
+
+  // ── Global Qualitative Stream Logic ──────────────────────────────────────
+  const triggerQualitativeAnalysis = async (projectId, forceRefresh = false) => {
+    // Abort any existing stream for a different project
+    if (qualAbortRef.current) {
+      qualAbortRef.current.abort();
+      qualAbortRef.current = null;
+    }
+
+    const controller = new AbortController();
+    qualAbortRef.current = controller;
+    const token = localStorage.getItem('token');
+
+    setQualAnalysisState(prev => ({
+      ...prev,
+      projectId,
+      status: 'running',
+      progress: 0,
+      message: forceRefresh ? 'Re-analyzing project...' : 'Initializing local AI pipeline...',
+      logs: forceRefresh ? [] : prev.logs,
+      data: forceRefresh ? null : prev.data,
+    }));
+    setPillDismissed(false);
+
+    try {
+      const url = `/api/v1/projects/${projectId}/qualitative-analysis${forceRefresh ? '?force_refresh=true' : ''}`;
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` },
+        signal: controller.signal
+      });
+
+      if (!res.ok) throw new Error('Failed to start qualitative analysis.');
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop();
+
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          try {
+            const event = JSON.parse(line.trim());
+            if (event.type === 'progress') {
+              setQualAnalysisState(prev => ({
+                ...prev,
+                status: 'running',
+                progress: event.progress || prev.progress,
+                message: event.message || prev.message,
+                logs: event.log_entry ? [...prev.logs, event.log_entry] : prev.logs,
+              }));
+            } else if (event.type === 'complete') {
+              setQualAnalysisState(prev => ({
+                ...prev,
+                status: 'complete',
+                progress: 100,
+                message: 'Analysis Complete!',
+                data: event.data,
+              }));
+            } else if (event.type === 'cancelled') {
+              setQualAnalysisState(prev => ({
+                ...prev,
+                status: 'cancelled',
+                progress: 0,
+                message: 'Analysis stopped by user.',
+              }));
+            }
+          } catch (jsonErr) {
+            console.error('Stream parse error:', jsonErr);
+          }
+        }
+      }
+    } catch (e) {
+      if (e.name !== 'AbortError') {
+        console.error('Qualitative stream error:', e);
+        setQualAnalysisState(prev => ({
+          ...prev,
+          status: 'cancelled',
+          message: 'Error running local AI analysis.',
+        }));
+      }
+    }
+  };
+
+  const handleStopQualitative = async (projectId) => {
+    if (qualAbortRef.current) {
+      qualAbortRef.current.abort();
+      qualAbortRef.current = null;
+    }
+    setQualAnalysisState(prev => ({ ...prev, status: 'cancelling', message: 'Cancelling backend local AI process...' }));
+    try {
+      const token = localStorage.getItem('token');
+      await fetch(`/api/v1/projects/${projectId}/qualitative-analysis/cancel`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      setQualAnalysisState(prev => ({ ...prev, status: 'cancelled', progress: 0, message: 'Analysis stopped by user.' }));
+    } catch (err) {
+      console.error('Failed to signal cancel to backend:', err);
+      setQualAnalysisState(prev => ({ ...prev, status: 'cancelled', message: 'Analysis stopped.' }));
+    }
+  };
+  // ──────────────────────────────────────────────────────────────────────────
 
   // 1. Initial auth check
   useEffect(() => {
@@ -411,7 +536,10 @@ export default function App() {
           {selectedProject ? (
             <Analytics 
               project={selectedProject} 
-              onBack={() => setSelectedProject(null)} 
+              onBack={() => setSelectedProject(null)}
+              qualAnalysisState={qualAnalysisState.projectId === selectedProject.id ? qualAnalysisState : { projectId: selectedProject.id, status: 'idle', progress: 0, message: '', logs: [], data: null }}
+              onStartQualitative={(forceRefresh) => triggerQualitativeAnalysis(selectedProject.id, forceRefresh)}
+              onStopQualitative={() => handleStopQualitative(selectedProject.id)}
             />
           ) : (
             <>
@@ -470,6 +598,24 @@ export default function App() {
           course={currentCourse}
           onClose={() => setShowCreateModal(false)}
           onProjectCreated={handleProjectCreated}
+        />
+      )}
+
+      {/* Global floating pill — shown when analysis runs while user navigated elsewhere */}
+      {qualAnalysisState.status !== 'idle' &&
+       qualAnalysisState.status !== 'complete' &&
+       qualAnalysisState.status !== 'cancelled' &&
+       !pillDismissed &&
+       !(selectedProject && selectedProject.id === qualAnalysisState.projectId) && (
+        <QualitativeFloatingPill
+          qualAnalysisState={qualAnalysisState}
+          onView={() => {
+            // Navigate back to the project analytics
+            const proj = projects.find(p => p.id === qualAnalysisState.projectId);
+            if (proj) setSelectedProject(proj);
+            setPillDismissed(false);
+          }}
+          onDismiss={() => setPillDismissed(true)}
         />
       )}
     </div>

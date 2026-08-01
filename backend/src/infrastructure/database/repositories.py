@@ -138,12 +138,14 @@ class ProjectRepository(IProjectRepository):
             git_url=project_model.git_url,
             local_saved_path=project_model.local_saved_path,
             group_no=project_model.group_no or "G-00",
+            store_local_copy=project_model.store_local_copy or False,
+            is_local_copy_stored=project_model.is_local_copy_stored or False,
             created_at=project_model.created_at,
             course_id=project_model.course_id,
             tech_stack=self._detect_tech_stack(project_model.id)
         )
 
-    def create(self, name: str, description: Optional[str], git_url: str, course_id: int, group_no: str) -> ProjectEntity:
+    def create(self, name: str, description: Optional[str], git_url: str, course_id: int, group_no: str, store_local_copy: bool = False) -> ProjectEntity:
         # Initial saved path is empty, updated via update_local_path once ID is flushed/committed
         project_model = ProjectModel(
             name=name,
@@ -151,6 +153,8 @@ class ProjectRepository(IProjectRepository):
             git_url=git_url,
             local_saved_path="",
             group_no=group_no,
+            store_local_copy=store_local_copy,
+            is_local_copy_stored=False,
             course_id=course_id
         )
         self.db.add(project_model)
@@ -163,6 +167,8 @@ class ProjectRepository(IProjectRepository):
             git_url=project_model.git_url,
             local_saved_path=project_model.local_saved_path,
             group_no=project_model.group_no or "G-00",
+            store_local_copy=project_model.store_local_copy,
+            is_local_copy_stored=project_model.is_local_copy_stored,
             created_at=project_model.created_at,
             course_id=project_model.course_id,
             tech_stack=self._detect_tech_stack(project_model.id)
@@ -172,6 +178,12 @@ class ProjectRepository(IProjectRepository):
         project_model = self.db.query(ProjectModel).filter(ProjectModel.id == project_id).first()
         if project_model:
             project_model.local_saved_path = local_path
+            self.db.commit()
+
+    def update_is_local_copy_stored(self, project_id: int, is_stored: bool) -> None:
+        project_model = self.db.query(ProjectModel).filter(ProjectModel.id == project_id).first()
+        if project_model:
+            project_model.is_local_copy_stored = is_stored
             self.db.commit()
 
     def delete(self, project_id: int) -> bool:
@@ -191,6 +203,8 @@ class ProjectRepository(IProjectRepository):
                 git_url=m.git_url,
                 local_saved_path=m.local_saved_path,
                 group_no=m.group_no or "G-00",
+                store_local_copy=m.store_local_copy or False,
+                is_local_copy_stored=m.is_local_copy_stored or False,
                 description=m.description,
                 created_at=m.created_at,
                 course_id=m.course_id,
@@ -214,6 +228,8 @@ class ProjectRepository(IProjectRepository):
                 git_url=m.git_url,
                 local_saved_path=m.local_saved_path,
                 group_no=m.group_no or "G-00",
+                store_local_copy=m.store_local_copy or False,
+                is_local_copy_stored=m.is_local_copy_stored or False,
                 description=m.description,
                 created_at=m.created_at,
                 course_id=m.course_id,
@@ -485,7 +501,7 @@ class CommitRepository(ICommitRepository):
         commit_models = (
             self.db.query(CommitModel)
             .filter(CommitModel.project_id == project_id)
-            .options(selectinload(CommitModel.branches))
+            .options(selectinload(CommitModel.branches), selectinload(CommitModel.file_changes))
             .all()
         )
         return [
@@ -501,6 +517,18 @@ class CommitRepository(ICommitRepository):
                 branches=[
                     BranchEntity(id=b.id, project_id=b.project_id, name=b.name, short_name=b.short_name)
                     for b in m.branches
+                ],
+                file_changes=[
+                    FileChangeEntity(
+                        id=fc.id,
+                        commit_hash=fc.commit_hash,
+                        filename=fc.filename,
+                        status=fc.status,
+                        lines_added=fc.lines_added,
+                        lines_removed=fc.lines_removed,
+                        raw_diff=fc.raw_diff
+                    )
+                    for fc in m.file_changes
                 ]
             )
             for m in commit_models

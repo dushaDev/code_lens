@@ -1,7 +1,10 @@
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from typing import List, Optional
 import os
+import json
+
 
 from src.infrastructure.database.session import get_db
 from src.infrastructure.database.repositories import ProjectRepository, AuthorRepository, CommitRepository, DatabaseService, CourseRepository
@@ -20,7 +23,7 @@ from src.infrastructure.api.schemas import (
     FileChangeMetricsResponse, FileChangeASTResponse, ASTNodeResponse,
     CourseCreateRequest, CourseResponse, CoursesListResponse,
     UserRegisterRequest, UserResponse, UserUpdateRequest, UsersListResponse, TokenResponse, LoginRequest,
-    CourseResetRequest, SearchResultItem, SearchResponse
+    CourseResetRequest, SearchResultItem, SearchResponse, QualitativeAnalysisResponse
 )
 from src.use_cases.extract_git_history import ExtractGitHistoryUseCase
 from src.use_cases.get_author_commits import (
@@ -28,7 +31,11 @@ from src.use_cases.get_author_commits import (
     GetAllProjectsUseCase, GetProjectsByAuthorUseCase, GetProjectAuthorsUseCase,
     ResetCourseUseCase, MergeAuthorsUseCase
 )
+from src.use_cases.get_project_files import (
+    GetProjectFileTreeUseCase, GetProjectFileContentUseCase
+)
 from src.use_cases.get_project_analytics import GetProjectAnalyticsUseCase
+from src.use_cases.get_qualitative_analysis import GetQualitativeAnalysisUseCase, cancel_qualitative_analysis, get_project_analysis_status
 from src.use_cases.get_project_details import (
     GetProjectByIdUseCase, GetProjectBranchesUseCase, GetProjectCommitsUseCase
 )
@@ -447,11 +454,12 @@ def create_project(
         description=request.description,
         git_url=request.git_url,
         course_id=request.course_id,
-        group_no=request.group_no
+        group_no=request.group_no,
+        store_local_copy=request.store_local_copy or False
     )
 
     # 2. Update project with unique local path using its ID
-    local_path = f"./temp_repos/{project.id}/repo"
+    local_path = f"./saved_repos/project_{project.id}" if project.store_local_copy else f"./temp_repos/project_{project.id}"
     repo.update_local_path(project.id, local_path)
 
     return ProjectCreateResponse(
@@ -459,7 +467,9 @@ def create_project(
         name=project.name, 
         course_id=project.course_id,
         group_no=project.group_no,
-        tech_stack=project.tech_stack
+        tech_stack=project.tech_stack,
+        store_local_copy=project.store_local_copy,
+        is_local_copy_stored=project.is_local_copy_stored
     )
 
 
@@ -511,6 +521,55 @@ def delete_project(
     if not success:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
     return None
+
+
+@router.get(
+    "/projects/{project_id}/files/tree",
+    tags=["Projects"],
+    responses={400: {"model": ErrorResponse}, 401: {"model": ErrorResponse}, 404: {"model": ErrorResponse}, 500: {"model": ErrorResponse}}
+)
+def get_project_file_tree(
+    project_id: int,
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_user)
+):
+    _get_project_for_user(project_id, current_user.id, db)
+    project_repo = ProjectRepository(db)
+    use_case = GetProjectFileTreeUseCase(project_repo)
+    try:
+        return use_case.execute(project_id)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+@router.get(
+    "/projects/{project_id}/files/content",
+    tags=["Projects"],
+    responses={400: {"model": ErrorResponse}, 401: {"model": ErrorResponse}, 403: {"model": ErrorResponse}, 404: {"model": ErrorResponse}, 500: {"model": ErrorResponse}}
+)
+def get_project_file_content(
+    project_id: int,
+    file_path: str,
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_user)
+):
+    _get_project_for_user(project_id, current_user.id, db)
+    project_repo = ProjectRepository(db)
+    use_case = GetProjectFileContentUseCase(project_repo)
+    try:
+        return use_case.execute(project_id, file_path)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except PermissionError as e:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 
 @router.get(
@@ -703,8 +762,69 @@ def get_project_analytics(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 
+@router.post(
+    "/projects/{project_id}/qualitative-analysis",
+    tags=["Projects"],
+    responses={401: {"model": ErrorResponse}, 404: {"model": ErrorResponse}, 500: {"model": ErrorResponse}}
+)
+def get_qualitative_analysis(
+    project_id: int,
+    force_refresh: bool = False,
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_user)
+):
+    _get_project_for_user(project_id, current_user.id, db)
+    project_repo = ProjectRepository(db)
+    author_repo = AuthorRepository(db)
+    commit_repo = CommitRepository(db)
+    use_case = GetQualitativeAnalysisUseCase(project_repo, author_repo, commit_repo)
+    
+    def generate_events():
+        for chunk in use_case.execute_stream(project_id, force_refresh=force_refresh):
+            yield json.dumps(chunk) + "\n"
+
+    return StreamingResponse(generate_events(), media_type="application/x-ndjson")
+
+
+@router.post(
+    "/projects/{project_id}/qualitative-analysis/cancel",
+    tags=["Projects"]
+)
+def cancel_qualitative_analysis_route(
+    project_id: int,
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_user)
+):
+    _get_project_for_user(project_id, current_user.id, db)
+    cancel_qualitative_analysis(project_id)
+    return {"message": f"Qualitative analysis for project {project_id} marked for cancellation."}
+
+
+@router.get(
+    "/projects/{project_id}/qualitative-analysis/status",
+    tags=["Projects"]
+)
+def get_qualitative_analysis_status_route(
+    project_id: int,
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_user)
+):
+    """Get the current status of an in-progress or completed qualitative analysis job."""
+    _get_project_for_user(project_id, current_user.id, db)
+    status_data = get_project_analysis_status(project_id)
+    # If idle in memory, also check DB for cached report
+    if status_data["status"] == "idle":
+        project_repo = ProjectRepository(db)
+        project = project_repo.get_by_id(project_id)
+        if project and getattr(project, 'qualitative_report', None):
+            return {"status": "complete", "progress": 100, "message": "Loaded from database cache.", "has_db_cache": True}
+        return {"status": "idle", "progress": 0, "message": "", "has_db_cache": False}
+    return status_data
+
+
 @router.get(
     "/commits/{commit_hash}",
+
     response_model=CommitWithProjectAndFilesResponse,
     tags=["Commits"],
     responses={401: {"model": ErrorResponse}, 404: {"model": ErrorResponse}, 500: {"model": ErrorResponse}}

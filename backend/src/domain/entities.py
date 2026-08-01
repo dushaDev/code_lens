@@ -14,6 +14,7 @@ class FileChangeEntity:
     complexity_score: Optional[int] = None
     function_count: Optional[int] = None
     ast_fingerprint: Optional[str] = None
+    blame_snapshot: Optional[str] = None
 
 @dataclass
 class BranchEntity:
@@ -51,6 +52,8 @@ class ProjectEntity:
     git_url: str
     local_saved_path: str
     group_no: str
+    store_local_copy: bool = False
+    is_local_copy_stored: bool = False
     course_id: Optional[int] = None
     description: Optional[str] = None
     created_at: Optional[datetime] = None

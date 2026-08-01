@@ -73,6 +73,7 @@ class ProjectCreateRequest(BaseModel):
     git_url: str
     course_id: int
     group_no: str
+    store_local_copy: Optional[bool] = False
 
 class ProjectCreateResponse(BaseModel):
     project_id: int
@@ -80,6 +81,8 @@ class ProjectCreateResponse(BaseModel):
     course_id: int
     group_no: Optional[str] = "G-00"
     tech_stack: List[str] = []
+    store_local_copy: bool = False
+    is_local_copy_stored: bool = False
 
 class ExtractResponse(BaseModel):
     status: str
@@ -108,6 +111,8 @@ class ProjectResponse(BaseModel):
     git_url: str
     local_saved_path: str
     group_no: Optional[str] = "G-00"
+    store_local_copy: bool = False
+    is_local_copy_stored: bool = False
     tech_stack: List[str] = []
     created_at: datetime
     course_id: Optional[int] = None
@@ -259,3 +264,34 @@ class SearchResultItem(BaseModel):
 class SearchResponse(BaseModel):
     results: List[SearchResultItem]
     error: Optional[str] = None
+
+class CommitVerificationResponse(BaseModel):
+    hash: str
+    author_name: str
+    message: str
+    match_percentage: int
+    reason: str
+
+class AuthorQualitativeProfileResponse(BaseModel):
+    author_id: int
+    name: str
+    email: str
+    commit_count: int
+    total_insertions: int
+    squash_count: int
+    risk_flag: str
+
+class ArchitectureAnalysisResponse(BaseModel):
+    pattern_name: str
+    accuracy_score: int
+    assessment: str
+
+class QualitativeAnalysisResponse(BaseModel):
+    project_id: int
+    overall_truthfulness_score: int
+    executive_summary: str
+    architecture_analysis: Optional[ArchitectureAnalysisResponse] = None
+    commit_verifications: List[CommitVerificationResponse]
+    author_profiles: List[AuthorQualitativeProfileResponse]
+
+
