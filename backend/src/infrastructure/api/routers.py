@@ -504,6 +504,40 @@ def extract_git_data(
         )
 
 
+@router.post(
+    "/projects/{project_id}/sync",
+    response_model=ExtractResponse,
+    tags=["Projects"],
+    responses={401: {"model": ErrorResponse}, 404: {"model": ErrorResponse}, 500: {"model": ErrorResponse}}
+)
+def sync_project_updates(
+    project_id: int,
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_user)
+):
+    """
+    Pulls latest git commits from remote git_url, updating project files, commits, and analytics.
+    """
+    _get_project_for_user(project_id, current_user.id, db)
+
+    project_repo = ProjectRepository(db)
+    extractor_service = PyDrillerService(db)
+    use_case = ExtractGitHistoryUseCase(project_repo, extractor_service)
+
+    try:
+        result = use_case.execute(project_id)
+        return ExtractResponse(**result)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except RuntimeError as e:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"{type(e).__name__}: {str(e)}"
+        )
+
+
 @router.delete(
     "/projects/{project_id}",
     status_code=status.HTTP_204_NO_CONTENT,

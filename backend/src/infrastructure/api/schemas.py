@@ -73,7 +73,7 @@ class ProjectCreateRequest(BaseModel):
     git_url: str
     course_id: int
     group_no: str
-    store_local_copy: Optional[bool] = False
+    store_local_copy: Optional[bool] = True
 
 class ProjectCreateResponse(BaseModel):
     project_id: int
@@ -81,8 +81,8 @@ class ProjectCreateResponse(BaseModel):
     course_id: int
     group_no: Optional[str] = "G-00"
     tech_stack: List[str] = []
-    store_local_copy: bool = False
-    is_local_copy_stored: bool = False
+    store_local_copy: bool = True
+    is_local_copy_stored: bool = True
 
 class ExtractResponse(BaseModel):
     status: str
@@ -111,8 +111,8 @@ class ProjectResponse(BaseModel):
     git_url: str
     local_saved_path: str
     group_no: Optional[str] = "G-00"
-    store_local_copy: bool = False
-    is_local_copy_stored: bool = False
+    store_local_copy: bool = True
+    is_local_copy_stored: bool = True
     tech_stack: List[str] = []
     created_at: datetime
     course_id: Optional[int] = None

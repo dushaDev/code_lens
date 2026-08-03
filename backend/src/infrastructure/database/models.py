@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import List, Optional
 
-from sqlalchemy import Integer, String, Text, Boolean, DateTime, ForeignKey, Table, Column
+from sqlalchemy import Integer, String, Text, Boolean, DateTime, ForeignKey, Table, Column, BigInteger, Float
 from sqlalchemy.orm import declarative_base, Mapped, mapped_column, relationship
 
 Base = declarative_base()
@@ -162,3 +162,60 @@ class FileChangeModel(Base):
     ast_fingerprint: Mapped[Optional[str]] = mapped_column(String, nullable=True)
 
     commit: Mapped["CommitModel"] = relationship("CommitModel", back_populates="file_changes")
+
+
+class ProjectFingerprintModel(Base):
+    __tablename__ = "project_fingerprints"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    project_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    hash_value: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
+    file_path: Mapped[str] = mapped_column(String, nullable=False)
+    line_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    project: Mapped["ProjectModel"] = relationship("ProjectModel")
+
+
+class SimilarityReportModel(Base):
+    __tablename__ = "similarity_reports"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    course_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("courses.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    project_a_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    project_b_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    similarity_score: Mapped[float] = mapped_column(Float, nullable=False)
+    matched_hashes_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    matched_blocks_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(String, default="Needs Review", server_default="Needs Review")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    project_a: Mapped["ProjectModel"] = relationship("ProjectModel", foreign_keys=[project_a_id])
+    project_b: Mapped["ProjectModel"] = relationship("ProjectModel", foreign_keys=[project_b_id])
+
+
+class ComparisonCoverageModel(Base):
+    __tablename__ = "comparison_coverage"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    course_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("courses.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    project_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, unique=True, index=True
+    )
+    total_required_comparisons: Mapped[int] = mapped_column(Integer, default=0)
+    completed_comparisons: Mapped[int] = mapped_column(Integer, default=0)
+    status: Mapped[str] = mapped_column(String, default="completed")
+    last_updated: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    project: Mapped["ProjectModel"] = relationship("ProjectModel")
+

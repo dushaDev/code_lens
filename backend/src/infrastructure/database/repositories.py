@@ -1,10 +1,14 @@
 import os
+import shutil
 from collections import Counter
 from typing import List, Optional
 from sqlalchemy.orm import Session, selectinload, joinedload, defer
 from src.domain.entities import ProjectEntity, AuthorEntity, CommitEntity, FileChangeEntity, BranchEntity, CourseEntity
 from src.use_cases.interfaces import IProjectRepository, IAuthorRepository, ICommitRepository, IDatabaseService, ICourseRepository
-from src.infrastructure.database.models import ProjectModel, AuthorModel, CommitModel, FileChangeModel, BranchModel, CourseModel, Base
+from src.infrastructure.database.models import (
+    ProjectModel, AuthorModel, CommitModel, FileChangeModel, BranchModel, CourseModel, Base,
+    ProjectFingerprintModel, SimilarityReportModel, ComparisonCoverageModel
+)
 from src.infrastructure.database.session import engine
 
 class ProjectRepository(IProjectRepository):
@@ -145,7 +149,7 @@ class ProjectRepository(IProjectRepository):
             tech_stack=self._detect_tech_stack(project_model.id)
         )
 
-    def create(self, name: str, description: Optional[str], git_url: str, course_id: int, group_no: str, store_local_copy: bool = False) -> ProjectEntity:
+    def create(self, name: str, description: Optional[str], git_url: str, course_id: int, group_no: str, store_local_copy: bool = True) -> ProjectEntity:
         # Initial saved path is empty, updated via update_local_path once ID is flushed/committed
         project_model = ProjectModel(
             name=name,
@@ -153,8 +157,8 @@ class ProjectRepository(IProjectRepository):
             git_url=git_url,
             local_saved_path="",
             group_no=group_no,
-            store_local_copy=store_local_copy,
-            is_local_copy_stored=False,
+            store_local_copy=True,
+            is_local_copy_stored=True,
             course_id=course_id
         )
         self.db.add(project_model)
@@ -190,6 +194,30 @@ class ProjectRepository(IProjectRepository):
         project_model = self.db.query(ProjectModel).filter(ProjectModel.id == project_id).first()
         if not project_model:
             return False
+
+        # 1. Remove project files from local disk if directory exists
+        local_path = project_model.local_saved_path
+        if local_path and os.path.exists(local_path):
+            try:
+                shutil.rmtree(local_path, ignore_errors=True)
+            except Exception as e:
+                pass
+
+        # 2. Delete all related DB records explicitly
+        self.db.query(ProjectFingerprintModel).filter(ProjectFingerprintModel.project_id == project_id).delete(synchronize_session=False)
+        self.db.query(SimilarityReportModel).filter(
+            (SimilarityReportModel.project_a_id == project_id) | (SimilarityReportModel.project_b_id == project_id)
+        ).delete(synchronize_session=False)
+        self.db.query(ComparisonCoverageModel).filter(ComparisonCoverageModel.project_id == project_id).delete(synchronize_session=False)
+
+        commit_hashes = [c.hash for c in self.db.query(CommitModel.hash).filter(CommitModel.project_id == project_id).all()]
+        if commit_hashes:
+            self.db.query(FileChangeModel).filter(FileChangeModel.commit_hash.in_(commit_hashes)).delete(synchronize_session=False)
+            self.db.query(CommitModel).filter(CommitModel.project_id == project_id).delete(synchronize_session=False)
+
+        self.db.query(BranchModel).filter(BranchModel.project_id == project_id).delete(synchronize_session=False)
+
+        # 3. Delete Project record itself
         self.db.delete(project_model)
         self.db.commit()
         return True
@@ -249,6 +277,26 @@ class ProjectRepository(IProjectRepository):
             )
             for m in branch_models
         ]
+
+    def delete(self, project_id: int) -> bool:
+        project_model = self.db.query(ProjectModel).filter(ProjectModel.id == project_id).first()
+        if not project_model:
+            return False
+
+        # Delete local clone repository directory from disk
+        if project_model.local_saved_path and os.path.exists(project_model.local_saved_path):
+            shutil.rmtree(project_model.local_saved_path, ignore_errors=True)
+
+        fallback_path = f"./saved_repos/project_{project_id}"
+        if os.path.exists(fallback_path):
+            shutil.rmtree(fallback_path, ignore_errors=True)
+        temp_path = f"./temp_repos/project_{project_id}"
+        if os.path.exists(temp_path):
+            shutil.rmtree(temp_path, ignore_errors=True)
+
+        self.db.delete(project_model)
+        self.db.commit()
+        return True
 
 
 class AuthorRepository(IAuthorRepository):
@@ -597,6 +645,17 @@ class DatabaseService(IDatabaseService):
                 .all()
             )
             for project in projects:
+                # Delete local clone repository directory from disk
+                if project.local_saved_path and os.path.exists(project.local_saved_path):
+                    shutil.rmtree(project.local_saved_path, ignore_errors=True)
+
+                fallback_path = f"./saved_repos/project_{project.id}"
+                if os.path.exists(fallback_path):
+                    shutil.rmtree(fallback_path, ignore_errors=True)
+                temp_path = f"./temp_repos/project_{project.id}"
+                if os.path.exists(temp_path):
+                    shutil.rmtree(temp_path, ignore_errors=True)
+
                 session.delete(project)
             session.commit()
         except Exception as e:

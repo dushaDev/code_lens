@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { useNotification } from '../../contexts/NotificationContext';
 import { 
   Users, 
   GraduationCap, 
@@ -8,7 +9,9 @@ import {
   GitMerge, 
   Bot, 
   X, 
-  ArrowUpDown 
+  ArrowUpDown,
+  FolderGit2,
+  ArrowUpRight
 } from 'lucide-react';
 import Tag from '../../components/Tag';
 import './Students.css';
@@ -16,9 +19,18 @@ import './Students.css';
 export default function Students({ 
   students, 
   projects = [], 
-  onMergeAuthors 
+  onMergeAuthors,
+  onSelectProject,
+  initialSearch = ''
 }) {
-  const [search, setSearch] = useState('');
+  const { addNotification } = useNotification();
+  const [search, setSearch] = useState(initialSearch);
+
+  useEffect(() => {
+    if (initialSearch) {
+      setSearch(initialSearch);
+    }
+  }, [initialSearch]);
   const [projectFilter, setProjectFilter] = useState('all');
   const [sortOrder, setSortOrder] = useState('commits-desc');
   
@@ -26,6 +38,9 @@ export default function Students({
   const [showMergeModal, setShowMergeModal] = useState(false);
   const [selectedSourceStudent, setSelectedSourceStudent] = useState(null);
   const [mergeTargetId, setMergeTargetId] = useState('');
+
+  // Projects Modal state
+  const [projectsModalStudent, setProjectsModalStudent] = useState(null);
 
   // 1. Identify bots helper
   const isBot = (student) => {
@@ -85,7 +100,7 @@ export default function Students({
     if (!selectedSourceStudent || !mergeTargetId) return;
     
     if (selectedSourceStudent.id === parseInt(mergeTargetId)) {
-      alert("You cannot merge a student into themselves.");
+      addNotification({ type: 'warning', title: 'Invalid Merge', description: "You cannot merge a student into themselves." });
       return;
     }
 
@@ -235,6 +250,7 @@ export default function Students({
               <tr>
                 <th>Name/Username</th>
                 <th>Email</th>
+                <th>Projects Contributed</th>
                 <th>Commits</th>
                 <th>Impact Lines</th>
                 <th>Actions</th>
@@ -243,6 +259,14 @@ export default function Students({
             <tbody>
               {sortedStudents.map((student) => {
                 const studentIsBot = isBot(student);
+                const studentProjects = projects.filter((p) => {
+                  const isAuthor = Array.isArray(p.authors) && p.authors.some(
+                    a => a && a.email && String(a.email).toLowerCase() === String(student.email).toLowerCase()
+                  );
+                  const isInList = Array.isArray(student.projects) && student.projects.includes(p.id);
+                  return isAuthor || isInList;
+                });
+
                 return (
                   <tr key={student.id} className={studentIsBot ? 'row-bot' : ''}>
                     <td style={{ padding: '8px 12px' }}>
@@ -252,6 +276,53 @@ export default function Students({
                       </div>
                     </td>
                     <td className="muted-cell">{student.email}</td>
+                    <td>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', alignItems: 'center' }}>
+                        {studentProjects.slice(0, 2).map((proj) => (
+                          <button
+                            key={proj.id}
+                            className="btn btn-outline btn-sm"
+                            onClick={() => onSelectProject && onSelectProject(proj)}
+                            title={`Click to view analytics for ${proj.name}`}
+                            style={{ 
+                              padding: '3px 8px', 
+                              fontSize: '0.75rem', 
+                              gap: '4px',
+                              color: 'var(--primary)',
+                              borderColor: 'var(--border-color)',
+                              backgroundColor: 'var(--bg-app)',
+                              cursor: 'pointer'
+                            }}
+                          >
+                            <FolderGit2 size={12} />
+                            <span>{proj.name}</span>
+                          </button>
+                        ))}
+
+                        {studentProjects.length > 2 && (
+                          <button
+                            className="btn btn-outline btn-sm"
+                            onClick={() => setProjectsModalStudent({ student, projects: studentProjects })}
+                            title="Click to view all contributed projects"
+                            style={{ 
+                              padding: '3px 8px', 
+                              fontSize: '0.75rem', 
+                              fontWeight: 'bold',
+                              color: 'var(--primary)',
+                              backgroundColor: 'var(--primary-alpha)',
+                              borderColor: 'var(--border-color)',
+                              cursor: 'pointer'
+                            }}
+                          >
+                            +{studentProjects.length - 2}
+                          </button>
+                        )}
+
+                        {studentProjects.length === 0 && (
+                          <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>No projects</span>
+                        )}
+                      </div>
+                    </td>
                     <td className="bold-cell">{Math.round(student.commitsCount)}</td>
                     <td>
                       <span className="additions-text">+{Math.round(student.additions)}</span>
@@ -276,7 +347,7 @@ export default function Students({
               })}
               {sortedStudents.length === 0 && (
                 <tr>
-                  <td colSpan="5" className="empty-table-cell">
+                  <td colSpan="6" className="empty-table-cell">
                     <p>No students match your query filters.</p>
                   </td>
                 </tr>
@@ -360,7 +431,7 @@ export default function Students({
               </div>
 
               {/* Explanation Note */}
-              <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', backgroundColor: '#fffbeb', border: '1px solid #fef3c7', padding: '10px', borderRadius: '6px', display: 'flex', gap: '8px', alignItems: 'flex-start', marginBottom: '16px' }}>
+              <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', backgroundColor: 'var(--bg-app)', border: '1px solid var(--border-color)', padding: '10px 12px', borderRadius: 'var(--radius-sm)', display: 'flex', gap: '8px', alignItems: 'flex-start', marginBottom: '16px' }}>
                 <span>💡</span>
                 <div>
                 All commits, lines of code, and git activities from profile (1) will be consolidated into profile (2). Profile (1) will then be removed from the directory. <strong style={{ color: 'var(--color-danger)' }}>This action cannot be undone.</strong>
@@ -384,6 +455,87 @@ export default function Students({
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Projects List Popup Modal when +N is clicked */}
+      {projectsModalStudent && (
+        <div className="modal-overlay" style={{ zIndex: 9999 }}>
+          <div className="modal-card card" style={{ maxWidth: '540px', width: '90%' }}>
+            <div className="modal-header">
+              <div className="modal-title-box" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <FolderGit2 size={22} className="primary-text" />
+                <h2>Projects Contributed by {projectsModalStudent.student.name}</h2>
+              </div>
+              <button 
+                className="close-btn" 
+                onClick={() => setProjectsModalStudent(null)}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '16px', textAlign: 'left' }}>
+              Click any project card below to view detailed analytics and contribution metrics.
+            </p>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', maxHeight: '350px', overflowY: 'auto', paddingRight: '4px' }}>
+              {projectsModalStudent.projects.map((proj) => (
+                <div
+                  key={proj.id}
+                  className="card"
+                  onClick={() => {
+                    setProjectsModalStudent(null);
+                    if (onSelectProject) onSelectProject(proj);
+                  }}
+                  style={{
+                    padding: '14px 18px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    cursor: 'pointer',
+                    backgroundColor: 'var(--bg-card)',
+                    border: '1px solid var(--border-color)',
+                    borderRadius: 'var(--radius-md)',
+                    transition: 'var(--transition)'
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                    <div style={{
+                      width: '40px',
+                      height: '40px',
+                      borderRadius: '10px',
+                      backgroundColor: 'var(--primary-alpha)',
+                      color: 'var(--primary)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      flexShrink: 0
+                    }}>
+                      <FolderGit2 size={20} />
+                    </div>
+                    <div style={{ textAlign: 'left' }}>
+                      <div style={{ fontSize: '0.95rem', fontWeight: '600', color: 'var(--text-main)' }}>{proj.name}</div>
+                      <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+                        {proj.group_no || proj.groupNo || 'Group Project'} • {proj.authorsCount || (proj.authors?.length || 1)} Contributor(s)
+                      </div>
+                    </div>
+                  </div>
+
+                  <span style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                    fontSize: '0.8rem',
+                    fontWeight: '600',
+                    color: 'var(--primary)'
+                  }}>
+                    View Analytics <ArrowUpRight size={14} />
+                  </span>
+                </div>
+              ))}
+            </div>
           </div>
         </div>
       )}

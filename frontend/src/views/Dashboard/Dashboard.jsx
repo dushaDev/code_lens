@@ -1,4 +1,5 @@
 import React from 'react';
+import { useNotification } from '../../contexts/NotificationContext';
 import { 
   Folder, 
   Users, 
@@ -20,6 +21,7 @@ export default function Dashboard({
   onViewAnalytics, 
   onCreateProjectClick 
 }) {
+  const { addNotification } = useNotification();
 
   // Function to map tech stack names to beautiful background colors and icons
   const renderTechBadges = (techStack) => {
@@ -67,7 +69,7 @@ export default function Dashboard({
   };
 
   const handleExport = () => {
-    alert('Report downloaded successfully!');
+    addNotification({ type: 'success', title: 'Export Successful', description: 'Report downloaded successfully!' });
   };
 
   const getGreeting = () => {

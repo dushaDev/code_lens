@@ -145,6 +145,10 @@ class PyDrillerService(IGitExtractorService):
             mailmap_loaded = False
             cloned_subfolder = None
 
+            existing_commit_hashes = set(
+                h[0] for h in self.db.query(CommitModel.hash).filter(CommitModel.project_id == project.id).all()
+            )
+
             for commit in repo.traverse_commits():
                 if not mailmap_loaded:
                     mailmap_loaded = True
@@ -174,6 +178,34 @@ class PyDrillerService(IGitExtractorService):
                     self.db.add(author)
                     self.db.flush()
                     new_authors_count += 1
+
+                # Check if commit already exists in DB to prevent UniqueViolation on commits_pkey during sync
+                if commit.hash in existing_commit_hashes:
+                    existing_commit = self.db.query(CommitModel).filter(CommitModel.hash == commit.hash).first()
+                    if existing_commit and commit.branches:
+                        for b_name in commit.branches:
+                            cache_key = (project.id, b_name)
+                            if cache_key not in branch_cache:
+                                branch_model = self.db.query(BranchModel).filter(
+                                    BranchModel.project_id == project.id,
+                                    BranchModel.name == b_name
+                                ).first()
+                                if not branch_model:
+                                    short = clean_branch_short_name(b_name)
+                                    branch_model = BranchModel(
+                                        project_id=project.id,
+                                        name=b_name,
+                                        short_name=short,
+                                    )
+                                    self.db.add(branch_model)
+                                    self.db.flush()
+                                branch_cache[cache_key] = branch_model
+
+                            if branch_cache[cache_key] not in existing_commit.branches:
+                                existing_commit.branches.append(branch_cache[cache_key])
+                    continue
+
+                existing_commit_hashes.add(commit.hash)
 
                 # 2. Squash Heuristics
                 is_squash = False

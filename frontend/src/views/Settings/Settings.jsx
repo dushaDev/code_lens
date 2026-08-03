@@ -1,8 +1,10 @@
 import React, { useState } from 'react';
+import { useNotification } from '../../contexts/NotificationContext';
 import { Database, AlertTriangle, ShieldCheck, Save, Trash2, RotateCcw, Settings as SettingsIcon } from 'lucide-react';
 import './Settings.css';
 
 export default function Settings({ course, onCourseReset, onCourseDeleted }) {
+  const { addNotification } = useNotification();
   const [loading, setLoading] = useState(false);
   const [deleteLoading, setDeleteLoading] = useState(false);
   const [message, setMessage] = useState('');
@@ -83,7 +85,7 @@ export default function Settings({ course, onCourseReset, onCourseDeleted }) {
         throw new Error(data.detail || 'Failed to verify password.');
       }
 
-      alert(`Course "${course?.name}" has been permanently deleted.`);
+      addNotification({ type: 'success', title: 'Course Deleted', description: `Course "${course?.name}" has been permanently deleted.` });
       setDeletePassword('');
       if (onCourseDeleted) onCourseDeleted();
     } catch (err) {
@@ -125,7 +127,7 @@ export default function Settings({ course, onCourseReset, onCourseDeleted }) {
               <input type="checkbox" id="co-authored" defaultChecked />
               <label htmlFor="co-authored">Flag Co-authored commits as squash suspected</label>
             </div>
-            <button className="btn btn-primary btn-sm settings-action-btn" onClick={() => alert('Settings saved!')}>
+            <button className="btn btn-primary btn-sm settings-action-btn" onClick={() => addNotification({ type: 'success', title: 'Settings Saved', description: 'Parameters have been updated successfully.' })}>
               <Save size={16} />
               <span>Save Parameters</span>
             </button>

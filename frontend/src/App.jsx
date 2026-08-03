@@ -1,4 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { RefreshCw } from 'lucide-react';
+import { useNotification } from './contexts/NotificationContext';
 import Sidebar from './components/Sidebar';
 import Header from './components/Header';
 import Login from './views/Login/Login';
@@ -14,20 +16,37 @@ import QualitativeFloatingPill from './components/QualitativeFloatingPill';
 import './App.css';
 
 export default function App() {
+  const { addNotification, removeNotification, updateNotification } = useNotification();
   const [user, setUser] = useState(null);
   const [currentCourse, setCurrentCourse] = useState(null);
   const [currentTab, setCurrentTab] = useState('dashboard');
   const [selectedProject, setSelectedProject] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
+  const [studentSearchQuery, setStudentSearchQuery] = useState('');
+
+  const handleNavigateTab = (tab, query = '') => {
+    setSelectedProject(null);
+    setCurrentTab(tab);
+    if (tab === 'students') {
+      setStudentSearchQuery(query);
+    }
+  };
   
   // App state lists
   const [projects, setProjects] = useState([]);
   const [students, setStudents] = useState([]);
   const [plagiarismAlerts, setPlagiarismAlerts] = useState([]);
+  const [plagiarismClusters, setPlagiarismClusters] = useState([]);
+  const [plagiarismCoverage, setPlagiarismCoverage] = useState(null);
   
   // Modals
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [authLoading, setAuthLoading] = useState(true);
+  const [refreshCounter, setRefreshCounter] = useState(0);
+
+  // Automatic Plagiarism Check & Unread Counter
+  const [isAutoPlagiarismScanning, setIsAutoPlagiarismScanning] = useState(false);
+  const [unreadPlagiarismCount, setUnreadPlagiarismCount] = useState(0);
 
   // ── Global Qualitative Analysis State ──────────────────────────────────────
   // Persists across tab switches so background processing continues
@@ -235,16 +254,20 @@ export default function App() {
         if (!response.ok) throw new Error('API failed to load course projects');
         const data = await response.json();
 
-        if (data.projects.length === 0) {
+        const projList = Array.isArray(data.projects) ? data.projects : (Array.isArray(data) ? data : []);
+
+        if (projList.length === 0) {
           setProjects([]);
           setStudents([]);
           setPlagiarismAlerts([]);
+          setUnreadPlagiarismCount(0);
+          setIsAutoPlagiarismScanning(false);
           return;
         }
 
         // Fetch metrics and authors in parallel for each project
         const detailedProjects = await Promise.all(
-          data.projects.map(async (proj) => {
+          projList.map(async (proj) => {
             try {
               // 1. Fetch analytics (Gini coefficient & distribution status)
               const analyticsRes = await fetch(`/api/v1/projects/${proj.id}/analytics`, {
@@ -303,34 +326,40 @@ export default function App() {
 
         setProjects(detailedProjects);
 
-        // 4. Derive students directory dynamically from authors list
+        // 4. Derive students directory dynamically from authors list safely
         const studentsMap = {};
         detailedProjects.forEach((proj) => {
-          if (proj.authors) {
+          if (Array.isArray(proj.authors)) {
             proj.authors.forEach((auth) => {
-              const emailKey = auth.email.toLowerCase();
+              if (!auth) return;
+              const rawEmail = auth.email || auth.name || `author-${auth.id}`;
+              const emailKey = String(rawEmail).toLowerCase();
+
               if (!studentsMap[emailKey]) {
-                // Find matching stats in project analytics contributions
-                const contribution = proj.analytics?.contributions?.find(c => c.email.toLowerCase() === emailKey);
+                const contribution = Array.isArray(proj.analytics?.contributions) 
+                  ? proj.analytics.contributions.find(c => c && c.email && String(c.email).toLowerCase() === emailKey)
+                  : null;
                 
                 studentsMap[emailKey] = {
                   id: auth.id,
-                  name: auth.name,
-                  email: auth.email,
-                  studentId: `CS-${1000 + auth.id}`,
-                  commitsCount: contribution ? contribution.commit_count : (proj.commitsCount / (proj.authorsCount || 1)),
+                  name: auth.name || 'Unknown Author',
+                  email: auth.email || 'no-email@domain.com',
+                  studentId: `CS-${1000 + (auth.id || 0)}`,
+                  commitsCount: contribution ? contribution.commit_count : Math.round(proj.commitsCount / (proj.authorsCount || 1)),
                   additions: contribution ? contribution.lines_added : 0,
-                  deletions: contribution ? Math.floor(contribution.lines_added * 0.2) : 0,
+                  deletions: contribution ? Math.floor((contribution.lines_added || 0) * 0.2) : 0,
                   status: 'Active',
                   projects: [proj.id]
                 };
               } else {
-                // Accumulate commits/lines if student is in multiple projects
-                const contribution = proj.analytics?.contributions?.find(c => c.email.toLowerCase() === emailKey);
+                const contribution = Array.isArray(proj.analytics?.contributions) 
+                  ? proj.analytics.contributions.find(c => c && c.email && String(c.email).toLowerCase() === emailKey)
+                  : null;
+
                 if (contribution) {
-                  studentsMap[emailKey].commitsCount += contribution.commit_count;
-                  studentsMap[emailKey].additions += contribution.lines_added;
-                  studentsMap[emailKey].deletions += Math.floor(contribution.lines_added * 0.2);
+                  studentsMap[emailKey].commitsCount += (contribution.commit_count || 0);
+                  studentsMap[emailKey].additions += (contribution.lines_added || 0);
+                  studentsMap[emailKey].deletions += Math.floor((contribution.lines_added || 0) * 0.2);
                 }
                 if (!studentsMap[emailKey].projects.includes(proj.id)) {
                   studentsMap[emailKey].projects.push(proj.id);
@@ -343,38 +372,101 @@ export default function App() {
         const derivedStudents = Object.values(studentsMap);
         setStudents(derivedStudents);
 
-        // 5. Derive plagiarism alerts dynamically based on Gini index
-        const derivedAlerts = [];
-        const highRisk = detailedProjects.filter(p => p.plagiarismRisk === 'High Risk');
-        
-        highRisk.forEach((proj, idx) => {
-          const otherProj = detailedProjects.find(p => p.id !== proj.id) || { name: 'External Course Library' };
-          derivedAlerts.push({
-            id: idx + 1,
-            severity: 'High',
-            percentage: Math.floor(75 + (proj.gini * 20)), // Scale percentage with Gini coefficient
-            timestamp: 'Recently',
-            projectA: proj.name,
-            authorA: proj.authors?.[0]?.name || 'Student Team',
-            projectB: otherProj.name,
-            authorB: otherProj.authors?.[0]?.name || 'Reference Repository',
-            matchedFile: 'src/main.py',
-            status: 'Needs Review'
-          });
+        // 5. Automatic Plagiarism Check (Runs Winnowing AST analysis)
+        setIsAutoPlagiarismScanning(true);
+        const scanNotifId = addNotification({
+          type: 'info',
+          title: 'Automatic Plagiarism Check',
+          description: 'Parsing AST structures & k-grams (15%)...',
+          progress: true,
+          progressValue: 15,
+          autoClose: false
         });
 
-        setPlagiarismAlerts(derivedAlerts);
+        let currentProgress = 15;
+        const scanInterval = setInterval(() => {
+          if (currentProgress < 85) {
+            currentProgress += 15;
+            let msg = 'Comparing structural fingerprints (Winnowing)...';
+            if (currentProgress > 60) msg = 'Filtering match clusters & computing overlap...';
+            updateNotification(scanNotifId, {
+              progressValue: currentProgress,
+              description: `${msg} (${currentProgress}%)`
+            });
+          }
+        }, 200);
+
+        try {
+          const simRes = await fetch(`/api/v1/courses/${currentCourse.id}/similarity/analyze`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ k: 5, w: 4, similarity_threshold: 30.0 })
+          });
+
+          clearInterval(scanInterval);
+          updateNotification(scanNotifId, {
+            progressValue: 100,
+            description: 'Plagiarism check completed (100%)'
+          });
+
+          if (simRes.ok) {
+            const simData = await simRes.json();
+            const realAlerts = (simData.reports || []).map((r, idx) => ({
+              id: r.report_id || (idx + 1),
+              severity: r.confidence_level === 'HIGH' ? 'High' : 'Medium',
+              percentage: r.file_match_percentage || r.similarity_score,
+              fileMatchPct: r.file_match_percentage || r.similarity_score,
+              identifierOverlap: r.identifier_overlap_percentage || 100.0,
+              totalMatchRuns: r.total_match_runs || (r.matched_blocks?.length || 0),
+              maxContiguousTokens: r.max_contiguous_run_tokens || 0,
+              timestamp: r.created_at ? new Date(r.created_at).toLocaleDateString() : 'Recently',
+              projectA: r.project_a_name,
+              projectAId: r.project_a_id,
+              authorA: 'Project ' + r.project_a_name,
+              projectB: r.project_b_name,
+              projectBId: r.project_b_id,
+              authorB: 'Project ' + r.project_b_name,
+              matchedFile: r.matched_blocks?.[0]?.file_a || 'AST Structure Match',
+              matchedBlocks: r.matched_blocks || [],
+              status: r.status || 'Needs Review'
+            }));
+
+            setPlagiarismAlerts(realAlerts);
+            setPlagiarismClusters(simData.clusters || []);
+
+            const unreviewedCount = realAlerts.filter(a => !a.status || a.status === 'Needs Review').length;
+            setUnreadPlagiarismCount(unreviewedCount);
+
+            const covRes = await fetch(`/api/v1/courses/${currentCourse.id}/similarity/coverage`);
+            if (covRes.ok) {
+              const covData = await covRes.json();
+              setPlagiarismCoverage(covData);
+            }
+          } else {
+            setPlagiarismAlerts([]);
+            setPlagiarismClusters([]);
+            setUnreadPlagiarismCount(0);
+          }
+        } catch (e) {
+          console.warn('Could not run automatic similarity scan:', e);
+          setPlagiarismAlerts([]);
+          setUnreadPlagiarismCount(0);
+        } finally {
+          setIsAutoPlagiarismScanning(false);
+          removeNotification(scanNotifId);
+        }
 
       } catch (err) {
         console.error('Failed to load course details from API:', err);
         setProjects([]);
         setStudents([]);
         setPlagiarismAlerts([]);
+        setUnreadPlagiarismCount(0);
       }
     };
 
     loadCourseData();
-  }, [currentCourse]);
+  }, [currentCourse, refreshCounter]);
 
   const handleLoginSuccess = (userData) => {
     setUser(userData);
@@ -393,7 +485,8 @@ export default function App() {
   };
 
   const handleProjectCreated = (newProject) => {
-    window.location.reload();
+    setShowCreateModal(false);
+    setRefreshCounter(prev => prev + 1);
   };
 
   const handleDeleteProject = async (id) => {
@@ -416,11 +509,33 @@ export default function App() {
     }
   };
 
+  const handleSyncProject = async (projectId) => {
+    const token = localStorage.getItem('token');
+    try {
+      const res = await fetch(`/api/v1/projects/${projectId}/sync`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || 'Failed to pull updates from GitHub.');
+      }
+      setRefreshCounter(prev => prev + 1);
+      addNotification({ type: 'success', title: 'Sync Successful', description: `Project successfully updated from GitHub!` });
+    } catch (err) {
+      console.error('Failed to sync project:', err);
+      addNotification({ type: 'error', title: 'Sync Failed', description: err.message });
+    }
+  };
+
   const handleResolvePlagiarism = (id, result) => {
-    setPlagiarismAlerts(plagiarismAlerts.map(alert => 
+    setPlagiarismAlerts(prev => prev.map(alert => 
       alert.id === id ? { ...alert, status: 'Resolved', severity: result } : alert
     ));
-    alert(`Alert resolved as: ${result}`);
+    setUnreadPlagiarismCount(prev => Math.max(0, prev - 1));
+    addNotification({ type: 'success', title: 'Alert Resolved', description: `Alert resolved as: ${result}` });
   };
 
   const handleMergeAuthors = async (sourceId, targetId) => {
@@ -448,11 +563,10 @@ export default function App() {
         throw new Error(data.detail || 'Author merge failed.');
       }
 
-      alert('Student profiles merged successfully. Recalculating metrics...');
-      // Re-trigger course data loading
-      setCurrentCourse({ ...currentCourse });
+      setRefreshCounter(prev => prev + 1);
+      addNotification({ type: 'success', title: 'Merge Successful', description: 'Student profiles merged successfully. Recalculating metrics...' });
     } catch (err) {
-      alert('Merge failed: ' + err.message);
+      addNotification({ type: 'error', title: 'Merge Failed', description: err.message });
     }
   };
 
@@ -474,7 +588,7 @@ export default function App() {
     if (proj) {
       setSelectedProject(proj);
     } else {
-      alert('Could not open project analytics.');
+      addNotification({ type: 'error', title: 'Navigation Error', description: 'Could not open project analytics.' });
     }
   };
 
@@ -517,6 +631,8 @@ export default function App() {
         onCloseCourse={handleCloseCourse}
         onLogout={handleLogout}
         onCreateProjectClick={() => setShowCreateModal(true)}
+        unreadPlagiarismCount={unreadPlagiarismCount}
+        onClearUnreadPlagiarism={() => setUnreadPlagiarismCount(0)}
       />
 
       <main className="main-content">
@@ -526,7 +642,7 @@ export default function App() {
           setSearchTerm={setSearchTerm}
           currentCourse={currentCourse}
           onSelectProject={handleSelectProjectById}
-          onNavigateTab={setCurrentTab}
+          onNavigateTab={handleNavigateTab}
           onSelectCourse={setCurrentCourse}
           onLogout={handleLogout}
           onUserUpdate={(updatedUser) => setUser(updatedUser)}
@@ -559,6 +675,7 @@ export default function App() {
                   projects={projects}
                   onViewAnalytics={setSelectedProject}
                   onDeleteProject={handleDeleteProject}
+                  onSyncProject={handleSyncProject}
                 />
               )}
 
@@ -567,12 +684,17 @@ export default function App() {
                   students={students}
                   projects={projects}
                   onMergeAuthors={handleMergeAuthors}
+                  onSelectProject={setSelectedProject}
+                  initialSearch={studentSearchQuery}
                 />
               )}
 
               {currentTab === 'plagiarism' && (
                 <Plagiarism 
                   alerts={plagiarismAlerts} 
+                  clusters={plagiarismClusters}
+                  coverage={plagiarismCoverage}
+                  currentCourseId={currentCourse?.id}
                   onResolveAlert={handleResolvePlagiarism}
                 />
               )}
@@ -600,6 +722,9 @@ export default function App() {
           onProjectCreated={handleProjectCreated}
         />
       )}
+
+      {/* Floating Notification Pill when Plagiarism Scan runs in background */}
+      {/* Removed old UI pill in favor of centralized notifications */}
 
       {/* Global floating pill — shown when analysis runs while user navigated elsewhere */}
       {qualAnalysisState.status !== 'idle' &&

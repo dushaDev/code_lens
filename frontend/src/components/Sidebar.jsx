@@ -17,7 +17,9 @@ export default function Sidebar({
   setCurrentTab, 
   onCloseCourse, 
   onLogout,
-  onCreateProjectClick
+  onCreateProjectClick,
+  unreadPlagiarismCount = 0,
+  onClearUnreadPlagiarism
 }) {
   const menuItems = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
@@ -55,14 +57,26 @@ export default function Sidebar({
           {menuItems.map((item) => {
             const Icon = item.icon;
             const isActive = currentTab === item.id;
+            const showBadge = item.id === 'plagiarism' && unreadPlagiarismCount > 0;
+
             return (
               <li key={item.id}>
                 <button 
                   className={`nav-link ${isActive ? 'active' : ''}`}
-                  onClick={() => setCurrentTab(item.id)}
+                  onClick={() => {
+                    setCurrentTab(item.id);
+                    if (item.id === 'plagiarism' && onClearUnreadPlagiarism) {
+                      onClearUnreadPlagiarism();
+                    }
+                  }}
                 >
                   <Icon size={18} />
                   <span>{item.label}</span>
+                  {showBadge && (
+                    <span className="sidebar-unread-badge" title={`${unreadPlagiarismCount} new plagiarism alert(s)`}>
+                      {unreadPlagiarismCount}
+                    </span>
+                  )}
                 </button>
               </li>
             );

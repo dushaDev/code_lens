@@ -24,6 +24,13 @@ def init_db():
         if 'qualitative_report' not in columns:
             with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE projects ADD COLUMN qualitative_report TEXT NULL;"))
+
+        # Proactively inspect and run schema migration for similarity_reports.status if missing
+        if inspector.has_table('similarity_reports'):
+            sim_columns = [col['name'] for col in inspector.get_columns('similarity_reports')]
+            if 'status' not in sim_columns:
+                with engine.begin() as conn:
+                    conn.execute(text("ALTER TABLE similarity_reports ADD COLUMN status VARCHAR DEFAULT 'Needs Review';"))
     except Exception as e:
         print(f"Database migration check failed/skipped: {e}")
 

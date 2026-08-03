@@ -1,8 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { User, LogOut, ChevronDown, Plus, Sun, Moon } from 'lucide-react';
+import { useNotification } from '../contexts/NotificationContext';
 import './Header.css'; // Reuses the shared header styles
 
 export default function ProfileDropdown({ user, onLogout, onUserUpdate }) {
+  const { addNotification } = useNotification();
   const [showProfileMenu, setShowProfileMenu] = useState(false);
   const [showGithubInput, setShowGithubInput] = useState(false);
   const [githubUsername, setGithubUsername] = useState(user?.github_username || '');
@@ -51,7 +53,7 @@ export default function ProfileDropdown({ user, onLogout, onUserUpdate }) {
       }
       setShowGithubInput(false);
     } catch (err) {
-      alert(err.message);
+      addNotification({ type: 'error', title: 'Update Failed', description: err.message });
     } finally {
       setSaving(false);
     }
@@ -84,7 +86,7 @@ export default function ProfileDropdown({ user, onLogout, onUserUpdate }) {
         onUserUpdate(updatedUser);
       }
     } catch (err) {
-      alert(err.message);
+      addNotification({ type: 'error', title: 'Update Failed', description: err.message });
     } finally {
       setSaving(false);
     }

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Copy, Check, FileCode2, AlertOctagon, Eye } from 'lucide-react';
+import { Copy, Check, FileCode2, AlertOctagon, Eye, AlertCircleIcon } from 'lucide-react';
 import './CodeViewer.css';
 
 // Tokenizer for lightweight syntax highlighting
@@ -164,7 +164,7 @@ export default function CodeViewer({ code, filePath }) {
       {isTooLarge ? (
         <div className="large-file-container">
           <div className="large-file-card">
-            <AlertOctagon size={36} className="large-file-icon" />
+            <AlertCircleIcon size={36} className="large-file-icon" />
             <h3>File Too Large to Preview</h3>
             <p>
               This file contains <strong>{lineCount.toLocaleString()} lines</strong> ({formatSize(byteCount)}). 
