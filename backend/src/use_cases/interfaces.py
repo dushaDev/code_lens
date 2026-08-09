@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from datetime import datetime
 from typing import List, Optional
 from src.domain.entities import ProjectEntity, AuthorEntity, CommitEntity, BranchEntity, CourseEntity
 
@@ -90,7 +91,20 @@ class IDatabaseService(ABC):
 
 class ICourseRepository(ABC):
     @abstractmethod
-    def create(self, name: str, description: Optional[str], user_id: int) -> CourseEntity:
+    def create(
+        self,
+        name: str,
+        description: Optional[str],
+        user_id: int,
+        tech_requirements: Optional[str] = None,
+        deadline: Optional[datetime] = None,
+    ) -> CourseEntity:
+        pass
+
+    @abstractmethod
+    def update(self, course_id: int, user_id: int, fields: dict) -> Optional[CourseEntity]:
+        """Apply a partial update. Only keys present in `fields` are written, so a
+        key mapped to None explicitly clears that column."""
         pass
 
     @abstractmethod

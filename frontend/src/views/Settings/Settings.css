@@ -37,6 +37,50 @@
   max-width: 600px;
 }
 
+.settings-textarea {
+  min-height: 76px;
+  resize: vertical;
+  font-family: inherit;
+}
+
+.settings-hint {
+  display: block;
+  margin-top: 6px;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+}
+
+.settings-deadline-inputs {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.settings-deadline-inputs input[type="date"] {
+  flex: 2;
+}
+
+.settings-deadline-inputs .btn-today {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 12px;
+  height: 38px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.settings-deadline-inputs input[type="time"] {
+  flex: 1.2;
+}
+
+.settings-deadline-inputs input:disabled {
+  color: var(--text-light);
+  cursor: not-allowed;
+}
+
 .checkbox-group {
   flex-direction: row;
   align-items: center;

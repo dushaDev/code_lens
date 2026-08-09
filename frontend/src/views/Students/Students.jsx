@@ -192,21 +192,21 @@ export default function Students({
           <GraduationCap size={20} className="purple-text" />
           <div>
             <h3>{filteredStudents.filter(s => !isBot(s)).length}</h3>
-            <p>Actual Students</p>
+            <p>Students</p>
           </div>
         </div>
         <div className="student-metric-card card">
           <Bot size={20} className="red-text" />
           <div>
             <h3>{filteredStudents.filter(s => isBot(s)).length}</h3>
-            <p>Bots Identified</p>
+            <p>Bots</p>
           </div>
         </div>
         <div className="student-metric-card card">
           <GitCommit size={20} className="blue-text" />
           <div>
             <h3>{filteredStudents.reduce((acc, s) => acc + (s.commitsCount || 0), 0)}</h3>
-            <p>Total Commits Evaluated</p>
+            <p>Total Commits</p>
           </div>
         </div>
       </div>

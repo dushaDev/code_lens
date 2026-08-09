@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 from typing import List, Optional
 import os
 import json
@@ -13,7 +14,7 @@ from src.infrastructure.auth.dependencies import get_current_user
 from src.infrastructure.auth.user_repository import UserRepository
 from src.infrastructure.auth.hashing import verify_password
 from src.infrastructure.auth.jwt import create_access_token
-from src.infrastructure.database.models import UserModel, CourseModel, ProjectModel, AuthorModel, CommitModel
+from src.infrastructure.database.models import UserModel, UserApiKeyModel, CourseModel, ProjectModel, AuthorModel, CommitModel
 from src.infrastructure.api.schemas import (
     ProjectCreateRequest, ProjectCreateResponse, ExtractResponse, ErrorResponse,
     CommitResponse, AuthorFullProfileResponse, ProjectResponse, FileChangeResponse, CommitWithProjectAndFilesResponse,
@@ -21,10 +22,14 @@ from src.infrastructure.api.schemas import (
     AuthorCommitsResponse, ProjectsListResponse, ProjectAuthorsResponse,
     ProjectAnalyticsResponse, MergeAuthorsRequest, AuthorsListResponse, BranchesListResponse, BranchResponse,
     FileChangeMetricsResponse, FileChangeASTResponse, ASTNodeResponse,
-    CourseCreateRequest, CourseResponse, CoursesListResponse,
+    CourseCreateRequest, CourseUpdateRequest, CourseResponse, CoursesListResponse,
     UserRegisterRequest, UserResponse, UserUpdateRequest, UsersListResponse, TokenResponse, LoginRequest,
-    CourseResetRequest, SearchResultItem, SearchResponse, QualitativeAnalysisResponse
+    UserApiKeyCreateRequest, UserApiKeyResponse,
+    CourseResetRequest, SearchResultItem, SearchResponse, QualitativeAnalysisResponse,
+    ApiKeySaveRequest, ApiKeyStatusResponse, CloudReportResponse
 )
+from src.infrastructure.auth.crypto import encrypt_api_key, decrypt_api_key, mask_api_key
+from src.use_cases.get_cloud_report import generate_cloud_report
 from src.use_cases.extract_git_history import ExtractGitHistoryUseCase
 from src.use_cases.get_author_commits import (
     GetAuthorCommitsUseCase, GetAuthorFullProfileUseCase,
@@ -44,7 +49,7 @@ from src.use_cases.get_author_details import (
 )
 from src.use_cases.manage_courses import (
     CreateCourseUseCase, GetAllCoursesUseCase, GetCourseByIdUseCase,
-    DeleteCourseUseCase, GetCourseProjectsUseCase
+    DeleteCourseUseCase, GetCourseProjectsUseCase, UpdateCourseUseCase
 )
 
 router = APIRouter(prefix="/api/v1")
@@ -100,7 +105,7 @@ def login(request: LoginRequest, db: Session = Depends(get_db)):
     user_repo = UserRepository(db)
     user = user_repo.get_by_email(request.email)
 
-    if not user or not verify_password(request.password, user.hashed_password):
+    if not user or not verify_password(request.password, user.password):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect email or password.",
@@ -257,7 +262,137 @@ def delete_user(
 
 
 # ---------------------------------------------------------------------------
-# Course endpoints (PROTECTED)
+# User API Key Management endpoints
+# ---------------------------------------------------------------------------
+
+@router.get(
+    "/user/api-keys",
+    response_model=List[UserApiKeyResponse],
+    tags=["User API Keys"]
+)
+def list_user_api_keys(
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_user)
+):
+    """List all API keys stored by the current user."""
+    keys = db.query(UserApiKeyModel).filter(UserApiKeyModel.user_id == current_user.id).order_by(UserApiKeyModel.created_at.desc()).all()
+    if not keys:
+        # Check if user's courses have any encrypted_api_key stored
+        courses = db.query(CourseModel).filter(CourseModel.user_id == current_user.id).all()
+        for course in courses:
+            if course.encrypted_api_key:
+                plain = decrypt_api_key(course.encrypted_api_key)
+                if plain:
+                    migrated = UserApiKeyModel(
+                        user_id=current_user.id,
+                        name=f"Migrated Key ({course.name})",
+                        provider="AgentRouter" if plain.startswith("sk-") else "Gemini",
+                        encrypted_api_key=course.encrypted_api_key,
+                        masked_key=mask_api_key(plain),
+                        is_active=True
+                    )
+                    db.add(migrated)
+                    db.commit()
+                    break
+        keys = db.query(UserApiKeyModel).filter(UserApiKeyModel.user_id == current_user.id).order_by(UserApiKeyModel.created_at.desc()).all()
+    return keys
+
+
+@router.post(
+    "/user/api-keys",
+    response_model=UserApiKeyResponse,
+    status_code=status.HTTP_201_CREATED,
+    tags=["User API Keys"]
+)
+def create_user_api_key(
+    request: UserApiKeyCreateRequest,
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_user)
+):
+    """Create and encrypt a new API key for the current user."""
+    plain_key = request.api_key.strip()
+    if not plain_key:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="API key cannot be empty.")
+
+    # Check existing keys. If this is the user's first key, mark it active automatically.
+    existing_count = db.query(UserApiKeyModel).filter(UserApiKeyModel.user_id == current_user.id).count()
+    should_be_active = (existing_count == 0)
+
+    encrypted = encrypt_api_key(plain_key)
+    masked = mask_api_key(plain_key)
+
+    new_key = UserApiKeyModel(
+        user_id=current_user.id,
+        name=request.name.strip(),
+        provider=request.provider.strip() if request.provider else "Gemini",
+        encrypted_api_key=encrypted,
+        masked_key=masked,
+        is_active=should_be_active
+    )
+    db.add(new_key)
+    db.commit()
+    db.refresh(new_key)
+    return new_key
+
+
+@router.put(
+    "/user/api-keys/{key_id}/activate",
+    response_model=UserApiKeyResponse,
+    tags=["User API Keys"]
+)
+def activate_user_api_key(
+    key_id: int,
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_user)
+):
+    """Set the specified API key as active, deactivating all other keys for the user."""
+    key = db.query(UserApiKeyModel).filter(
+        UserApiKeyModel.id == key_id,
+        UserApiKeyModel.user_id == current_user.id
+    ).first()
+    if not key:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="API Key not found.")
+
+    # Deactivate all other keys for this user
+    db.query(UserApiKeyModel).filter(UserApiKeyModel.user_id == current_user.id).update({"is_active": False})
+    key.is_active = True
+    db.commit()
+    db.refresh(key)
+    return key
+
+
+@router.delete(
+    "/user/api-keys/{key_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    tags=["User API Keys"]
+)
+def delete_user_api_key(
+    key_id: int,
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_user)
+):
+    """Delete an API key for the current user. If active key is deleted, activates the most recent remaining key."""
+    key = db.query(UserApiKeyModel).filter(
+        UserApiKeyModel.id == key_id,
+        UserApiKeyModel.user_id == current_user.id
+    ).first()
+    if not key:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="API Key not found.")
+
+    was_active = key.is_active
+    db.delete(key)
+    db.commit()
+
+    # If deleted key was active, activate the latest remaining key
+    if was_active:
+        latest = db.query(UserApiKeyModel).filter(
+            UserApiKeyModel.user_id == current_user.id
+        ).order_by(UserApiKeyModel.created_at.desc()).first()
+        if latest:
+            latest.is_active = True
+            db.commit()
+
+    return None
 # ---------------------------------------------------------------------------
 
 @router.post(
@@ -274,11 +409,19 @@ def create_course(
     course_repo = CourseRepository(db)
     use_case = CreateCourseUseCase(course_repo)
     try:
-        course = use_case.execute(name=request.name, description=request.description, user_id=current_user.id)
+        course = use_case.execute(
+            name=request.name,
+            description=request.description,
+            user_id=current_user.id,
+            tech_requirements=request.tech_requirements,
+            deadline=request.deadline,
+        )
         return CourseResponse(
             id=course.id,
             name=course.name,
             description=course.description,
+            tech_requirements=course.tech_requirements,
+            deadline=course.deadline,
             created_at=course.created_at
         )
     except Exception as e:
@@ -300,12 +443,30 @@ def get_all_courses(
     try:
         courses = use_case.execute(user_id=current_user.id)
         courses_list = [
-            CourseResponse(id=c.id, name=c.name, description=c.description, created_at=c.created_at)
+            CourseResponse(
+                id=c.id, name=c.name, description=c.description,
+                tech_requirements=c.tech_requirements, deadline=c.deadline,
+                created_at=c.created_at
+            )
             for c in courses
         ]
         return CoursesListResponse(total_courses=len(courses_list), courses=courses_list)
     except Exception as e:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+def _make_course_response(course) -> CourseResponse:
+    plain_key = decrypt_api_key(getattr(course, 'encrypted_api_key', None)) if getattr(course, 'encrypted_api_key', None) else ""
+    return CourseResponse(
+        id=course.id,
+        name=course.name,
+        description=course.description,
+        tech_requirements=course.tech_requirements,
+        deadline=course.deadline,
+        has_api_key=bool(plain_key),
+        masked_api_key=mask_api_key(plain_key) if plain_key else None,
+        created_at=course.created_at
+    )
 
 
 @router.get(
@@ -323,16 +484,122 @@ def get_course_by_id(
     use_case = GetCourseByIdUseCase(course_repo)
     try:
         course = use_case.execute(course_id, user_id=current_user.id)
-        return CourseResponse(
-            id=course.id,
-            name=course.name,
-            description=course.description,
-            created_at=course.created_at
-        )
+        return _make_course_response(course)
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+@router.put(
+    "/courses/{course_id}",
+    response_model=CourseResponse,
+    tags=["Courses"],
+    responses={400: {"model": ErrorResponse}, 401: {"model": ErrorResponse}, 404: {"model": ErrorResponse}, 500: {"model": ErrorResponse}}
+)
+def update_course(
+    course_id: int,
+    request: CourseUpdateRequest,
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_user)
+):
+    """Update course metadata (name, description, tech requirements, deadline).
+    Only the fields present in the request body are changed."""
+    course_repo = CourseRepository(db)
+    use_case = UpdateCourseUseCase(course_repo)
+    try:
+        course = use_case.execute(
+            course_id,
+            user_id=current_user.id,
+            fields=request.model_dump(exclude_unset=True)
+        )
+        return _make_course_response(course)
+    except ValueError as e:
+        detail = str(e)
+        if "not found" in detail:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=detail)
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=detail)
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+@router.post(
+    "/courses/{course_id}/api-key",
+    response_model=ApiKeyStatusResponse,
+    tags=["Courses"]
+)
+def save_course_api_key(
+    course_id: int,
+    request: ApiKeySaveRequest,
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_user)
+):
+    """Encrypt and store user's Gemini / Cloud AI API key in DB. The key is encrypted via Fernet AES-128 and cannot be viewed in plain-text again."""
+    course = db.query(CourseModel).filter(CourseModel.id == course_id, CourseModel.user_id == current_user.id).first()
+    if not course:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Course with ID {course_id} not found.")
+
+    plain_key = request.api_key.strip()
+    if not plain_key:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="API key cannot be empty.")
+
+    encrypted = encrypt_api_key(plain_key)
+    course.encrypted_api_key = encrypted
+    db.commit()
+    db.refresh(course)
+
+    return ApiKeyStatusResponse(
+        has_api_key=True,
+        masked_api_key=mask_api_key(plain_key),
+        message="API Key encrypted and saved successfully."
+    )
+
+
+@router.get(
+    "/courses/{course_id}/api-key",
+    response_model=ApiKeyStatusResponse,
+    tags=["Courses"]
+)
+def get_course_api_key_status(
+    course_id: int,
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_user)
+):
+    """Get masked API key status. Plain-text key is NEVER returned."""
+    course = db.query(CourseModel).filter(CourseModel.id == course_id, CourseModel.user_id == current_user.id).first()
+    if not course:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Course with ID {course_id} not found.")
+
+    encrypted = getattr(course, 'encrypted_api_key', None)
+    if not encrypted:
+        return ApiKeyStatusResponse(has_api_key=False, masked_api_key=None)
+
+    plain = decrypt_api_key(encrypted)
+    if not plain:
+        return ApiKeyStatusResponse(has_api_key=False, masked_api_key=None)
+
+    return ApiKeyStatusResponse(has_api_key=True, masked_api_key=mask_api_key(plain))
+
+
+@router.delete(
+    "/courses/{course_id}/api-key",
+    response_model=ApiKeyStatusResponse,
+    tags=["Courses"]
+)
+def delete_course_api_key(
+    course_id: int,
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_user)
+):
+    """Remove stored API key for this course."""
+    course = db.query(CourseModel).filter(CourseModel.id == course_id, CourseModel.user_id == current_user.id).first()
+    if not course:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Course with ID {course_id} not found.")
+
+    course.encrypted_api_key = None
+    db.commit()
+
+    return ApiKeyStatusResponse(has_api_key=False, masked_api_key=None, message="API Key removed successfully.")
 
 
 @router.delete(
@@ -447,6 +714,41 @@ def create_project(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Course with ID {request.course_id} not found."
         )
+
+    # 0. Check duplicate Group No / Tag in the same course
+    if request.group_no and request.group_no.strip():
+        existing_group = repo.db.query(ProjectModel).filter(
+            ProjectModel.course_id == request.course_id,
+            func.lower(ProjectModel.group_no) == request.group_no.strip().lower()
+        ).first()
+        if existing_group:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Group No / Tag '{request.group_no.strip()}' already exists in this course."
+            )
+
+    # Check duplicate Git URL in the same course
+    if request.git_url and request.git_url.strip():
+        clean_url = request.git_url.strip().rstrip("/").removesuffix(".git").lower()
+        course_projects = repo.db.query(ProjectModel).filter(ProjectModel.course_id == request.course_id).all()
+        for p in course_projects:
+            if p.git_url and p.git_url.strip().rstrip("/").removesuffix(".git").lower() == clean_url:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Repository URL '{request.git_url.strip()}' is already imported in this course."
+                )
+
+    # Check duplicate Project Name in the same course
+    if request.name and request.name.strip():
+        existing_name = repo.db.query(ProjectModel).filter(
+            ProjectModel.course_id == request.course_id,
+            func.lower(ProjectModel.name) == request.name.strip().lower()
+        ).first()
+        if existing_name:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Project name '{request.name.strip()}' already exists in this course."
+            )
 
     # 1. Create project row to flush / populate project ID
     project = repo.create(
@@ -804,18 +1106,39 @@ def get_project_analytics(
 def get_qualitative_analysis(
     project_id: int,
     force_refresh: bool = False,
+    mode: str = "sample",
+    sample_pct: float = 0.20,
     db: Session = Depends(get_db),
     current_user: UserModel = Depends(get_current_user)
 ):
+    """
+    Run qualitative analysis on a project's commits.
+    
+    - **mode**: `sample` (smart stratified, default), `full` (all commits), `random` (pure random %)
+    - **sample_pct**: Fraction of each contributor's remaining commits to include in sample/random modes (default 0.20 = 20%)
+    - **force_refresh**: Bypass DB cache and re-run analysis
+    """
+    if mode not in ("full", "sample", "random"):
+        mode = "sample"
+    sample_pct = max(0.05, min(1.0, sample_pct))
+    
     _get_project_for_user(project_id, current_user.id, db)
     project_repo = ProjectRepository(db)
     author_repo = AuthorRepository(db)
     commit_repo = CommitRepository(db)
     use_case = GetQualitativeAnalysisUseCase(project_repo, author_repo, commit_repo)
-    
+
     def generate_events():
-        for chunk in use_case.execute_stream(project_id, force_refresh=force_refresh):
-            yield json.dumps(chunk) + "\n"
+        try:
+            for chunk in use_case.execute_stream(
+                project_id,
+                mode=mode,
+                sample_pct=sample_pct,
+                force_refresh=force_refresh,
+            ):
+                yield json.dumps(chunk) + "\n"
+        except Exception as e:
+            yield json.dumps({"type": "error", "message": str(e)}) + "\n"
 
     return StreamingResponse(generate_events(), media_type="application/x-ndjson")
 
@@ -854,11 +1177,148 @@ def get_qualitative_analysis_status_route(
             return {"status": "complete", "progress": 100, "message": "Loaded from database cache.", "has_db_cache": True}
         return {"status": "idle", "progress": 0, "message": "", "has_db_cache": False}
     return status_data
+@router.post(
+    "/projects/{project_id}/cloud-report",
+    tags=["Projects"]
+)
+def generate_cloud_ai_report(
+    project_id: int,
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_user)
+):
+    """Generate a final narrative report using Cloud AI based on the stored qualitative analysis data, returning a PDF."""
+    import json as _json
+    print(f"\n================================================================================")
+    print(f"[CLOUD-REPORT-LOG] [ROUTER] HTTP POST /projects/{project_id}/cloud-report received.")
+    print(f"[CLOUD-REPORT-LOG] [ROUTER] Request User: ID {current_user.id} ({current_user.username}) | Target Project: ID {project_id}")
+
+    project = _get_project_for_user(project_id, current_user.id, db)
+    print(f"[CLOUD-REPORT-LOG] [ROUTER] Found Project '{project.name}' (ID: {project.id}). Course ID: {project.course_id}")
+
+    # Fetch active API key for current user (or auto-migrate legacy course key)
+    active_key_record = db.query(UserApiKeyModel).filter(
+        UserApiKeyModel.user_id == current_user.id,
+        UserApiKeyModel.is_active == True
+    ).first()
+
+    if active_key_record:
+        print(f"[CLOUD-REPORT-LOG] [ROUTER] Found Active User API Key: ID {active_key_record.id} ('{active_key_record.name}', Provider: {active_key_record.provider}, Masked: {active_key_record.masked_key})")
+    else:
+        print(f"[CLOUD-REPORT-LOG] [ROUTER] No active user API key record found in user_api_keys table for User ID {current_user.id}. Checking legacy course key...")
+        # Check if course has a legacy encrypted key to auto-migrate
+        course = getattr(project, 'course', None)
+        legacy_key = getattr(course, 'encrypted_api_key', None) if course else None
+        if legacy_key:
+            plain = decrypt_api_key(legacy_key)
+            if plain:
+                print(f"[CLOUD-REPORT-LOG] [ROUTER] Found legacy course API key. Auto-migrating to user_api_keys table...")
+                active_key_record = UserApiKeyModel(
+                    user_id=current_user.id,
+                    name=f"Migrated Key ({course.name or 'Course'})",
+                    provider="AgentRouter" if plain.startswith("sk-") else "Gemini",
+                    encrypted_api_key=legacy_key,
+                    masked_key=mask_api_key(plain),
+                    is_active=True
+                )
+                db.add(active_key_record)
+                db.commit()
+                db.refresh(active_key_record)
+                print(f"[CLOUD-REPORT-LOG] [ROUTER] Auto-migration successful. Created Key ID {active_key_record.id}")
+
+    encrypted_key = active_key_record.encrypted_api_key if active_key_record else None
+
+    if not encrypted_key:
+        print(f"[CLOUD-REPORT-LOG] [ROUTER] ERROR: No active API key found for user ID {current_user.id}. Returning HTTP 402 PAYMENT_REQUIRED.")
+        raise HTTPException(
+            status_code=status.HTTP_402_PAYMENT_REQUIRED,
+            detail="NO_API_KEY"
+        )
+
+    plain_key = decrypt_api_key(encrypted_key)
+    if not plain_key:
+        print(f"[CLOUD-REPORT-LOG] [ROUTER] ERROR: Failed to decrypt active API key for key ID {active_key_record.id}.")
+        raise HTTPException(
+            status_code=status.HTTP_402_PAYMENT_REQUIRED,
+            detail="NO_API_KEY"
+        )
+
+    print(f"[CLOUD-REPORT-LOG] [ROUTER] Successfully decrypted key. Key prefix: '{plain_key[:8]}...' (Length: {len(plain_key)})")
+
+    # Load local AI qualitative report from DB cache
+    qual_report_json = getattr(project, 'qualitative_report', None)
+    if not qual_report_json:
+        print(f"[CLOUD-REPORT-LOG] [ROUTER] ERROR: Project {project_id} has no qualitative_report stored in DB.")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No local AI analysis found. Run Local AI Analysis first."
+        )
+
+    print(f"[CLOUD-REPORT-LOG] [ROUTER] Found qualitative_report cache in DB ({len(qual_report_json)} characters).")
+
+    try:
+        qual_data = _json.loads(qual_report_json)
+        print(f"[CLOUD-REPORT-LOG] [ROUTER] Successfully parsed qualitative_report JSON cache.")
+    except Exception as e:
+        print(f"[CLOUD-REPORT-LOG] [ROUTER] ERROR: Failed to parse qualitative_report JSON: {e}")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Malformed qualitative report cache.")
+
+    course = getattr(project, 'course', None)
+    course_name = getattr(course, 'name', 'Unknown Course') if course else 'Unknown Course'
+    tech_req = getattr(course, 'tech_requirements', None) if course else None
+    deadline_val = getattr(course, 'deadline', None) if course else None
+    deadline_str = deadline_val.strftime("%Y-%m-%d %H:%M UTC") if deadline_val else None
+
+    try:
+        print(f"[CLOUD-REPORT-LOG] [ROUTER] Calling generate_cloud_report use-case function...")
+        report_data = generate_cloud_report(
+            qual_data=qual_data,
+            api_key=plain_key,
+            course_name=course_name,
+            tech_requirements=tech_req,
+            deadline=deadline_str
+        )
+        print(f"[CLOUD-REPORT-LOG] [ROUTER] generate_cloud_report returned valid CloudReportData object!")
+        
+        from src.use_cases.get_cloud_report import render_pdf_report
+        import datetime
+        import io
+        
+        date_str = datetime.datetime.utcnow().strftime("%Y-%m-%d")
+        print(f"[CLOUD-REPORT-LOG] [ROUTER] Rendering PDF report using Jinja2 + xhtml2pdf...")
+        pdf_bytes = render_pdf_report(
+            report_data=report_data, 
+            course_name=course_name, 
+            project_name=project.name, 
+            date=date_str
+        )
+        print(f"[CLOUD-REPORT-LOG] [ROUTER] PDF rendered successfully ({len(pdf_bytes)} bytes). Returning StreamingResponse.")
+        print(f"================================================================================\n")
+        
+        return StreamingResponse(
+            io.BytesIO(pdf_bytes), 
+            media_type="application/pdf", 
+            headers={"Content-Disposition": f'attachment; filename="CodeLens_Report_{project_id}.pdf"'}
+        )
+    except HTTPException:
+        raise
+    except ValueError as ve:
+        print(f"[CLOUD-REPORT-LOG] [ROUTER] Caught ValueError: {ve}")
+        print(f"================================================================================\n")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(ve))
+    except RuntimeError as re:
+        print(f"[CLOUD-REPORT-LOG] [ROUTER] Caught RuntimeError: {re}")
+        print(f"================================================================================\n")
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(re))
+    except Exception as ex:
+        import traceback
+        print(f"[CLOUD-REPORT-LOG] [ROUTER] Caught unexpected Exception: {ex}")
+        traceback.print_exc()
+        print(f"================================================================================\n")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Unexpected server error: {str(ex)}")
 
 
 @router.get(
     "/commits/{commit_hash}",
-
     response_model=CommitWithProjectAndFilesResponse,
     tags=["Commits"],
     responses={401: {"model": ErrorResponse}, 404: {"model": ErrorResponse}, 500: {"model": ErrorResponse}}

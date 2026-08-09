@@ -25,6 +25,19 @@ def init_db():
             with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE projects ADD COLUMN qualitative_report TEXT NULL;"))
 
+        # Proactively inspect and run schema migration for optional course metadata
+        if inspector.has_table('courses'):
+            course_columns = [col['name'] for col in inspector.get_columns('courses')]
+            if 'tech_requirements' not in course_columns:
+                with engine.begin() as conn:
+                    conn.execute(text("ALTER TABLE courses ADD COLUMN tech_requirements TEXT NULL;"))
+            if 'deadline' not in course_columns:
+                with engine.begin() as conn:
+                    conn.execute(text("ALTER TABLE courses ADD COLUMN deadline TIMESTAMP NULL;"))
+            if 'encrypted_api_key' not in course_columns:
+                with engine.begin() as conn:
+                    conn.execute(text("ALTER TABLE courses ADD COLUMN encrypted_api_key TEXT NULL;"))
+
         # Proactively inspect and run schema migration for similarity_reports.status if missing
         if inspector.has_table('similarity_reports'):
             sim_columns = [col['name'] for col in inspector.get_columns('similarity_reports')]

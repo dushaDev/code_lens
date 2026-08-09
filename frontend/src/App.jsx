@@ -55,7 +55,6 @@ export default function App() {
     status: 'idle',    // 'idle' | 'running' | 'cancelling' | 'complete' | 'cancelled'
     progress: 0,
     message: '',
-    logs: [],
     data: null,
   });
   const [pillDismissed, setPillDismissed] = useState(false);
@@ -96,7 +95,6 @@ export default function App() {
       status: 'running',
       progress: 0,
       message: forceRefresh ? 'Re-analyzing project...' : 'Initializing local AI pipeline...',
-      logs: forceRefresh ? [] : prev.logs,
       data: forceRefresh ? null : prev.data,
     }));
     setPillDismissed(false);
@@ -133,7 +131,6 @@ export default function App() {
                 status: 'running',
                 progress: event.progress || prev.progress,
                 message: event.message || prev.message,
-                logs: event.log_entry ? [...prev.logs, event.log_entry] : prev.logs,
               }));
             } else if (event.type === 'complete') {
               setQualAnalysisState(prev => ({
@@ -466,7 +463,7 @@ export default function App() {
     };
 
     loadCourseData();
-  }, [currentCourse, refreshCounter]);
+  }, [currentCourse?.id, refreshCounter]);
 
   const handleLoginSuccess = (userData) => {
     setUser(userData);
@@ -652,8 +649,9 @@ export default function App() {
           {selectedProject ? (
             <Analytics 
               project={selectedProject} 
+              course={currentCourse}
               onBack={() => setSelectedProject(null)}
-              qualAnalysisState={qualAnalysisState.projectId === selectedProject.id ? qualAnalysisState : { projectId: selectedProject.id, status: 'idle', progress: 0, message: '', logs: [], data: null }}
+              qualAnalysisState={qualAnalysisState.projectId === selectedProject.id ? qualAnalysisState : { projectId: selectedProject.id, status: 'idle', progress: 0, message: '', data: null }}
               onStartQualitative={(forceRefresh) => triggerQualitativeAnalysis(selectedProject.id, forceRefresh)}
               onStopQualitative={() => handleStopQualitative(selectedProject.id)}
             />
@@ -703,10 +701,13 @@ export default function App() {
                 <Settings 
                   course={currentCourse}
                   onCourseReset={() => {
-                    setCurrentCourse({ ...currentCourse });
+                    setRefreshCounter(prev => prev + 1);
                   }}
                   onCourseDeleted={() => {
                     setCurrentCourse(null);
+                  }}
+                  onCourseUpdated={(updatedCourse) => {
+                    setCurrentCourse(updatedCourse);
                   }}
                 />
               )}
@@ -718,6 +719,7 @@ export default function App() {
       {showCreateModal && (
         <CreateProjectModal 
           course={currentCourse}
+          existingProjects={projects}
           onClose={() => setShowCreateModal(false)}
           onProjectCreated={handleProjectCreated}
         />

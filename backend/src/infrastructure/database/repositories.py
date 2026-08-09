@@ -1,6 +1,7 @@
 import os
 import shutil
 from collections import Counter
+from datetime import datetime
 from typing import List, Optional
 from sqlalchemy.orm import Session, selectinload, joinedload, defer
 from src.domain.entities import ProjectEntity, AuthorEntity, CommitEntity, FileChangeEntity, BranchEntity, CourseEntity
@@ -188,6 +189,12 @@ class ProjectRepository(IProjectRepository):
         project_model = self.db.query(ProjectModel).filter(ProjectModel.id == project_id).first()
         if project_model:
             project_model.is_local_copy_stored = is_stored
+            self.db.commit()
+
+    def save_qualitative_report(self, project_id: int, report_json: str) -> None:
+        project_model = self.db.query(ProjectModel).filter(ProjectModel.id == project_id).first()
+        if project_model:
+            project_model.qualitative_report = report_json
             self.db.commit()
 
     def delete(self, project_id: int) -> bool:
@@ -675,13 +682,43 @@ class CourseRepository(ICourseRepository):
             id=m.id,
             name=m.name,
             description=m.description,
+            tech_requirements=m.tech_requirements,
+            deadline=m.deadline,
             created_at=m.created_at,
             user_id=m.user_id
         )
 
-    def create(self, name: str, description: Optional[str], user_id: int) -> CourseEntity:
-        course_model = CourseModel(name=name, description=description, user_id=user_id)
+    def create(
+        self,
+        name: str,
+        description: Optional[str],
+        user_id: int,
+        tech_requirements: Optional[str] = None,
+        deadline: Optional[datetime] = None,
+    ) -> CourseEntity:
+        course_model = CourseModel(
+            name=name,
+            description=description,
+            user_id=user_id,
+            tech_requirements=tech_requirements,
+            deadline=deadline,
+        )
         self.db.add(course_model)
+        self.db.commit()
+        self.db.refresh(course_model)
+        return self._to_entity(course_model)
+
+    def update(self, course_id: int, user_id: int, fields: dict) -> Optional[CourseEntity]:
+        course_model = self.db.query(CourseModel).filter(
+            CourseModel.id == course_id,
+            CourseModel.user_id == user_id
+        ).first()
+        if not course_model:
+            return None
+
+        for key, value in fields.items():
+            setattr(course_model, key, value)
+
         self.db.commit()
         self.db.refresh(course_model)
         return self._to_entity(course_model)

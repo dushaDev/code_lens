@@ -66,6 +66,8 @@ class CourseEntity:
     name: str
     user_id: int = 0
     description: Optional[str] = None
+    tech_requirements: Optional[str] = None
+    deadline: Optional[datetime] = None
     created_at: Optional[datetime] = None
     id: Optional[int] = None
     projects: List[ProjectEntity] = field(default_factory=list)

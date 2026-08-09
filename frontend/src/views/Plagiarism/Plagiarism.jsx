@@ -126,7 +126,7 @@ export default function Plagiarism({ alerts = [], currentCourseId }) {
           style={{ display: 'flex', alignItems: 'center', gap: '8px' }}
         >
           {isScanning ? <RefreshCw size={16} className="spin" /> : <Play size={16} />}
-          <span>{isScanning ? 'Running Scan...' : 'Run AST Similarity Scan'}</span>
+          <span>{isScanning ? 'Running Scan...' : 'Run Similarity Scan'}</span>
         </button>
       </div>
 
@@ -180,7 +180,7 @@ export default function Plagiarism({ alerts = [], currentCourseId }) {
             <div className="alert-itemcard-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
               <div className="risk-level-badge" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <AlertCircle size={18} style={{ color: alert.severity === 'High' ? '#ef4444' : '#f59e0b' }} />
-                <span style={{ fontWeight: '400', fontSize: '0.95rem' }}><strong>{alert.percentage}% File Overlap</strong></span>
+                <span style={{ fontWeight: '300', fontSize: '0.95rem' }}><strong>{alert.percentage}% File Overlap</strong></span>
               
               </div>
               <span className="alert-timestamp" style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Flagged {alert.timestamp}</span>

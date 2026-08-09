@@ -13,7 +13,7 @@ class UserModel(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     username: Mapped[str] = mapped_column(String, unique=True, nullable=False)
     email: Mapped[str] = mapped_column(String, unique=True, nullable=False)
-    hashed_password: Mapped[str] = mapped_column(String, nullable=False)
+    password: Mapped[str] = mapped_column(String, nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     github_username: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     is_dark_mode: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -22,6 +22,26 @@ class UserModel(Base):
     courses: Mapped[List["CourseModel"]] = relationship(
         "CourseModel", back_populates="owner", cascade="all, delete-orphan", passive_deletes=True
     )
+    api_keys: Mapped[List["UserApiKeyModel"]] = relationship(
+        "UserApiKeyModel", back_populates="user", cascade="all, delete-orphan", passive_deletes=True
+    )
+
+
+class UserApiKeyModel(Base):
+    __tablename__ = "user_api_keys"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    provider: Mapped[str] = mapped_column(String, nullable=False, default="Gemini")
+    encrypted_api_key: Mapped[str] = mapped_column(Text, nullable=False)
+    masked_key: Mapped[str] = mapped_column(String, nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    user: Mapped["UserModel"] = relationship("UserModel", back_populates="api_keys")
 
 
 class CourseModel(Base):
@@ -30,6 +50,14 @@ class CourseModel(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     name: Mapped[str] = mapped_column(String, nullable=False)
     description: Mapped[Optional[str]] = mapped_column(Text)
+    # Optional free-text notes on expected languages / frameworks for this course.
+    # Used as context when generating the final report.
+    tech_requirements: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # Optional submission deadline. Commits with a timestamp after this are
+    # considered late and can be highlighted in analytics/diagrams.
+    deadline: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    # Optional encrypted Gemini API key for cloud qualitative analysis.
+    encrypted_api_key: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     user_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False

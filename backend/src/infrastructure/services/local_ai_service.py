@@ -141,110 +141,191 @@ class LocalAIService:
                 "summary": f"Fallback: {str(e)}"
             }
 
-    def classify_commit(self, commit_message: str, code_diff: str) -> dict:
+    def classify_commit(
+        self,
+        commit_message: str,
+        code_diff: str,
+        lines_added: int = 0,
+        lines_removed: int = 0,
+        timing_flag: str = "normal",
+        hours_before_deadline: float = None,
+    ) -> dict:
         """
         Phase 1 Mechanical Labeling: Classify a single commit into structured labels.
         Tasks:
         - Task A: type (feature, bugfix, refactor, docs, test, config, style, merge, other)
         - Task B: substance (trivial, moderate, substantial)
         - Task C: message_quality (descriptive, vague)
-        - Task D: consistent (true/false, matches diff)
-        - Task E: security (has_security_risk: true/false, security_risk_type: hardcoded_secret, unsafe_eval, sql_injection, none)
-        - Task F: code_smells (array of items from [magic_numbers, deep_nesting, long_method, dead_code, complex_conditional, none])
-        - Task G: architecture_issues (array of items from [tight_coupling, poor_separation_of_concerns, missing_abstraction, business_logic_in_ui, none])
+        - Task D: message_diff_consistency (consistent, mismatch) + consistency_note
+        - Task E: security (has_security_risk: true/false, security_risk_type)
+        - Task F: code_smells
+        - Task G: architecture_issues
+        - Task H: notes (brief plain-text analyst note)
         """
         safe_diff = code_diff[:600] if code_diff else "No diff content provided."
         safe_msg = commit_message[:400] if commit_message else "No commit message."
-        
-        prompt = f"""
-        You are a strict data labeling assistant. Your job is to label this git commit.
-        Follow these rules:
-        - type: feature, bugfix, refactor, docs, test, config, style, merge, other
-        - substance: trivial, moderate, substantial
-        - message_quality: descriptive, vague
-        - consistent: boolean
-        - has_security_risk: boolean
-        - security_risk_type: hardcoded_secret, unsafe_eval, sql_injection, none
-        - code_smells: array of [magic_numbers, deep_nesting, long_method, dead_code, complex_conditional, none]
-        - architecture_issues: array of [tight_coupling, poor_separation_of_concerns, missing_abstraction, business_logic_in_ui, none]
 
-        Commit Message: {safe_msg}
-        Diff: {safe_diff}
+        timing_context = ""
+        if timing_flag == "after_deadline":
+            timing_context = f"\nNOTE: This commit was pushed AFTER the submission deadline (by {hours_before_deadline}h)."
+        elif timing_flag == "before_deadline_close":
+            timing_context = f"\nNOTE: This commit was pushed within {hours_before_deadline}h before the submission deadline."
 
-        Respond ONLY with a JSON object:
-        {{
-            "type": "feature",
-            "substance": "moderate",
-            "message_quality": "descriptive",
-            "consistent": true,
-            "has_security_risk": false,
-            "security_risk_type": "none",
-            "code_smells": ["none"],
-            "architecture_issues": ["none"]
-        }}
-        """
+        prompt = f"""=== SYSTEM INSTRUCTIONS ===
+You are a strict data labeling assistant. You must analyze the provided commit details and return a single, valid JSON object matching the schema below.
+Allowed Enums:
+- "type": "feature", "bugfix", "refactor", "docs", "test", "config", "style", "merge", "other"
+- "substance": "trivial", "moderate", "substantial"
+- "message_quality": "descriptive", "vague"
+- "message_diff_consistency": "consistent", "mismatch"
+- "security_risk_type": "hardcoded_secret", "unsafe_eval", "sql_injection", "none"
+- "code_smells": "magic_numbers", "deep_nesting", "long_method", "dead_code", "complex_conditional", "none"
+- "architecture_issues": "tight_coupling", "poor_separation_of_concerns", "missing_abstraction", "business_logic_in_ui", "none"
+
+=== ONE-SHOT EXAMPLE ===
+Commit Message: add input validation for user email registration
+Lines added: 12, Lines removed: 2
+Diff:
+--- src/auth.py
++   if not is_valid_email(email):
++       raise ValueError("Invalid email format")
+Response JSON:
+{{
+    "type": "feature",
+    "substance": "moderate",
+    "message_quality": "descriptive",
+    "message_diff_consistency": "consistent",
+    "consistency_note": "",
+    "has_security_risk": false,
+    "security_risk_type": "none",
+    "code_smells": ["none"],
+    "architecture_issues": ["none"],
+    "notes": "Added standard email validation during signup."
+}}
+
+=== NOW EVALUATE THIS COMMIT ===
+Commit Message: {safe_msg}
+Lines added: {lines_added}, Lines removed: {lines_removed}
+Diff: {safe_diff}{timing_context}
+
+Respond ONLY with a JSON object conforming exactly to the one-shot example format. Do not add any conversational text or markdown formatting wrapper.
+"""
+        def validate_labels(res: dict) -> bool:
+            if not isinstance(res, dict):
+                return False
+            allowed_types = ["feature", "bugfix", "refactor", "docs", "test", "config", "style", "merge", "other"]
+            allowed_substances = ["trivial", "moderate", "substantial"]
+            if "type" not in res or str(res["type"]).lower() not in allowed_types:
+                return False
+            if "substance" not in res or str(res["substance"]).lower() not in allowed_substances:
+                return False
+            return True
+
+        parsed_successfully = False
+        fell_back = False
+        result = {}
+
+        # Attempt 1
         try:
             response = ollama.chat(
                 model=self.model_name,
                 messages=[{'role': 'user', 'content': prompt}],
                 format="json",
-                options={'num_predict': 80, 'temperature': 0.1}
+                options={'num_predict': 120, 'temperature': 0.1}
             )
-            
             result = json.loads(response['message']['content'])
-            
-            # Ensure valid enums
-            c_type = str(result.get("type", "other")).lower()
-            if c_type not in ["feature", "bugfix", "refactor", "docs", "test", "config", "style", "merge", "other"]:
-                c_type = "other"
-                
-            substance = str(result.get("substance", "moderate")).lower()
-            if substance not in ["trivial", "moderate", "substantial"]:
-                substance = "moderate"
-                
-            msg_quality = str(result.get("message_quality", "descriptive")).lower()
-            if msg_quality not in ["descriptive", "vague"]:
-                msg_quality = "descriptive"
-                
-            consistent = bool(result.get("consistent", True))
-            has_security_risk = bool(result.get("has_security_risk", False))
-            
-            sec_type = str(result.get("security_risk_type", "none")).lower()
-            if sec_type not in ["hardcoded_secret", "unsafe_eval", "sql_injection", "none"]:
-                sec_type = "none" if not has_security_risk else "hardcoded_secret"
-            
-            raw_smells = result.get("code_smells", ["none"])
-            if not isinstance(raw_smells, list):
-                raw_smells = [str(raw_smells)]
-            clean_smells = [str(s).lower() for s in raw_smells if str(s).lower() != "none"]
-
-            raw_arch = result.get("architecture_issues", ["none"])
-            if not isinstance(raw_arch, list):
-                raw_arch = [str(raw_arch)]
-            clean_arch = [str(a).lower() for a in raw_arch if str(a).lower() != "none"]
-
-            return {
-                "type": c_type,
-                "substance": substance,
-                "message_quality": msg_quality,
-                "consistent": consistent,
-                "has_security_risk": has_security_risk,
-                "security_risk_type": sec_type,
-                "code_smells": clean_smells,
-                "architecture_issues": clean_arch
-            }
+            if validate_labels(result):
+                parsed_successfully = True
+            else:
+                print(f"[PARSE_FAILURE] Attempt 1 failed validation rules: {response['message']['content']}")
         except Exception as e:
-            # Fallback values if parsing fails or Ollama is down
-            return {
+            print(f"[PARSE_FAILURE] Attempt 1 malformed JSON: {e}")
+
+        # Retry once if Attempt 1 failed
+        if not parsed_successfully:
+            print("[PARSE_FAILURE] Retrying commit classification with stricter prompt reminder...")
+            retry_prompt = f"""The previous response was invalid. Ensure that:
+1. Output is valid JSON.
+2. "type" is strictly one of: ["feature", "bugfix", "refactor", "docs", "test", "config", "style", "merge", "other"]
+3. "substance" is strictly one of: ["trivial", "moderate", "substantial"]
+
+Commit to analyze:
+Message: {safe_msg}
+Diff: {safe_diff}
+
+Respond ONLY with a corrected valid JSON object:"""
+            try:
+                response = ollama.chat(
+                    model=self.model_name,
+                    messages=[{'role': 'user', 'content': retry_prompt}],
+                    format="json",
+                    options={'num_predict': 120, 'temperature': 0.1}
+                )
+                result = json.loads(response['message']['content'])
+                if validate_labels(result):
+                    parsed_successfully = True
+                else:
+                    print(f"[PARSE_FAILURE] Retry failed validation rules: {response['message']['content']}")
+            except Exception as e:
+                print(f"[PARSE_FAILURE] Retry malformed JSON: {e}")
+
+        if not parsed_successfully:
+            # Mark fallback
+            fell_back = True
+            result = {
                 "type": "other",
                 "substance": "moderate",
                 "message_quality": "descriptive",
-                "consistent": True,
+                "message_diff_consistency": "consistent",
+                "consistency_note": "Failed parsing, fallback applied",
                 "has_security_risk": False,
                 "security_risk_type": "none",
                 "code_smells": [],
-                "architecture_issues": []
+                "architecture_issues": [],
+                "notes": "Parsing failure fallback"
             }
+
+        c_type = str(result.get("type", "other")).lower()
+        substance = str(result.get("substance", "moderate")).lower()
+        msg_quality = str(result.get("message_quality", "descriptive")).lower()
+        msg_consistency = str(result.get("message_diff_consistency", "consistent")).lower()
+        consistency_note = str(result.get("consistency_note", "")).strip()
+
+        consistent = (msg_consistency == "consistent")
+        has_security_risk = bool(result.get("has_security_risk", False))
+
+        sec_type = str(result.get("security_risk_type", "none")).lower()
+        if sec_type not in ["hardcoded_secret", "unsafe_eval", "sql_injection", "none"]:
+            sec_type = "none" if not has_security_risk else "hardcoded_secret"
+
+        raw_smells = result.get("code_smells", ["none"])
+        if not isinstance(raw_smells, list):
+            raw_smells = [str(raw_smells)]
+        clean_smells = [str(s).lower() for s in raw_smells if str(s).lower() != "none"]
+
+        raw_arch = result.get("architecture_issues", ["none"])
+        if not isinstance(raw_arch, list):
+            raw_arch = [str(raw_arch)]
+        clean_arch = [str(a).lower() for a in raw_arch if str(a).lower() != "none"]
+
+        notes = str(result.get("notes", "")).strip()
+
+        return {
+            "type": c_type,
+            "substance": substance,
+            "message_quality": msg_quality,
+            "message_diff_consistency": msg_consistency,
+            "consistency_note": consistency_note,
+            "consistent": consistent,
+            "has_security_risk": has_security_risk,
+            "security_risk_type": sec_type,
+            "code_smells": clean_smells,
+            "architecture_issues": clean_arch,
+            "notes": notes,
+            "parse_failure": not parsed_successfully,
+            "fell_back": fell_back
+        }
+
 
     def analyze_architecture(self, folder_tree: str) -> dict:
         """

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 
-export default function CommitActivityChart({ commits, allCommits, authorName }) {
+export default function CommitActivityChart({ commits, allCommits, authorName, deadline }) {
   const sourceForBounds = allCommits || commits;
 
   const initDates = (src) => {
@@ -69,7 +69,13 @@ export default function CommitActivityChart({ commits, allCommits, authorName })
       const label = curr.toLocaleDateString(undefined, { month: 'short', year: '2-digit' });
       const nextMonth = new Date(curr.getFullYear(), curr.getMonth() + 1, 1);
       const count = filteredCommits.filter(c => { const d = new Date(c.timestamp); return d >= curr && d < nextMonth; }).length;
-      chartData.push({ label, count, tooltip: `${label}: ${count} commits` });
+      chartData.push({ 
+        label, 
+        count, 
+        startTime: curr.getTime(), 
+        endTime: nextMonth.getTime() - 1, 
+        tooltip: `${label}: ${count} commits` 
+      });
       curr = nextMonth;
     }
   } else if (chartInterval === 'weekly') {
@@ -78,9 +84,16 @@ export default function CommitActivityChart({ commits, allCommits, authorName })
     while (curr <= end) {
       const weekEnd = new Date(curr);
       weekEnd.setDate(weekEnd.getDate() + 6);
+      weekEnd.setHours(23, 59, 59, 999);
       const label = curr.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
       const count = filteredCommits.filter(c => { const d = new Date(c.timestamp); return d >= curr && d <= weekEnd; }).length;
-      chartData.push({ label, count, tooltip: `${curr.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} – ${weekEnd.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}: ${count} commits` });
+      chartData.push({ 
+        label, 
+        count, 
+        startTime: curr.getTime(), 
+        endTime: weekEnd.getTime(), 
+        tooltip: `${curr.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} – ${weekEnd.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}: ${count} commits` 
+      });
       curr.setDate(curr.getDate() + 7);
     }
   } else {
@@ -88,8 +101,16 @@ export default function CommitActivityChart({ commits, allCommits, authorName })
     while (curr <= end) {
       const label = curr.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
       const dateStr = curr.toDateString();
+      const dayEnd = new Date(curr);
+      dayEnd.setHours(23, 59, 59, 999);
       const count = filteredCommits.filter(c => new Date(c.timestamp).toDateString() === dateStr).length;
-      chartData.push({ label, count, tooltip: `${curr.toLocaleDateString(undefined, { dateStyle: 'medium' })}: ${count} commits` });
+      chartData.push({ 
+        label, 
+        count, 
+        startTime: curr.getTime(), 
+        endTime: dayEnd.getTime(), 
+        tooltip: `${curr.toLocaleDateString(undefined, { dateStyle: 'medium' })}: ${count} commits` 
+      });
       curr.setDate(curr.getDate() + 1);
     }
   }
@@ -104,6 +125,31 @@ export default function CommitActivityChart({ commits, allCommits, authorName })
   const totalSelectedCommits = filteredCommits.length;
   const avgCommits = (totalSelectedCommits / Math.max(chartData.length, 1)).toFixed(1);
   const barColor = 'var(--primary)';
+
+  // Deadline calculations & Red line placement
+  const deadlineDateObj = deadline ? new Date(deadline) : null;
+  const isValidDeadline = deadlineDateObj && !isNaN(deadlineDateObj.getTime());
+  
+  const lateCommits = isValidDeadline 
+    ? filteredCommits.filter(c => new Date(c.timestamp) > deadlineDateObj)
+    : [];
+  const lateCommitsCount = lateCommits.length;
+
+  let deadlineX = null;
+  if (isValidDeadline && chartData.length > 0) {
+    const minTime = chartData[0].startTime;
+    const maxTime = chartData[chartData.length - 1].endTime;
+    const dTime = deadlineDateObj.getTime();
+
+    if (dTime >= minTime && dTime <= maxTime && maxTime > minTime) {
+      const ratio = (dTime - minTime) / (maxTime - minTime);
+      deadlineX = paddingLeft + ratio * chartWidth;
+    } else if (dTime < minTime) {
+      deadlineX = paddingLeft;
+    } else if (dTime > maxTime) {
+      deadlineX = paddingLeft + chartWidth;
+    }
+  }
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
@@ -129,19 +175,28 @@ export default function CommitActivityChart({ commits, allCommits, authorName })
         </div>
       </div>
 
-      {/* Date pickers */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-          <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>From:</span>
-          <input type="date" className="input-field" style={{ padding: '4px 8px', fontSize: '0.8rem', width: '130px', height: 'auto' }} value={startDate} onChange={e => setStartDate(e.target.value)} />
+      {/* Date pickers & Deadline badge indicator */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>From:</span>
+            <input type="date" className="input-field" style={{ padding: '4px 8px', fontSize: '0.8rem', width: '130px', height: 'auto' }} value={startDate} onChange={e => setStartDate(e.target.value)} />
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>To:</span>
+            <input type="date" className="input-field" style={{ padding: '4px 8px', fontSize: '0.8rem', width: '130px', height: 'auto' }} value={endDate} onChange={e => setEndDate(e.target.value)} />
+          </div>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-          <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>To:</span>
-          <input type="date" className="input-field" style={{ padding: '4px 8px', fontSize: '0.8rem', width: '130px', height: 'auto' }} value={endDate} onChange={e => setEndDate(e.target.value)} />
-        </div>
+
+        {isValidDeadline && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.78rem', padding: '3px 10px', borderRadius: '20px', backgroundColor: 'rgba(239, 68, 68, 0.12)', color: '#ef4444', border: '1px solid rgba(239, 68, 68, 0.25)', fontWeight: '600' }}>
+            <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#ef4444', display: 'inline-block' }}></span>
+            <span>Deadline: {deadlineDateObj.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}</span>
+          </div>
+        )}
       </div>
 
-      {/* SVG chart */}
+      {/* SVG chart with Red Deadline Line */}
       <div style={{ position: 'relative', width: '100%', minHeight: '190px', padding: '10px 0', border: '1px solid var(--border-color)', borderRadius: '8px', backgroundColor: 'var(--bg-app)' }}>
         <svg viewBox={`0 0 ${width} ${height}`} style={{ width: '100%', height: '100%', overflow: 'visible' }}>
           {[0, 0.25, 0.5, 0.75, 1].map((ratio, i) => {
@@ -154,6 +209,7 @@ export default function CommitActivityChart({ commits, allCommits, authorName })
             );
           })}
           <text transform={`rotate(90, ${width - 15}, ${paddingTop + chartHeight / 2})`} x={width - 15} y={paddingTop + chartHeight / 2} textAnchor="middle" fontSize="9px" fontWeight="600" fill="var(--text-muted)" letterSpacing="0.05em">Commits</text>
+          
           {chartData.map((d, i) => {
             const x = paddingLeft + i * barSpacing + (barSpacing - barWidth) / 2;
             const barH = (d.count / maxVal) * chartHeight;
@@ -161,7 +217,9 @@ export default function CommitActivityChart({ commits, allCommits, authorName })
             const showLabel = chartData.length <= 12 || i % Math.ceil(chartData.length / 10) === 0;
             return (
               <g key={i} className="chart-bar-group">
-                <rect x={x} y={y} width={barWidth} height={Math.max(barH, 2)} rx="1.5" ry="1.5" fill={barColor} style={{ transition: 'all 0.3s ease', cursor: 'pointer' }} />
+                {d.count > 0 && (
+                  <rect x={x} y={y} width={barWidth} height={barH} rx="1.5" ry="1.5" fill={barColor} style={{ transition: 'all 0.3s ease', cursor: 'pointer' }} />
+                )}
                 <rect x={x - (barSpacing - barWidth) / 2} y={paddingTop} width={barSpacing} height={chartHeight} fill="transparent" style={{ cursor: 'pointer' }}>
                   <title>{d.tooltip}</title>
                 </rect>
@@ -169,11 +227,26 @@ export default function CommitActivityChart({ commits, allCommits, authorName })
               </g>
             );
           })}
+
+          {/* Red Vertical Line for Course Submission Deadline */}
+          {deadlineX !== null && (
+            <g key="deadline-marker" style={{ pointerEvents: 'none' }}>
+              <line
+                x1={deadlineX}
+                y1={paddingTop}
+                x2={deadlineX}
+                y2={height - paddingBottom + 4}
+                stroke="#ef4444"
+                strokeWidth="2"
+                strokeDasharray="4 3"
+              />
+            </g>
+          )}
         </svg>
       </div>
 
       {/* Summary stats */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px', padding: '12px', backgroundColor: 'var(--bg-app)', borderRadius: '6px', border: '1px solid var(--border-color)', textAlign: 'center' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: isValidDeadline ? 'repeat(4, 1fr)' : 'repeat(3, 1fr)', gap: '12px', padding: '12px', backgroundColor: 'var(--bg-app)', borderRadius: '6px', border: '1px solid var(--border-color)', textAlign: 'center' }}>
         <div>
           <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '2px' }}>Selected Range Commits</div>
           <strong style={{ fontSize: '1.05rem', color: 'var(--text-main)' }}>{totalSelectedCommits}</strong>
@@ -186,6 +259,14 @@ export default function CommitActivityChart({ commits, allCommits, authorName })
           <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '2px' }}>Peak {chartInterval === 'monthly' ? 'Month' : chartInterval === 'weekly' ? 'Week' : 'Day'}</div>
           <strong style={{ fontSize: '1.05rem', color: 'var(--text-main)' }}>{maxVal}</strong>
         </div>
+        {isValidDeadline && (
+          <div>
+            <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '2px' }}>Late Commits</div>
+            <strong style={{ fontSize: '1.05rem', color: lateCommitsCount > 0 ? '#ef4444' : '#10b981' }}>
+              {lateCommitsCount > 0 ? `${lateCommitsCount}` : '0'}
+            </strong>
+          </div>
+        )}
       </div>
     </div>
   );

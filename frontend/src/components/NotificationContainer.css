@@ -70,8 +70,8 @@
 }
 
 .notification-icon {
-  width: 20px;
-  height: 20px;
+  width: 16px;
+  height: 16px;
 }
 .notification-icon.info { color: #3b82f6; }
 .notification-icon.success { color: #10b981; }

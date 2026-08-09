@@ -41,8 +41,8 @@ export default function Sidebar({
         <div className="sidebar-course-card">
           <div className="course-info">
             <GraduationCap size={16} className="course-icon" />
-            <span className="course-name" title={currentCourse.name}>
-              {currentCourse.name}
+            <span className="course-name" title={currentCourse.name || currentCourse.title || 'Unnamed Course'}>
+              {currentCourse.name || currentCourse.title || currentCourse.course_name || 'Unnamed Course'}
             </span>
           </div>
           <button className="sidebar-create-btn" onClick={onCreateProjectClick}>

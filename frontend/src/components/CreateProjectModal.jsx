@@ -4,6 +4,7 @@ import './CreateProjectModal.css';
 
 export default function CreateProjectModal({ 
   course, 
+  existingProjects = [],
   onClose, 
   onProjectCreated 
 }) {
@@ -16,9 +17,43 @@ export default function CreateProjectModal({
   const [progressPct, setProgressPct] = useState(0);
   const [error, setError] = useState('');
 
+  const normalizeGitUrl = (url) => (url || '').trim().replace(/\/+$/, '').replace(/\.git$/i, '').toLowerCase();
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!name.trim() || !gitUrl.trim() || !groupNo.trim()) return;
+
+    setError('');
+
+    // 1. Validation: Group No duplicate
+    const normGroup = groupNo.trim().toLowerCase();
+    const isDuplicateGroup = existingProjects.some(p => 
+      (p.group_no || p.groupNo || '').trim().toLowerCase() === normGroup
+    );
+    if (isDuplicateGroup) {
+      setError(`Group No / Tag "${groupNo.trim()}" already exists in this course.`);
+      return;
+    }
+
+    // 2. Validation: Git URL duplicate
+    const normUrl = normalizeGitUrl(gitUrl);
+    const isDuplicateUrl = existingProjects.some(p => 
+      normalizeGitUrl(p.git_url || p.gitUrl) === normUrl
+    );
+    if (isDuplicateUrl) {
+      setError(`Repository URL "${gitUrl.trim()}" is already imported in this course.`);
+      return;
+    }
+
+    // 3. Validation: Project Name duplicate
+    const normName = name.trim().toLowerCase();
+    const isDuplicateName = existingProjects.some(p => 
+      (p.name || '').trim().toLowerCase() === normName
+    );
+    if (isDuplicateName) {
+      setError(`Project name "${name.trim()}" already exists in this course.`);
+      return;
+    }
 
     setLoading(true);
     setError('');

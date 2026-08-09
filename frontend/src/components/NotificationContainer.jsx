@@ -1,12 +1,12 @@
 import React from 'react';
-import { X, CheckCircle, AlertCircle, AlertTriangle, Info, RefreshCw } from 'lucide-react';
+import { X, CheckCircle, AlertCircle, AlertTriangle, Info, RefreshCw, LoaderCircle, RecycleIcon, LucideRecycle, ArrowUpLeftFromCircleIcon, LucideRefreshCcw } from 'lucide-react';
 import './NotificationContainer.css'; // We'll add this next
 
 const NotificationItem = ({ notification, onRemove }) => {
   const { id, type, title, description, progress, progressValue } = notification;
 
   const getIcon = () => {
-    if (progress) return <img src="/favicon.svg" alt="Code Lens" className="notification-icon" style={{ width: 20, height: 20, borderRadius: 4, objectFit: 'contain' }} />;
+    if (progress) return <LucideRefreshCcw className="notification-icon info" />;
     switch (type) {
       case 'success': return <CheckCircle className="notification-icon success" />;
       case 'error': return <AlertCircle className="notification-icon error" />;
