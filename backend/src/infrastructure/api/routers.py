@@ -5,6 +5,7 @@ from sqlalchemy import func
 from typing import List, Optional
 import os
 import json
+import io
 
 
 from src.infrastructure.database.session import get_db
@@ -1258,6 +1259,102 @@ def generate_cloud_ai_report(
     try:
         qual_data = _json.loads(qual_report_json)
         print(f"[CLOUD-REPORT-LOG] [ROUTER] Successfully parsed qualitative_report JSON cache.")
+        
+        # Dynamic on-the-fly enrichment for legacy DB caches
+        ps = qual_data.get("project_summary", {})
+        if not ps.get("folder_structure") or not ps.get("readme_quality") or not ps.get("language_distribution"):
+            import os
+            try:
+                if not ps.get("language_distribution") and hasattr(project_repo, 'get_language_distribution'):
+                    ps["language_distribution"] = project_repo.get_language_distribution(project.id) or {}
+                
+                repo_path = getattr(project, 'local_saved_path', None)
+                if repo_path and os.path.exists(repo_path) and os.path.isdir(repo_path):
+                    if not ps.get("folder_structure"):
+                        top_dirs = []
+                        tot_files = 0
+                        tot_dirs = 0
+                        has_tests = False
+                        for root, dirs, files in os.walk(repo_path):
+                            dirs[:] = [d for d in dirs if not d.startswith('.') and d not in ('node_modules', '__pycache__', 'venv', 'env', 'build', 'dist')]
+                            tot_dirs += len(dirs)
+                            tot_files += len(files)
+                            if root == repo_path:
+                                top_dirs = list(dirs)
+                            for d in dirs:
+                                if d.lower() in ('test', 'tests', '__tests__', 'spec', 'specs'):
+                                    has_tests = True
+
+                        modularity = "Monolithic (Flat)"
+                        if len(top_dirs) >= 3 or has_tests:
+                            modularity = "High Modularity (Structured Directories)"
+                        elif len(top_dirs) >= 1:
+                            modularity = "Moderate Modularity"
+
+                        ps["folder_structure"] = {
+                            "top_level_directories": top_dirs[:8],
+                            "total_directories": tot_dirs,
+                            "total_files": tot_files,
+                            "has_tests_dir": has_tests,
+                            "modularity_score": modularity
+                        }
+
+                    if not ps.get("readme_quality"):
+                        readme_file = None
+                        for fname in os.listdir(repo_path):
+                            if fname.lower().startswith('readme'):
+                                readme_file = os.path.join(repo_path, fname)
+                                break
+                        if readme_file and os.path.isfile(readme_file):
+                            size_kb = round(os.path.getsize(readme_file) / 1024.0, 2)
+                            has_setup = False
+                            has_arch = False
+                            try:
+                                with open(readme_file, 'r', encoding='utf-8', errors='ignore') as f:
+                                    content = f.read().lower()
+                                    if any(k in content for k in ['install', 'setup', 'run', 'build', 'usage', 'getting started']):
+                                        has_setup = True
+                                    if any(k in content for k in ['architecture', 'design', 'structure', 'api', 'component', 'overview']):
+                                        has_arch = True
+                            except Exception:
+                                pass
+
+                            if size_kb > 2.0 and has_setup and has_arch:
+                                doc_score = "Comprehensive (9/10)"
+                            elif size_kb > 0.5 or has_setup:
+                                doc_score = "Basic (5/10)"
+                            else:
+                                doc_score = "Minimal (3/10)"
+
+                            ps["readme_quality"] = {
+                                "has_readme": True,
+                                "readme_size_kb": size_kb,
+                                "has_setup_guide": has_setup,
+                                "has_architecture_doc": has_arch,
+                                "documentation_score": doc_score
+                            }
+                        else:
+                            ps["readme_quality"] = {"documentation_score": "Missing (0/10)"}
+                qual_data["project_summary"] = ps
+            except Exception as enrich_err:
+                print(f"[CLOUD-REPORT-LOG] [ROUTER] On-the-fly cache enrichment warning: {enrich_err}")
+
+        # Always ensure branches_summary, plagiarism_summary, ast_complexity_summary exist
+        if not ps.get("branches_summary") or not ps.get("plagiarism_summary") or not ps.get("ast_complexity_summary"):
+            try:
+                from src.use_cases.get_qualitative_analysis import extract_extended_quantitative_metrics
+                db_session = getattr(project_repo, 'db', db)
+                commits_list = commit_repo.get_by_project_id(project_id) if hasattr(commit_repo, 'get_by_project_id') else None
+                ext = extract_extended_quantitative_metrics(
+                    db=db_session,
+                    project_id=project.id,
+                    project=project,
+                    commits=commits_list
+                )
+                ps.update(ext)
+                qual_data["project_summary"] = ps
+            except Exception as ext_err:
+                print(f"[CLOUD-REPORT-LOG] [ROUTER] On-the-fly extended metrics warning: {ext_err}")
     except Exception as e:
         print(f"[CLOUD-REPORT-LOG] [ROUTER] ERROR: Failed to parse qualitative_report JSON: {e}")
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Malformed qualitative report cache.")
@@ -1281,23 +1378,35 @@ def generate_cloud_ai_report(
         
         from src.use_cases.get_cloud_report import render_pdf_report
         import datetime
-        import io
-        
         date_str = datetime.datetime.utcnow().strftime("%Y-%m-%d")
         print(f"[CLOUD-REPORT-LOG] [ROUTER] Rendering PDF report using Jinja2 + xhtml2pdf...")
+        lecturer = getattr(current_user, 'username', None) or getattr(current_user, 'email', None) or 'Course Lecturer'
+        course_obj = getattr(project, 'course', None)
+        course_dl = getattr(course_obj, 'deadline', None) if course_obj else getattr(project, 'deadline', None)
+        
         pdf_bytes = render_pdf_report(
             report_data=report_data, 
             course_name=course_name, 
             project_name=project.name, 
-            date=date_str
+            date=date_str,
+            qual_data=qual_data,
+            group_no=getattr(project, 'group_no', None),
+            lecturer_name=lecturer,
+            git_url=getattr(project, 'git_url', None),
+            deadline=course_dl
         )
         print(f"[CLOUD-REPORT-LOG] [ROUTER] PDF rendered successfully ({len(pdf_bytes)} bytes). Returning StreamingResponse.")
         print(f"================================================================================\n")
         
+        import re
+        safe_course = re.sub(r'[^\w\-_]', '_', course_name or "Course").strip('_')
+        safe_project = re.sub(r'[^\w\-_]', '_', project.name or "Project").strip('_')
+        download_filename = f"Project Report_{safe_course}_{safe_project}_{project_id}.pdf"
+        
         return StreamingResponse(
             io.BytesIO(pdf_bytes), 
             media_type="application/pdf", 
-            headers={"Content-Disposition": f'attachment; filename="CodeLens_Report_{project_id}.pdf"'}
+            headers={"Content-Disposition": f'attachment; filename="{download_filename}"'}
         )
     except HTTPException:
         raise

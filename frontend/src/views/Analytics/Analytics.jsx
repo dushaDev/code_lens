@@ -58,6 +58,37 @@ export default function Analytics({ project, course, onBack, qualAnalysisState, 
   const isComplete = qualStatus === 'complete';
   const isIdle = qualStatus === 'idle' || qualStatus === 'cancelled';
 
+  // Live Timer & ETA Calculation for Local AI Qualitative Analysis
+  const [startTime, setStartTime] = useState(null);
+  const [nowTime, setNowTime] = useState(Date.now());
+
+  useEffect(() => {
+    if (isRunning || isCancelling) {
+      if (!startTime) {
+        setStartTime(Date.now());
+      }
+      const interval = setInterval(() => {
+        setNowTime(Date.now());
+      }, 1000);
+      return () => clearInterval(interval);
+    } else {
+      setStartTime(null);
+    }
+  }, [isRunning, isCancelling, startTime]);
+
+  const elapsedSec = startTime ? Math.max(0, Math.floor((nowTime - startTime) / 1000)) : 0;
+  const etaSec = (startTime && qualProgress > 3 && qualProgress < 100)
+    ? Math.max(0, Math.round(((100 - qualProgress) / qualProgress) * elapsedSec))
+    : null;
+
+  const formatSeconds = (sec) => {
+    if (sec === null || isNaN(sec) || sec < 0) return null;
+    if (sec < 60) return `${sec}s`;
+    const m = Math.floor(sec / 60);
+    const s = sec % 60;
+    return `${m}m ${s}s`;
+  };
+
 
 
 
@@ -103,6 +134,13 @@ export default function Analytics({ project, course, onBack, qualAnalysisState, 
 
 
 
+  // Sync sampling mode from completed qualitative analysis data if available
+  useEffect(() => {
+    if (qualData?.project_summary?.sampling_mode) {
+      setSamplingMode(qualData.project_summary.sampling_mode);
+    }
+  }, [qualData]);
+
   // When entering qualitative tab: if idle, check backend/DB status then auto-start
   useEffect(() => {
     if (activeTab !== 'qualitative') return;
@@ -124,14 +162,14 @@ export default function Analytics({ project, course, onBack, qualAnalysisState, 
         }
         if (statusData.status === 'complete' || statusData.has_db_cache) {
           // DB has cached data — start stream (will return instantly from cache)
-          onStartQualitative(false);
+          onStartQualitative(false, samplingMode);
           return;
         }
         // Truly idle, no cache: auto-start
-        onStartQualitative(false);
+        onStartQualitative(false, samplingMode);
       } catch (err) {
         console.error('Status check failed, auto-starting:', err);
-        onStartQualitative(false);
+        onStartQualitative(false, samplingMode);
       }
     };
     checkAndStart();
@@ -206,12 +244,21 @@ export default function Analytics({ project, course, onBack, qualAnalysisState, 
         throw new Error(detailMsg);
       }
       
+      let fileName = `Project Report_${(project.course_name || 'Course').replace(/[^\w\-_]/g, '_')}_${(project.name || 'Project').replace(/[^\w\-_]/g, '_')}_${project.id}.pdf`;
+      const disposition = res.headers.get('Content-Disposition');
+      if (disposition && disposition.includes('filename=')) {
+        const match = disposition.match(/filename="?([^";]+)"?/);
+        if (match && match[1]) {
+          fileName = match[1];
+        }
+      }
+      
       const blob = await res.blob();
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.style.display = 'none';
       a.href = url;
-      a.download = `CodeLens_Report_${project.id}.pdf`;
+      a.download = fileName;
       document.body.appendChild(a);
       a.click();
       window.URL.revokeObjectURL(url);
@@ -915,8 +962,14 @@ export default function Analytics({ project, course, onBack, qualAnalysisState, 
                   {statusBadge()}
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-                  {/* Sampling mode selector — always visible */}
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '4px', border: '1px solid var(--border-color)', borderRadius: '6px', padding: '2px', backgroundColor: 'var(--bg-app)' }}>
+                  {/* Sampling mode selector — locked while analysis is running */}
+                  <div style={{
+                    display: 'flex', alignItems: 'center', gap: '4px',
+                    border: '1px solid var(--border-color)', borderRadius: '6px', padding: '2px',
+                    backgroundColor: 'var(--bg-app)',
+                    opacity: (isRunning || isCancelling) ? 0.6 : 1,
+                    pointerEvents: (isRunning || isCancelling) ? 'none' : 'auto'
+                  }}>
                     {[['sample', 'Smart'], ['full', 'Full'], ['random', 'Random']].map(([m, label]) => (
                       <button
                         key={m}
@@ -925,11 +978,13 @@ export default function Analytics({ project, course, onBack, qualAnalysisState, 
                         disabled={isRunning || isCancelling}
                         style={{
                           padding: '3px 9px', borderRadius: '4px', fontSize: '0.73rem', fontWeight: '600',
-                          border: 'none', cursor: 'pointer', transition: 'all 0.15s',
+                          border: 'none',
+                          cursor: (isRunning || isCancelling) ? 'not-allowed' : 'pointer',
+                          transition: 'all 0.15s',
                           backgroundColor: samplingMode === m ? 'var(--primary)' : 'transparent',
                           color: samplingMode === m ? '#fff' : 'var(--text-muted)',
                         }}
-                        title={m === 'sample' ? 'Stratified Smart-Sampling: always-include high-signal commits + 20% per contributor' : m === 'full' ? 'Process every commit (slow on large repos)' : 'Pure random 20% of all commits'}
+                        title={(isRunning || isCancelling) ? 'Mode selection is locked while analysis is in progress' : (m === 'sample' ? 'Stratified Smart-Sampling: always-include high-signal commits + 20% per contributor' : m === 'full' ? 'Process every commit (slow on large repos)' : 'Pure random 20% of all commits')}
                       >
                         {label}
                       </button>
@@ -939,7 +994,7 @@ export default function Analytics({ project, course, onBack, qualAnalysisState, 
                   {/* Start button — only when idle/cancelled */}
                   {isIdle && (
                     <button type="button" className="btn btn-secondary"
-                      onClick={() => onStartQualitative(false)}
+                      onClick={() => onStartQualitative(false, samplingMode)}
                       style={{ display:'inline-flex', alignItems:'center', gap:'6px', fontSize:'0.85rem', color:'var(--primary)', borderColor:'var(--primary)' }}
                     >
                       <Play size={14} /><span>Start Analysis</span>
@@ -957,10 +1012,10 @@ export default function Analytics({ project, course, onBack, qualAnalysisState, 
                   )}
                   {/* Re-analyze — always available */}
                   <button type="button" className="btn btn-secondary"
-                    onClick={() => onStartQualitative(true)}
+                    onClick={() => onStartQualitative(true, samplingMode)}
                     disabled={isRunning || isCancelling}
                     style={{ display:'inline-flex', alignItems:'center', gap:'6px', fontSize:'0.85rem' }}
-                    title="Clear DB cache and re-run from scratch"
+                    title="Clear DB cache and re-run from scratch with selected mode"
                   >
                     <RefreshCw size={14} /><span>Re-analyze</span>
                   </button>
@@ -974,12 +1029,35 @@ export default function Analytics({ project, course, onBack, qualAnalysisState, 
                 </div>
               </div>
 
-              {/* Progress bar — only when running */}
+              {/* Progress bar with Live Timer & Estimated Time Remaining */}
               {(isRunning || isCancelling) && (
-                <div style={{ marginTop: '8px' }}>
-                  <p style={{ margin: '0 0 8px 0', fontSize: '0.82rem', color: 'var(--text-muted)' }}>
-                    {qualMessage || 'Processing...'}
-                  </p>
+                <div style={{ marginTop: '12px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px', flexWrap: 'wrap', gap: '8px' }}>
+                    <p style={{ margin: 0, fontSize: '0.82rem', color: 'var(--text-muted)', fontWeight: '500' }}>
+                      {qualMessage || 'Processing...'}
+                    </p>
+                    {/* Live Timer & ETA Badge */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.78rem' }}>
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', color: 'var(--text-muted)' }}>
+                        <Clock size={13} style={{ color: 'var(--primary)' }} />
+                        <span>Elapsed: <strong>{formatSeconds(elapsedSec)}</strong></span>
+                      </span>
+                      {etaSec !== null ? (
+                        <span style={{
+                          fontWeight: '600', color: 'var(--primary)',
+                          backgroundColor: 'rgba(99,102,241,0.1)',
+                          padding: '2px 8px', borderRadius: '4px',
+                          border: '1px solid rgba(99,102,241,0.2)'
+                        }}>
+                          Est. remaining: ~{formatSeconds(etaSec)}
+                        </span>
+                      ) : qualProgress <= 3 ? (
+                        <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontStyle: 'italic' }}>
+                          Calculating ETA...
+                        </span>
+                      ) : null}
+                    </div>
+                  </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                     <div style={{ flex: 1, height: '8px', backgroundColor: 'var(--bg-app)', borderRadius: '5px', overflow: 'hidden', border: '1px solid var(--border-color)' }}>
                       <div style={{ height: '100%', width: `${qualProgress}%`, background: 'linear-gradient(90deg, var(--primary), #818cf8)', borderRadius: '5px', transition: 'width 0.4s ease-out' }} />
@@ -1047,7 +1125,7 @@ export default function Analytics({ project, course, onBack, qualAnalysisState, 
                         <th style={{ width: '15%' }}>LOC Share</th>
                         <th style={{ width: '15%' }}>Vague Msg %</th>
                         <th style={{ width: '15%' }}>Msg Mismatch %</th>
-                        <th style={{ width: '10%' }}>AI Risk</th>
+                        <th style={{ width: '10%' }}>Risk Score</th>
                         <th style={{ width: '23%' }}>Status / Red Flags</th>
                       </tr>
                     </thead>
@@ -1115,7 +1193,7 @@ export default function Analytics({ project, course, onBack, qualAnalysisState, 
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '12px' }}>
                 <h2 style={{ fontSize: '1.1rem', fontWeight: '600', color: 'var(--text-main)', margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
                   <Bot size={20} style={{ color: 'var(--primary)' }} />
-                  <span>Cloud AI Final Report (Gemini)</span>
+                  <span>Cloud AI Final Report</span>
                 </h2>
               </div>
               

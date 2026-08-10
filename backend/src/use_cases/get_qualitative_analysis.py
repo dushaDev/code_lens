@@ -1,4 +1,5 @@
 import json
+import os
 import concurrent.futures
 from datetime import timedelta
 from typing import Dict, Any, List, Optional
@@ -22,6 +23,128 @@ def cancel_qualitative_analysis(project_id: int):
     CANCELLED_PROJECT_IDS.add(project_id)
     if project_id in RUNNING_PROJECTS:
         RUNNING_PROJECTS[project_id]["status"] = "cancelling"
+
+def extract_extended_quantitative_metrics(db, project_id: int, project=None, commits=None) -> dict:
+    """Extract extended quantitative metrics: branches, similarity reports, AST complexity, timeline peak."""
+    from sqlalchemy import func, desc
+    from src.infrastructure.database.models import (
+        BranchModel, commit_branches, SimilarityReportModel,
+        ProjectModel, FileChangeModel, CommitModel
+    )
+    
+    # 1. Branches summary
+    branches_summary = {"total_branches": 0, "top_branches": []}
+    try:
+        if db:
+            results = db.query(
+                BranchModel.name,
+                func.count(commit_branches.c.commit_hash).label("commit_count")
+            ).outerjoin(commit_branches, BranchModel.id == commit_branches.c.branch_id)\
+             .filter(BranchModel.project_id == project_id)\
+             .group_by(BranchModel.id, BranchModel.name)\
+             .order_by(desc("commit_count")).all()
+            
+            total_b = len(results)
+            top_b = [{"name": r[0], "commits": r[1]} for r in results[:10]]
+            branches_summary = {
+                "total_branches": total_b,
+                "top_branches": top_b
+            }
+    except Exception as e:
+        print(f"[EXTENDED-METRICS] Branch extraction error: {e}")
+
+    # 2. Plagiarism / Similarity summary
+    plagiarism_summary = {
+        "has_scan": False,
+        "max_similarity_score": 0.0,
+        "matched_project_name": None,
+        "status": "No Scan Performed",
+        "matched_blocks_count": 0
+    }
+    try:
+        if db:
+            reports = db.query(SimilarityReportModel).filter(
+                (SimilarityReportModel.project_a_id == project_id) |
+                (SimilarityReportModel.project_b_id == project_id)
+            ).order_by(desc(SimilarityReportModel.similarity_score)).all()
+            
+            if reports:
+                top_r = reports[0]
+                partner_id = top_r.project_b_id if top_r.project_a_id == project_id else top_r.project_a_id
+                partner_proj = db.query(ProjectModel).filter(ProjectModel.id == partner_id).first()
+                partner_name = partner_proj.name if partner_proj else f"Project #{partner_id}"
+                
+                plagiarism_summary = {
+                    "has_scan": True,
+                    "max_similarity_score": round(top_r.similarity_score * 100.0, 1) if top_r.similarity_score <= 1.0 else round(top_r.similarity_score, 1),
+                    "matched_project_name": partner_name,
+                    "status": top_r.status or "Needs Review",
+                    "matched_blocks_count": top_r.matched_hashes_count or 0
+                }
+    except Exception as e:
+        print(f"[EXTENDED-METRICS] Similarity extraction error: {e}")
+
+    # 3. AST Complexity & Squash commits
+    ast_complexity_summary = {
+        "avg_complexity_score": 0.0,
+        "total_functions": 0,
+        "squash_suspected_commits": 0
+    }
+    try:
+        if db:
+            ast_res = db.query(
+                func.avg(FileChangeModel.complexity_score),
+                func.sum(FileChangeModel.function_count)
+            ).join(CommitModel, FileChangeModel.commit_hash == CommitModel.hash)\
+             .filter(CommitModel.project_id == project_id).first()
+            
+            squash_count = db.query(func.count(CommitModel.hash)).filter(
+                CommitModel.project_id == project_id,
+                CommitModel.is_squash_suspected == True
+            ).scalar() or 0
+
+            avg_comp = round(float(ast_res[0]), 1) if ast_res and ast_res[0] is not None else 0.0
+            tot_func = int(ast_res[1]) if ast_res and ast_res[1] is not None else 0
+            
+            ast_complexity_summary = {
+                "avg_complexity_score": avg_comp,
+                "total_functions": tot_func,
+                "squash_suspected_commits": squash_count
+            }
+    except Exception as e:
+        print(f"[EXTENDED-METRICS] AST complexity error: {e}")
+
+    # 4. Pacing peak & daily velocity summary
+    pacing_summary = {
+        "peak_commit_date": "N/A",
+        "peak_commit_count": 0,
+        "avg_commits_per_active_day": 0.0
+    }
+    try:
+        if commits:
+            daily_counts = {}
+            for c in commits:
+                if c.timestamp:
+                    d_str = c.timestamp.strftime("%Y-%m-%d")
+                    daily_counts[d_str] = daily_counts.get(d_str, 0) + 1
+            if daily_counts:
+                peak_date = max(daily_counts, key=daily_counts.get)
+                peak_val = daily_counts[peak_date]
+                avg_val = round(sum(daily_counts.values()) / len(daily_counts), 1)
+                pacing_summary = {
+                    "peak_commit_date": peak_date,
+                    "peak_commit_count": peak_val,
+                    "avg_commits_per_active_day": avg_val
+                }
+    except Exception as e:
+        print(f"[EXTENDED-METRICS] Pacing summary error: {e}")
+
+    return {
+        "branches_summary": branches_summary,
+        "plagiarism_summary": plagiarism_summary,
+        "ast_complexity_summary": ast_complexity_summary,
+        "pacing_summary": pacing_summary
+    }
 
 class GetQualitativeAnalysisUseCase:
     def __init__(
@@ -320,10 +443,16 @@ class GetQualitativeAnalysisUseCase:
         # Pre-calculate total lines of code changed (LOC) across the project
         total_project_loc = 0
         canonical_loc_map = {}
+        canonical_added_map = {}
+        canonical_removed_map = {}
         for cid in unique_canonical_ids:
             author_commits = commits_by_author.get(cid, [])
-            author_loc = sum((getattr(c, 'insertions', 0) or 0) + (getattr(c, 'deletions', 0) or 0) for c in author_commits)
+            author_added = sum(getattr(c, 'insertions', 0) or 0 for c in author_commits)
+            author_removed = sum(getattr(c, 'deletions', 0) or 0 for c in author_commits)
+            author_loc = author_added + author_removed
             canonical_loc_map[cid] = author_loc
+            canonical_added_map[cid] = author_added
+            canonical_removed_map[cid] = author_removed
             total_project_loc += author_loc
 
         total_commits_all = len(commits)
@@ -479,6 +608,8 @@ class GetQualitativeAnalysisUseCase:
                     "sampled_commits": total_sampled,
                     "commit_share_percentage": commit_share,
                     "loc_share_percentage": loc_share,
+                    "lines_added": canonical_added_map.get(author_id, 0),
+                    "lines_removed": canonical_removed_map.get(author_id, 0),
                     "lines_changed": author_loc,
                     "type_distribution": dict(type_dist),
                     "substance_distribution": substance_dist,
@@ -605,10 +736,135 @@ class GetQualitativeAnalysisUseCase:
         else:
             peer_review_summary = None
 
+        # Calculate Commit Timeline (Daily aggregated commit volume)
+        commit_timeline_dict = defaultdict(int)
+        for c in commits:
+            if getattr(c, 'timestamp', None):
+                d_str = c.timestamp.strftime("%Y-%m-%d")
+                commit_timeline_dict[d_str] += 1
+        sorted_commit_timeline = [{"date": d, "count": cnt} for d, cnt in sorted(commit_timeline_dict.items())]
+
+        # Fetch Language Distribution
+        lang_dist = {}
+        try:
+            if hasattr(self.project_repo, 'get_language_distribution'):
+                lang_dist = self.project_repo.get_language_distribution(project_id) or {}
+        except Exception as lang_err:
+            print(f"Error fetching language distribution: {lang_err}")
+
+        # Folder Structure & README Quality Inspection
+        folder_structure = {
+            "top_level_directories": [],
+            "total_directories": 0,
+            "total_files": 0,
+            "has_tests_dir": False,
+            "modularity_score": "Standard"
+        }
+
+        readme_quality = {
+            "has_readme": False,
+            "readme_size_kb": 0.0,
+            "has_setup_guide": False,
+            "has_architecture_doc": False,
+            "documentation_score": "Not Found"
+        }
+
+        repo_path = getattr(project, 'local_saved_path', None)
+        if repo_path and os.path.exists(repo_path) and os.path.isdir(repo_path):
+            try:
+                top_dirs = []
+                tot_files = 0
+                tot_dirs = 0
+                has_tests = False
+                
+                for root, dirs, files in os.walk(repo_path):
+                    dirs[:] = [d for d in dirs if not d.startswith('.') and d not in ('node_modules', '__pycache__', 'venv', 'env', 'build', 'dist')]
+                    tot_dirs += len(dirs)
+                    tot_files += len(files)
+                    
+                    if root == repo_path:
+                        top_dirs = list(dirs)
+                        
+                    for d in dirs:
+                        if d.lower() in ('test', 'tests', '__tests__', 'spec', 'specs'):
+                            has_tests = True
+
+                modularity = "Monolithic (Flat)"
+                if len(top_dirs) >= 3 or has_tests:
+                    modularity = "High Modularity (Structured Directories)"
+                elif len(top_dirs) >= 1:
+                    modularity = "Moderate Modularity"
+
+                folder_structure = {
+                    "top_level_directories": top_dirs[:8],
+                    "total_directories": tot_dirs,
+                    "total_files": tot_files,
+                    "has_tests_dir": has_tests,
+                    "modularity_score": modularity
+                }
+
+                readme_file = None
+                for fname in os.listdir(repo_path):
+                    if fname.lower().startswith('readme'):
+                        readme_file = os.path.join(repo_path, fname)
+                        break
+                
+                if readme_file and os.path.isfile(readme_file):
+                    size_kb = round(os.path.getsize(readme_file) / 1024.0, 2)
+                    has_setup = False
+                    has_arch = False
+                    
+                    try:
+                        with open(readme_file, 'r', encoding='utf-8', errors='ignore') as f:
+                            content = f.read().lower()
+                            if any(k in content for k in ['install', 'setup', 'run', 'build', 'usage', 'getting started']):
+                                has_setup = True
+                            if any(k in content for k in ['architecture', 'design', 'structure', 'api', 'component', 'overview']):
+                                has_arch = True
+                    except Exception:
+                        pass
+
+                    if size_kb > 2.0 and has_setup and has_arch:
+                        doc_score = "Comprehensive (9/10)"
+                    elif size_kb > 0.5 or has_setup:
+                        doc_score = "Basic (5/10)"
+                    else:
+                        doc_score = "Minimal (3/10)"
+
+                    readme_quality = {
+                        "has_readme": True,
+                        "readme_size_kb": size_kb,
+                        "has_setup_guide": has_setup,
+                        "has_architecture_doc": has_arch,
+                        "documentation_score": doc_score
+                    }
+                else:
+                    readme_quality["documentation_score"] = "Missing (0/10)"
+            except Exception as repo_err:
+                print(f"Error inspecting repo folder structure / README: {repo_err}")
+
+        # ── Extract Extended Quantitative Metrics (Branches, Plagiarism, AST, Peak Timeline) ──
+        ext_metrics = {}
+        try:
+            db_session = getattr(self.project_repo, 'db', None)
+            ext_metrics = extract_extended_quantitative_metrics(
+                db=db_session,
+                project_id=project_id,
+                project=project,
+                commits=commits
+            )
+        except Exception as ext_err:
+            print(f"[QUAL-ANALYSIS] Error generating extended metrics: {ext_err}")
+
         project_summary = {
             **sampling_stats,
+            **ext_metrics,
             "total_commits": len(commits),
             "sampled_commits": proj_total_sampled,
+            "commit_timeline": sorted_commit_timeline,
+            "language_distribution": lang_dist,
+            "folder_structure": folder_structure,
+            "readme_quality": readme_quality,
             "type_distribution": dict(proj_type_dist),
             "substance_distribution": proj_substance_dist,
             "vague_message_percentage": round((proj_vague_count / proj_total_sampled) * 100, 1) if proj_total_sampled else 0,

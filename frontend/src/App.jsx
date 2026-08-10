@@ -78,7 +78,7 @@ export default function App() {
   }, []);
 
   // ── Global Qualitative Stream Logic ──────────────────────────────────────
-  const triggerQualitativeAnalysis = async (projectId, forceRefresh = false) => {
+  const triggerQualitativeAnalysis = async (projectId, forceRefresh = false, mode = 'sample') => {
     // Abort any existing stream for a different project
     if (qualAbortRef.current) {
       qualAbortRef.current.abort();
@@ -100,7 +100,10 @@ export default function App() {
     setPillDismissed(false);
 
     try {
-      const url = `/api/v1/projects/${projectId}/qualitative-analysis${forceRefresh ? '?force_refresh=true' : ''}`;
+      const params = new URLSearchParams();
+      if (forceRefresh) params.append('force_refresh', 'true');
+      if (mode) params.append('mode', mode);
+      const url = `/api/v1/projects/${projectId}/qualitative-analysis?${params.toString()}`;
       const res = await fetch(url, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${token}` },
@@ -652,7 +655,7 @@ export default function App() {
               course={currentCourse}
               onBack={() => setSelectedProject(null)}
               qualAnalysisState={qualAnalysisState.projectId === selectedProject.id ? qualAnalysisState : { projectId: selectedProject.id, status: 'idle', progress: 0, message: '', data: null }}
-              onStartQualitative={(forceRefresh) => triggerQualitativeAnalysis(selectedProject.id, forceRefresh)}
+              onStartQualitative={(forceRefresh, mode) => triggerQualitativeAnalysis(selectedProject.id, forceRefresh, mode)}
               onStopQualitative={() => handleStopQualitative(selectedProject.id)}
             />
           ) : (
