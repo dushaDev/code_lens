@@ -10,13 +10,8 @@ from slowapi.middleware import SlowAPIMiddleware
 load_dotenv()
 
 from src.infrastructure.database.session import init_db
-from src.infrastructure.api.routers import router
+from src.infrastructure.api.routers import router, limiter
 from src.infrastructure.api.similarity_router import similarity_router
-
-# ---------------------------------------------------------------------------
-# Rate limiter — keyed by client IP
-# ---------------------------------------------------------------------------
-limiter = Limiter(key_func=get_remote_address)
 
 app = FastAPI(
     title="Code Lens API",
