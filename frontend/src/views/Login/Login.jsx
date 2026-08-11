@@ -16,6 +16,7 @@ export default function Login({ onLoginSuccess }) {
     setLoading(true);
 
     try {
+      // TODO: migrate to apiFetch
       const response = await fetch('/api/v1/auth/login', {
         method: 'POST',
         headers: {
@@ -32,6 +33,7 @@ export default function Login({ onLoginSuccess }) {
 
       localStorage.setItem('token', data.access_token);
       
+      // TODO: migrate to apiFetch
       const meRes = await fetch('/api/v1/users/me', {
         headers: {
           'Authorization': `Bearer ${data.access_token}`
@@ -41,7 +43,8 @@ export default function Login({ onLoginSuccess }) {
       
       onLoginSuccess(meData);
     } catch (err) {
-      setError(err.message || 'Something went wrong. Please check your credentials.');
+      const isKnownAuthError = err.message === 'Incorrect email or password.' || err.message === 'User account is deactivated.';
+      setError(isKnownAuthError ? err.message : 'Something went wrong, please try again.');
     } finally {
       setLoading(false);
     }

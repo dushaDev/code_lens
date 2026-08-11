@@ -36,6 +36,7 @@ export default function ProfileDropdown({ user, onLogout, onUserUpdate }) {
     setSaving(true);
     const token = localStorage.getItem('token');
     try {
+      // TODO: migrate to apiFetch
       const response = await fetch(`/api/v1/users/${user.id}`, {
         method: 'PUT',
         headers: {
@@ -70,6 +71,7 @@ export default function ProfileDropdown({ user, onLogout, onUserUpdate }) {
     setSaving(true);
     const token = localStorage.getItem('token');
     try {
+      // TODO: migrate to apiFetch
       const response = await fetch(`/api/v1/users/${user.id}`, {
         method: 'PUT',
         headers: {

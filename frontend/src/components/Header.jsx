@@ -48,6 +48,7 @@ export default function Header({
     try {
       const token = localStorage.getItem('token');
       const courseParam = currentCourse ? `&course_id=${currentCourse.id}` : '';
+      // TODO: migrate to apiFetch
       const response = await fetch(`/api/v1/search?q=${encodeURIComponent(value)}${courseParam}`, {
         headers: {
           'Authorization': `Bearer ${token}`

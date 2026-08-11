@@ -39,6 +39,7 @@ export default function Signup({ onSwitchToLogin, onRegisterSuccess }) {
       setError('Passwords do not match.');
       return;
     }
+    // NOTE: Real password strength policy and complexity validation are enforced on the backend side.
     if (strength.score < 2) {
       setError('Please use a stronger password (at least Good).');
       return;
@@ -47,6 +48,7 @@ export default function Signup({ onSwitchToLogin, onRegisterSuccess }) {
     setLoading(true);
 
     try {
+      // TODO: migrate to apiFetch
       const response = await fetch('/api/v1/auth/register', {
         method: 'POST',
         headers: {

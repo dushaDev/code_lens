@@ -29,6 +29,7 @@ export default function CourseSelect({ user, onSelectCourse, onLogout, onUserUpd
     const token = localStorage.getItem('token');
 
     try {
+      // TODO: migrate to apiFetch
       const response = await fetch('/api/v1/courses', {
         headers: {
           'Authorization': `Bearer ${token}`
@@ -56,6 +57,7 @@ export default function CourseSelect({ user, onSelectCourse, onLogout, onUserUpd
     const token = localStorage.getItem('token');
 
     try {
+      // TODO: migrate to apiFetch
       const response = await fetch('/api/v1/courses', {
         method: 'POST',
         headers: {

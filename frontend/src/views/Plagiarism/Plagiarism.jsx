@@ -45,6 +45,7 @@ export default function Plagiarism({ alerts = [], currentCourseId }) {
     }, 250);
 
     try {
+      // TODO: migrate to apiFetch
       const res = await fetch(`/api/v1/courses/${currentCourseId}/similarity/analyze`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -98,6 +99,7 @@ export default function Plagiarism({ alerts = [], currentCourseId }) {
 
     // 2. Persist status in database
     try {
+      // TODO: migrate to apiFetch
       await fetch(`/api/v1/similarity/reports/${reportId}/status`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },

@@ -64,6 +64,7 @@ export default function FileBrowserModal({ project, onClose }) {
     const token = localStorage.getItem('token');
 
     try {
+      // TODO: migrate to apiFetch
       const res = await fetch(`/api/v1/projects/${project.id}/files/tree`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
@@ -85,6 +86,7 @@ export default function FileBrowserModal({ project, onClose }) {
     const token = localStorage.getItem('token');
 
     try {
+      // TODO: migrate to apiFetch
       const res = await fetch(`/api/v1/projects/${project.id}/files/content?file_path=${encodeURIComponent(filePath)}`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });

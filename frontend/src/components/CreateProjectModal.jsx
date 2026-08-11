@@ -66,6 +66,7 @@ export default function CreateProjectModal({
 
     try {
       // 1. Create project entry
+      // TODO: migrate to apiFetch
       const createRes = await fetch('/api/v1/projects', {
         method: 'POST',
         headers: {
@@ -106,6 +107,7 @@ export default function CreateProjectModal({
       }, 350);
 
       // 2. Trigger git history extraction
+      // TODO: migrate to apiFetch
       const extractRes = await fetch(`/api/v1/extract/${createData.project_id}`, {
         method: 'POST',
         headers: {

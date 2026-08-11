@@ -40,6 +40,7 @@ export default function PlagiarismCodeCompareModal({ alert, onClose }) {
     setErrorA(null);
 
     const token = localStorage.getItem('token');
+    // TODO: migrate to apiFetch
     fetch(`/api/v1/projects/${projectAId}/files/content?file_path=${encodeURIComponent(fileA)}`, {
       headers: { 'Authorization': `Bearer ${token}` }
     })
@@ -63,6 +64,7 @@ export default function PlagiarismCodeCompareModal({ alert, onClose }) {
     setErrorB(null);
 
     const token = localStorage.getItem('token');
+    // TODO: migrate to apiFetch
     fetch(`/api/v1/projects/${projectBId}/files/content?file_path=${encodeURIComponent(fileB)}`, {
       headers: { 'Authorization': `Bearer ${token}` }
     })

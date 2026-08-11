@@ -1,3 +1,4 @@
+import { apiFetch, UNAUTHORIZED_EVENT } from './api/client';
 import React, { useState, useEffect, useRef } from 'react';
 import { RefreshCw } from 'lucide-react';
 import { useNotification } from './contexts/NotificationContext';
@@ -16,6 +17,18 @@ import QualitativeFloatingPill from './components/QualitativeFloatingPill';
 import './App.css';
 
 export default function App() {
+  // Listen for unauthorized events from apiFetch client to log out user
+  useEffect(() => {
+    const handleUnauthorized = () => {
+      localStorage.removeItem('token');
+      setUser(null);
+    };
+    window.addEventListener(UNAUTHORIZED_EVENT, handleUnauthorized);
+    return () => {
+      window.removeEventListener(UNAUTHORIZED_EVENT, handleUnauthorized);
+    };
+  }, []);
+
   const { addNotification, removeNotification, updateNotification } = useNotification();
   const [user, setUser] = useState(null);
   const [currentCourse, setCurrentCourse] = useState(null);
@@ -61,21 +74,7 @@ export default function App() {
   const qualAbortRef = useRef(null);  // AbortController for the streaming fetch
   // ──────────────────────────────────────────────────────────────────────────
 
-  // Global 401 interceptor to redirect to login on unauthorized access
-  useEffect(() => {
-    const originalFetch = window.fetch;
-    window.fetch = async (...args) => {
-      const response = await originalFetch(...args);
-      if (response.status === 401) {
-        localStorage.removeItem('token');
-        setUser(null);
-      }
-      return response;
-    };
-    return () => {
-      window.fetch = originalFetch;
-    };
-  }, []);
+
 
   // ── Global Qualitative Stream Logic ──────────────────────────────────────
   const triggerQualitativeAnalysis = async (projectId, forceRefresh = false, mode = 'sample') => {
@@ -104,7 +103,7 @@ export default function App() {
       if (forceRefresh) params.append('force_refresh', 'true');
       if (mode) params.append('mode', mode);
       const url = `/api/v1/projects/${projectId}/qualitative-analysis?${params.toString()}`;
-      const res = await fetch(url, {
+      const res = await apiFetch(url, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${token}` },
         signal: controller.signal
@@ -176,7 +175,7 @@ export default function App() {
     setQualAnalysisState(prev => ({ ...prev, status: 'cancelling', message: 'Cancelling backend local AI process...' }));
     try {
       const token = localStorage.getItem('token');
-      await fetch(`/api/v1/projects/${projectId}/qualitative-analysis/cancel`, {
+      await apiFetch(`/api/v1/projects/${projectId}/qualitative-analysis/cancel`, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${token}` }
       });
@@ -197,14 +196,8 @@ export default function App() {
         return;
       }
 
-      if (token === 'mock-jwt-token') {
-        setUser({ id: 1, username: 'Dr. Noyel Fernando', email: 'noyel@example.com' });
-        setAuthLoading(false);
-        return;
-      }
-
       try {
-        const response = await fetch('/api/v1/users/me', {
+        const response = await apiFetch('/api/v1/users/me', {
           headers: {
             'Authorization': `Bearer ${token}`
           }
@@ -214,10 +207,12 @@ export default function App() {
           setUser(userData);
         } else {
           localStorage.removeItem('token');
+          setUser(null);
         }
       } catch (err) {
-        console.error('Auth verification offline. Loading demo session.');
-        setUser({ id: 1, username: 'Dr. Noyel Fernando', email: 'noyel@example.com' });
+        console.error('Auth verification offline/failed:', err);
+        localStorage.removeItem('token');
+        setUser(null);
       } finally {
         setAuthLoading(false);
       }
@@ -246,7 +241,7 @@ export default function App() {
       const token = localStorage.getItem('token');
 
       try {
-        const response = await fetch(`/api/v1/courses/${currentCourse.id}/projects`, {
+        const response = await apiFetch(`/api/v1/courses/${currentCourse.id}/projects`, {
           headers: {
             'Authorization': `Bearer ${token}`
           }
@@ -270,13 +265,13 @@ export default function App() {
           projList.map(async (proj) => {
             try {
               // 1. Fetch analytics (Gini coefficient & distribution status)
-              const analyticsRes = await fetch(`/api/v1/projects/${proj.id}/analytics`, {
+              const analyticsRes = await apiFetch(`/api/v1/projects/${proj.id}/analytics`, {
                 headers: { 'Authorization': `Bearer ${token}` }
               });
               const analyticsData = analyticsRes.ok ? await analyticsRes.json() : null;
 
               // 2. Fetch commits
-              const commitsRes = await fetch(`/api/v1/projects/${proj.id}/commits`, {
+              const commitsRes = await apiFetch(`/api/v1/projects/${proj.id}/commits`, {
                 headers: { 'Authorization': `Bearer ${token}` }
               });
               const commitsData = commitsRes.ok ? await commitsRes.json() : { commits: [] };
@@ -289,7 +284,7 @@ export default function App() {
               }
 
               // 3. Fetch authors
-              const authorsRes = await fetch(`/api/v1/projects/${proj.id}/authors`, {
+              const authorsRes = await apiFetch(`/api/v1/projects/${proj.id}/authors`, {
                 headers: { 'Authorization': `Bearer ${token}` }
               });
               const authorsData = authorsRes.ok ? await authorsRes.json() : { authors: [] };
@@ -397,7 +392,7 @@ export default function App() {
         }, 200);
 
         try {
-          const simRes = await fetch(`/api/v1/courses/${currentCourse.id}/similarity/analyze`, {
+          const simRes = await apiFetch(`/api/v1/courses/${currentCourse.id}/similarity/analyze`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ k: 5, w: 4, similarity_threshold: 30.0 })
@@ -437,7 +432,7 @@ export default function App() {
             const unreviewedCount = realAlerts.filter(a => !a.status || a.status === 'Needs Review').length;
             setUnreadPlagiarismCount(unreviewedCount);
 
-            const covRes = await fetch(`/api/v1/courses/${currentCourse.id}/similarity/coverage`);
+            const covRes = await apiFetch(`/api/v1/courses/${currentCourse.id}/similarity/coverage`);
             if (covRes.ok) {
               const covData = await covRes.json();
               setPlagiarismCoverage(covData);
@@ -495,7 +490,7 @@ export default function App() {
     const token = localStorage.getItem('token');
 
     try {
-      const response = await fetch(`/api/v1/projects/${id}`, {
+      const response = await apiFetch(`/api/v1/projects/${id}`, {
         method: 'DELETE',
         headers: {
           'Authorization': `Bearer ${token}`
@@ -512,7 +507,7 @@ export default function App() {
   const handleSyncProject = async (projectId) => {
     const token = localStorage.getItem('token');
     try {
-      const res = await fetch(`/api/v1/projects/${projectId}/sync`, {
+      const res = await apiFetch(`/api/v1/projects/${projectId}/sync`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`
@@ -546,7 +541,7 @@ export default function App() {
     const token = localStorage.getItem('token');
 
     try {
-      const response = await fetch('/api/v1/authors/merge', {
+      const response = await apiFetch('/api/v1/authors/merge', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -575,7 +570,7 @@ export default function App() {
     if (!proj) {
       try {
         const token = localStorage.getItem('token');
-        const res = await fetch(`/api/v1/projects/${projectId}`, {
+        const res = await apiFetch(`/api/v1/projects/${projectId}`, {
           headers: { 'Authorization': `Bearer ${token}` }
         });
         if (res.ok) {

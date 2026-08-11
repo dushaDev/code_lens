@@ -110,12 +110,15 @@ export default function Analytics({ project, course, onBack, qualAnalysisState, 
 
       try {
         const [analyticsRes, commitsRes, cloudReportRes] = await Promise.all([
+          // TODO: migrate to apiFetch
           fetch(`/api/v1/projects/${project.id}/analytics`, {
             headers: { 'Authorization': `Bearer ${token}` }
           }),
+          // TODO: migrate to apiFetch
           fetch(`/api/v1/projects/${project.id}/commits`, {
             headers: { 'Authorization': `Bearer ${token}` }
           }),
+          // TODO: migrate to apiFetch
           fetch(`/api/v1/projects/${project.id}/cloud-report`, {
             headers: { 'Authorization': `Bearer ${token}` }
           })
@@ -137,7 +140,7 @@ export default function Analytics({ project, course, onBack, qualAnalysisState, 
           setCloudReport(null);
         }
       } catch (err) {
-        setError(err.message || 'Failed to load project analytics from database.');
+        setError('Something went wrong, please try again.');
       } finally {
         setLoading(false);
       }
@@ -161,6 +164,7 @@ export default function Analytics({ project, course, onBack, qualAnalysisState, 
     const checkAndStart = async () => {
       try {
         const token = localStorage.getItem('token');
+        // TODO: migrate to apiFetch
         const res = await fetch(`/api/v1/projects/${project.id}/qualitative-analysis/status`, {
           headers: { 'Authorization': `Bearer ${token}` }
         });
@@ -266,6 +270,7 @@ export default function Analytics({ project, course, onBack, qualAnalysisState, 
     setSamplingMode(mode);
     try {
       const token = localStorage.getItem('token');
+      // TODO: migrate to apiFetch
       const res = await fetch(`/api/v1/projects/${project.id}/sampling-mode`, {
         method: 'PUT',
         headers: {
@@ -288,6 +293,7 @@ export default function Analytics({ project, course, onBack, qualAnalysisState, 
     setCloudReport(null);
     try {
       const token = localStorage.getItem('token');
+      // TODO: migrate to apiFetch
       const res = await fetch(`/api/v1/projects/${project.id}/cloud-report/generate`, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${token}` }
@@ -308,7 +314,8 @@ export default function Analytics({ project, course, onBack, qualAnalysisState, 
       const data = await res.json();
       setCloudReport(data);
     } catch (err) {
-      setCloudError(err.message);
+      const isKnownIntentional = err.message && !err.message.includes('failed') && !err.message.includes('fetch') && !err.message.includes('Unexpected') && err.message !== 'Internal server error';
+      setCloudError(isKnownIntentional ? err.message : 'Something went wrong, please try again.');
     } finally {
       setIsCloudGenerating(false);
     }
@@ -327,6 +334,7 @@ export default function Analytics({ project, course, onBack, qualAnalysisState, 
     setCloudError(null);
     try {
       const token = localStorage.getItem('token');
+      // TODO: migrate to apiFetch
       const res = await fetch(`/api/v1/projects/${project.id}/cloud-report`, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${token}` }
@@ -365,7 +373,8 @@ export default function Analytics({ project, course, onBack, qualAnalysisState, 
       window.URL.revokeObjectURL(url);
       document.body.removeChild(a);
     } catch (err) {
-      setCloudError(err.message);
+      const isKnownIntentional = err.message && !err.message.includes('failed') && !err.message.includes('fetch') && !err.message.includes('Unexpected') && err.message !== 'Internal server error';
+      setCloudError(isKnownIntentional ? err.message : 'Something went wrong, please try again.');
     } finally {
       setIsPdfDownloading(false);
     }

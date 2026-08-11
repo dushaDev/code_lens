@@ -13,6 +13,7 @@ export default function CommitCodeViewModal({ commitHash, onClose }) {
       setError('');
       const token = localStorage.getItem('token');
       try {
+        // TODO: migrate to apiFetch
         const res = await fetch(`/api/v1/commits/${commitHash}`, {
           headers: { 'Authorization': `Bearer ${token}` }
         });

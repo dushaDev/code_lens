@@ -33,6 +33,7 @@ export default function Settings({ course, onCourseReset, onCourseDeleted, onCou
     const token = localStorage.getItem('token');
     if (!token) return;
     try {
+      // TODO: migrate to apiFetch
       const res = await fetch('/api/v1/user/api-keys', {
         headers: { 'Authorization': `Bearer ${token}` }
       });
@@ -71,6 +72,7 @@ export default function Settings({ course, onCourseReset, onCourseDeleted, onCou
 
     const token = localStorage.getItem('token');
     try {
+      // TODO: migrate to apiFetch
       const response = await fetch('/api/v1/user/api-keys', {
         method: 'POST',
         headers: {
@@ -102,6 +104,7 @@ export default function Settings({ course, onCourseReset, onCourseDeleted, onCou
     setApiKeysLoading(true);
     const token = localStorage.getItem('token');
     try {
+      // TODO: migrate to apiFetch
       const response = await fetch(`/api/v1/user/api-keys/${keyId}/activate`, {
         method: 'PUT',
         headers: { 'Authorization': `Bearer ${token}` }
@@ -123,6 +126,7 @@ export default function Settings({ course, onCourseReset, onCourseDeleted, onCou
     setApiKeysLoading(true);
     const token = localStorage.getItem('token');
     try {
+      // TODO: migrate to apiFetch
       const response = await fetch(`/api/v1/user/api-keys/${keyId}`, {
         method: 'DELETE',
         headers: { 'Authorization': `Bearer ${token}` }
@@ -153,6 +157,7 @@ export default function Settings({ course, onCourseReset, onCourseDeleted, onCou
     const token = localStorage.getItem('token');
 
     try {
+      // TODO: migrate to apiFetch
       const response = await fetch(`/api/v1/courses/${course.id}`, {
         method: 'PUT',
         headers: {
@@ -205,6 +210,7 @@ export default function Settings({ course, onCourseReset, onCourseDeleted, onCou
     const token = localStorage.getItem('token');
 
     try {
+      // TODO: migrate to apiFetch
       const response = await fetch(`/api/v1/courses/${course.id}/reset`, {
         method: 'POST',
         headers: {
@@ -255,6 +261,7 @@ export default function Settings({ course, onCourseReset, onCourseDeleted, onCou
     const token = localStorage.getItem('token');
 
     try {
+      // TODO: migrate to apiFetch
       const response = await fetch(`/api/v1/courses/${course.id}`, {
         method: 'DELETE',
         headers: {
