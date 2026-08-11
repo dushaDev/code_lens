@@ -1781,12 +1781,6 @@ def get_commit_by_hash(
 # Author endpoints (PROTECTED)
 # ---------------------------------------------------------------------------
 
-@router.get(
-    "/authors",
-    response_model=AuthorsListResponse,
-    tags=["Authors"],
-    responses={401: {"model": ErrorResponse}, 500: {"model": ErrorResponse}}
-)
 def _check_author_belongs_to_user(db: Session, author_id: int, user_id: int) -> bool:
     user_author_exists = db.query(CommitModel.author_id)\
         .join(ProjectModel, CommitModel.project_id == ProjectModel.id)\
