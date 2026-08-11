@@ -119,71 +119,7 @@
   font-size: 0.85rem;
 }
 
-/* Tech Badges */
-.tech-badges-list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
 
-.tech-badge {
-  display: inline-flex;
-  align-items: center;
-  padding: 2px 8px;
-  font-size: 0.75rem;
-  font-weight: 600;
-  border-radius: 4px;
-}
-
-.tech-python {
-  background-color: #eff6ff;
-  color: #2563eb;
-}
-
-.tech-react {
-  background-color: #ecfeff;
-  color: #0891b2;
-}
-
-.tech-ts {
-  background-color: #f0fdf4;
-  color: #16a34a;
-}
-
-.tech-cpp {
-  background-color: #faf5ff;
-  color: #7c3aed;
-}
-
-.tech-kotlin {
-  background-color: #fdf2f8;
-  color: #db2777;
-}
-
-.tech-csharp {
-  background-color: #e0f2fe;
-  color: #0369a1;
-}
-
-.tech-db {
-  background-color: #f1f5f9;
-  color: #475569;
-}
-
-.tech-html {
-  background-color: #fff7ed;
-  color: #ea580c;
-}
-
-.tech-css {
-  background-color: #ecfeff;
-  color: #0d9488;
-}
-
-.tech-shell {
-  background-color: #f8fafc;
-  color: #64748b;
-}
 
 .tech-go {
   background-color: #f0f9ff;

@@ -1,0 +1,513 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="utf-8">
+    <meta name="author" content="CodeLens Academic Integrity System">
+    <title>Academic Integrity & Engineering Assessment Report</title>
+    <style>
+        @page {
+            size: a4 portrait;
+            margin: 1.2cm 1.2cm 1.5cm 1.2cm;
+
+            @frame footer {
+                -pdf-frame-content: footerContent;
+                bottom: 0.4cm;
+                margin-left: 1.2cm;
+                margin-right: 1.2cm;
+                height: 0.8cm;
+            }
+        }
+
+        body {
+            font-family: Helvetica, Arial, sans-serif;
+            color: #333333;
+            line-height: 1.35;
+            font-size: 8.5pt;
+        }
+
+        h1,
+        h2,
+        h3,
+        h4 {
+            color: #1a1a1a;
+            page-break-after: avoid;
+            -pdf-keep-with-next: true;
+        }
+
+        h1.title {
+            text-align: center;
+            font-size: 16pt;
+            margin-bottom: 2px;
+        }
+
+        .subtitle {
+            text-align: center;
+            font-size: 10pt;
+            color: #555555;
+            margin-bottom: 12px;
+        }
+
+        h2.section {
+            border-bottom: 1px dashed #4a7ab5;
+            padding-bottom: 2px;
+            margin-top: 12px;
+            font-size: 11.5pt;
+            color: #1f4268;
+            page-break-after: avoid;
+            -pdf-keep-with-next: true;
+        }
+
+        .project-details {
+            background-color: #f8f9fa;
+            border: 1px solid #e9ecef;
+            padding: 8px 12px;
+            margin-bottom: 12px;
+            border-left: 4px solid #2b5c8f;
+            page-break-inside: avoid;
+        }
+
+        .meta-table {
+            width: 100%;
+            border: none;
+            margin-top: 2px;
+            margin-bottom: 2px;
+        }
+
+        .meta-table td {
+            border: none;
+            padding: 2px 4px;
+            vertical-align: top;
+        }
+
+        .tag-pill {
+            display: inline-block;
+            background-color: #e8f0fe;
+            color: #1967d2;
+            padding: 2px 6px;
+            border-radius: 8px;
+            font-size: 7.5pt;
+            font-weight: bold;
+            margin-right: 3px;
+            margin-bottom: 2px;
+        }
+
+        .health-box {
+            background-color: #f1f3f4;
+            border: 1px solid #dcdfe1;
+            padding: 6px 10px;
+            margin-top: 8px;
+            margin-bottom: 10px;
+            border-radius: 4px;
+            page-break-inside: avoid;
+        }
+
+        .charts-container {
+            margin-top: 8px;
+            margin-bottom: 10px;
+            text-align: center;
+            page-break-inside: avoid;
+        }
+
+        .chart-table {
+            width: 100%;
+            border: none;
+            margin-top: 4px;
+        }
+
+        .chart-table td {
+            border: none;
+            text-align: center;
+            vertical-align: middle;
+            padding: 2px;
+        }
+
+        table.data-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 6px;
+            margin-bottom: 10px;
+            font-size: 8pt;
+            page-break-inside: avoid;
+        }
+
+        table.data-table tr {
+            page-break-inside: avoid;
+        }
+
+        table.data-table th,
+        table.data-table td {
+            border: 1px solid #dddddd;
+            padding: 4px 5px;
+            text-align: left;
+            vertical-align: top;
+        }
+
+        table.data-table th {
+            background-color: #f4f6f8;
+            color: #1f4268;
+            font-weight: bold;
+        }
+
+        .smell-badge {
+            display: inline-block;
+            background-color: #fef7e0;
+            color: #b06000;
+            border: 1px solid #fce8e6;
+            padding: 2px 5px;
+            border-radius: 3px;
+            font-size: 7.5pt;
+            margin-right: 3px;
+            margin-bottom: 2px;
+        }
+
+        .arch-badge {
+            display: inline-block;
+            background-color: #fce8e6;
+            color: #c5221f;
+            border: 1px solid #fad2cf;
+            padding: 2px 5px;
+            border-radius: 3px;
+            font-size: 7.5pt;
+            margin-right: 3px;
+            margin-bottom: 2px;
+        }
+
+        .risk-score {
+            font-size: 10.5pt;
+            font-weight: bold;
+            padding: 6px 10px;
+            background-color: #fff3cd;
+            color: #856404;
+            border: 1px solid #ffeeba;
+            margin-top: 8px;
+            margin-bottom: 10px;
+            border-left: 4px solid #e6a23c;
+            page-break-inside: avoid;
+            -pdf-keep-with-next: true;
+        }
+
+        ul {
+            padding-left: 16px;
+            margin-top: 4px;
+        }
+
+        li {
+            margin-bottom: 3px;
+        }
+
+        #footerContent {
+            text-align: center;
+            font-size: 8pt;
+            color: #777777;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div id="footerContent">
+        Code Lens &nbsp;|&nbsp; Page
+        <pdf:pagenumber /> of
+        <pdf:pagecount />
+    </div>
+
+    <table style="width: 100%; border-collapse: collapse; margin-bottom: 2px;">
+        <tr>
+            <td style="vertical-align: bottom; text-align: left;">
+                <h1 class="title" style="margin: 0; text-align: left; line-height: 1.0; font-size: 16pt;">Project
+                    Contribution Evaluation Report</h1>
+            </td>
+            {% if logo_uri %}
+            <td style="width: 140px; text-align: right; vertical-align: bottom;">
+                <img src="{{ logo_uri }}" style="height: 22px; width: auto; vertical-align: bottom;" />
+            </td>
+            {% endif %}
+        </tr>
+    </table>
+    <div class="subtitle" style="margin-top: 3px; margin-bottom: 10px; text-align: left;">Academic Integrity &amp;
+        Software Engineering Assessment</div>
+
+    <div class="project-details">
+        <table class="meta-table">
+            <tr>
+                <td width="50%">
+                    <span style="font-size: 8.5pt; color: #555555;">Course:</span> <strong
+                        style="font-size: 10.5pt; color: #1f4268;">{{ course_name }}</strong><br>
+                    <span style="font-size: 8.5pt; color: #555555;">Project:</span> <strong
+                        style="font-size: 11pt; color: #1f4268;">{{ project_name }}</strong>
+                    {% set g_no = group_no or (qual_data.group_no if qual_data and qual_data.group_no is defined else
+                    (qual_data.project_summary.group_no if qual_data and qual_data.project_summary and
+                    qual_data.project_summary.group_no is defined else '')) %}
+                    {% if g_no %}
+                    <strong style="font-size: 10pt; color: #2b5c8f;">({{ g_no }})</strong>
+                    {% endif %}<br>
+                    {% set repo_link = git_url or (qual_data.git_url if qual_data and qual_data.git_url is defined else
+                    (qual_data.project_summary.git_url if qual_data and qual_data.project_summary and
+                    qual_data.project_summary.git_url is defined else '')) %}
+                    {% if repo_link %}
+                    <span style="font-size: 8.5pt; color: #555555;">Repository:</span> <a href="{{ repo_link }}"
+                        style="font-size: 8.5pt; color: #0037B0; text-decoration: underline;">{{ repo_link }}</a><br>
+                    {% endif %}
+                    <span style="font-size: 8.5pt; color: #555555;">Report Date:</span> <strong
+                        style="font-size: 9pt; color: #333333;">{{ date }}</strong>
+                </td>
+                <td width="50%">
+                    {% if qual_data and qual_data.project_summary and qual_data.project_summary.language_distribution %}
+                    <strong>Primary Languages:</strong><br>
+                    <!-- Stacked visual progress bar -->
+                    <table
+                        style="width: 100%; border-collapse: collapse; margin-top: 4px; margin-bottom: 4px; height: 8px;">
+                        <tr>
+                            {% for lang, pct in qual_data.project_summary.language_distribution.items() %}
+                            <td style="width: {{ pct }}%; background-color: {{ loop.index0 | lang_color }}; height: 8px; border: none; padding: 0;"
+                                title="{{ lang }}: {{ pct }}%"></td>
+                            {% endfor %}
+                        </tr>
+                    </table>
+                    {% for lang, pct in qual_data.project_summary.language_distribution.items() %}
+                    <span class="tag-pill" style="border-left: 3px solid {{ loop.index0 | lang_color }};">{{ lang }}: {{
+                        pct }}%</span>
+                    {% endfor %}
+                    {% endif %}
+                </td>
+            </tr>
+        </table>
+    </div>
+
+    {% if qual_data and qual_data.project_summary and qual_data.project_summary.plagiarism_summary %}
+    {% set plag = qual_data.project_summary.plagiarism_summary %}
+    {% if plag.has_scan %}
+    <div
+        style="background-color: {% if plag.max_similarity_score > 50 %}#fce8e6{% elif plag.max_similarity_score > 25 %}#fef7e0{% else %}#e6f4ea{% endif %}; border: 1px solid {% if plag.max_similarity_score > 50 %}#fad2cf{% elif plag.max_similarity_score > 25 %}#ffeeba{% else %}#ceedd5{% endif %}; color: {% if plag.max_similarity_score > 50 %}#c5221f{% elif plag.max_similarity_score > 25 %}#b06000{% else %}#137333{% endif %}; padding: 6px 10px; margin-bottom: 10px; border-radius: 4px; font-size: 8pt; page-break-inside: avoid;">
+        <strong>AST Winnowing Similarity Scan:</strong>
+        Max Similarity: <strong>{{ plag.max_similarity_score }}%</strong>
+        {% if plag.matched_project_name %}with <em>{{ plag.matched_project_name }}</em>{% endif %}
+        &nbsp;|&nbsp; Status: <strong>{{ plag.status }}</strong>
+        &nbsp;|&nbsp; Matched Hash Blocks: {{ plag.matched_blocks_count }}
+    </div>
+    {% endif %}
+    {% endif %}
+
+    {% if qual_data and qual_data.project_summary %}
+    {% set ps = qual_data.project_summary %}
+    <div class="health-box">
+        <strong>Repository Architecture, Branches & AST Complexity:</strong><br>
+        {% if ps.readme_quality %}
+        • <strong>Documentation Score:</strong> {{ ps.readme_quality.documentation_score }}
+        {% if ps.readme_quality.has_readme %}(README size: {{ ps.readme_quality.readme_size_kb }} KB, Setup Guide: {{
+        "Yes" if ps.readme_quality.has_setup_guide else "No" }}){% endif %}
+        <br>
+        {% endif %}
+        {% if ps.folder_structure %}
+        • <strong>Repository Modularity:</strong> {{ ps.folder_structure.modularity_score }}
+        ({{ ps.folder_structure.total_files }} files in {{ ps.folder_structure.total_directories }} directories, Tests
+        Dir: {{ "Present" if ps.folder_structure.has_tests_dir else "None" }})
+        <br>
+        {% endif %}
+        {% if ps.ast_complexity_summary %}
+        • <strong>AST Code Metrics:</strong> Avg Cyclomatic Complexity: {{
+        ps.ast_complexity_summary.avg_complexity_score }} &nbsp;|&nbsp; Total Parsed Functions: {{
+        ps.ast_complexity_summary.total_functions }} &nbsp;|&nbsp; Squash-Suspected Commits: {{
+        ps.ast_complexity_summary.squash_suspected_commits }}
+        <br>
+        {% endif %}
+        {% if ps.pacing_summary and ps.pacing_summary.peak_commit_date != 'N/A' %}
+        • <strong>Timeline Velocity:</strong> Peak Activity: {{ ps.pacing_summary.peak_commit_date }} ({{
+        ps.pacing_summary.peak_commit_count }} commits) &nbsp;|&nbsp; Avg Velocity: {{
+        ps.pacing_summary.avg_commits_per_active_day }} commits/active day
+        {% if ps.pacing_summary.project_span_days is defined %}
+        &nbsp;|&nbsp; Project Span: {{ ps.pacing_summary.project_span_days }} days &nbsp;|&nbsp; Active Days (at least 1 commit): {{ ps.pacing_summary.active_days_count }} days
+        {% endif %}
+        <br>
+        {% endif %}
+        {% if ps.branches_summary and ps.branches_summary.top_branches %}
+        <div style="margin-top: 4px;">
+            • <strong>Git Branches List ({{ ps.branches_summary.total_branches }} total):</strong>
+            <table style="width: 100%; border-collapse: collapse; margin-top: 3px; font-size: 8pt;">
+                {% for b in ps.branches_summary.top_branches %}
+                <tr>
+                    <td style="padding: 1px 4px; border-bottom: 1px dotted #e0e0e0; width: 75%;">
+                        <code>{{ b.name }}</code>
+                    </td>
+                    <td
+                        style="padding: 1px 4px; border-bottom: 1px dotted #e0e0e0; width: 25%; text-align: right; color: #555555; font-weight: bold;">
+                        {{ b.commits }} commits</td>
+                </tr>
+                {% endfor %}
+            </table>
+        </div>
+        {% endif %}
+    </div>
+    {% endif %}
+
+    <h2 class="section">1. Executive Summary</h2>
+    <div>{{ report.executive_summary | md }}</div>
+
+    <h2 class="section">2. Work Distribution & Engineering Metrics</h2>
+    <div>{{ report.work_distribution_and_fairness | md }}</div>
+
+    {% if charts %}
+    <div class="charts-container" style="text-align: center; margin-top: 14px; margin-bottom: 14px;">
+        {% if charts.commit_bar %}
+        <div style="text-align: center; margin-bottom: 14px; page-break-inside: avoid;">
+            <img src="{{ charts.commit_bar }}" style="width: 17cm; height: auto;" />
+        </div>
+        {% endif %}
+
+        {% if charts.lorenz_curve %}
+        <div style="text-align: center; margin-bottom: 14px; page-break-inside: avoid;">
+            <img src="{{ charts.lorenz_curve }}" style="width: 17cm; height: auto;" />
+        </div>
+        {% endif %}
+
+        {% if charts.commit_timeline %}
+        <div style="text-align: center; margin-bottom: 14px; page-break-inside: avoid;">
+            <img src="{{ charts.commit_timeline }}" style="width: 17cm; height: auto;" />
+        </div>
+        {% endif %}
+    </div>
+    {% endif %}
+
+    {% if qual_data and qual_data.contributors %}
+    <h3 style="margin-top: 14px; margin-bottom: 6px; color: #1f4268;">Quantitative Contributor Share</h3>
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th style="width: 25%;">Contributor</th>
+                <th style="width: 15%;">Total Commits</th>
+                <th style="width: 15%;">Commit Share</th>
+                <th style="width: 15%;">Lines Added (+)</th>
+                <th style="width: 15%;">Lines Removed (-)</th>
+                <th style="width: 15%;">LOC Share</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for name, cdata in qual_data.contributors.items() | sort(attribute='1.stats.total_project_commits',
+            reverse=True) %}
+            {% set stats = cdata.stats if cdata.stats is defined and cdata.stats else cdata %}
+            <tr>
+                <td><strong>{{ name }}</strong></td>
+                <td>{{ stats.total_project_commits if stats.total_project_commits is defined else 'N/A' }}</td>
+                <td>{{ stats.commit_share_percentage if stats.commit_share_percentage is defined else
+                    (stats.commit_share if stats.commit_share is defined else 'N/A') }}%</td>
+                <td>+{{ stats.lines_added if stats.lines_added is defined else (stats.lines_changed if
+                    stats.lines_changed is defined else 0) }}</td>
+                <td>-{{ stats.lines_removed if stats.lines_removed is defined else 0 }}</td>
+                <td>{{ stats.loc_share_percentage if stats.loc_share_percentage is defined else (stats.loc_share if
+                    stats.loc_share is defined else 'N/A') }}%</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% endif %}
+
+    {% if qual_data and qual_data.project_summary and qual_data.project_summary.peer_review_summary %}
+    {% set pr = qual_data.project_summary.peer_review_summary %}
+    <div class="health-box">
+        <strong>Peer Review & Collaboration Signals:</strong><br>
+        • <strong>Evaluated Review Comments:</strong> {{ pr.evaluated_comments }} &nbsp;|&nbsp;
+        <strong>Constructive Reviews:</strong> {{ pr.constructive_reviews }} &nbsp;|&nbsp;
+        <strong>Rubber Stamps:</strong> {{ pr.rubber_stamps }} &nbsp;|&nbsp;
+        <strong>Average Review Score:</strong> {{ pr.average_quality_score }}/10
+    </div>
+    {% endif %}
+
+    <h2 class="section">3. Individual Student Evaluations</h2>
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th style="width: 16%;">Student</th>
+                <th style="width: 13%;">Commits</th>
+                <th style="width: 18%;">Substance</th>
+                <th style="width: 18%;">Pacing & Deadlines</th>
+                <th style="width: 18%;">Quality Signals</th>
+                <th style="width: 17%;">Verdict</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for s in report.student_evaluations %}
+            <tr>
+                <td><strong>{{ s.student_name }}</strong></td>
+                <td>{{ s.commits_summary }}</td>
+                <td>{{ s.substance_breakdown }}</td>
+                <td>{{ s.pacing_and_deadlines }}</td>
+                <td>{{ s.quality_and_integrity_signals }}</td>
+                <td style="{{ s.verdict | verdict_style }}">
+                    {{ s.verdict }}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    <h2 class="section">4. Academic Integrity, Code Smells & Architecture Assessment</h2>
+    <div>{{ report.academic_integrity_anomalies | md }}</div>
+
+    {% if qual_data and qual_data.project_summary %}
+    {% set ps = qual_data.project_summary %}
+    {% if ps.code_smell_distribution or ps.architecture_issue_distribution %}
+    <div style="margin-top: 10px; margin-bottom: 10px;">
+        {% if ps.code_smell_distribution %}
+        <strong>Detected Code Smells:</strong><br>
+        {% for smell, count in ps.code_smell_distribution.items() %}
+        <span class="smell-badge">{{ smell }}: {{ count }}</span>
+        {% endfor %}
+        <br>
+        {% endif %}
+        {% if ps.architecture_issue_distribution %}
+        <strong style="margin-top: 6px; display: inline-block;">Detected Architecture Issues:</strong><br>
+        {% for issue, count in ps.architecture_issue_distribution.items() %}
+        <span class="arch-badge">{{ issue }}: {{ count }}</span>
+        {% endfor %}
+        {% endif %}
+    </div>
+    {% endif %}
+    {% endif %}
+
+    <h2 class="section">5. Final Risk Score & Recommendations</h2>
+    <div class="risk-score">Overall Project Risk Score: {{ report.overall_project_risk_score }}</div>
+
+    <h3>Actionable Recommendations for Course Lecturer:</h3>
+    <ul>
+        {% for rec in report.actionable_recommendations %}
+        <li>{{ rec | md }}</li>
+        {% endfor %}
+    </ul>
+
+    <div
+        style="background-color: #f8f9fa; border: 1px solid #e0e0e0; border-left: 4px solid #0037B0; padding: 8px 12px; margin-top: 14px; margin-bottom: 10px; border-radius: 4px; font-size: 7.8pt; page-break-inside: avoid;">
+        <strong style="color: #ff0008; font-size: 8.5pt;">Notice:</strong><br>
+        • <strong>Report Purpose &amp; Accuracy:</strong> This report is generated by CodeLens as an automated
+        decision-support tool to assist course lecturers in evaluating Contributions, commit timing patterns, and
+        codebase integrity. All findings serve as quantitative investigative signals for academic review.<br>
+        • <strong>AI Models Utilized:</strong>
+        Local Classification: <code>Qwen2.5-Coder (Local LLM via Ollama)</code> &nbsp;|&nbsp;
+        Cloud Synthesis: <code>Google Gemini 2.0 Flash / AgentRouter API</code><br>
+        {% if qual_data and qual_data.project_summary %}
+        {% set ps = qual_data.project_summary %}
+        • <strong>Analysis Level &amp; Coverage:</strong>
+        Mode: <strong>{{ ps.sampling_mode | default('Smart Stratified') | title }}</strong> &nbsp;|&nbsp;
+        Coverage: <strong>{{ ps.sampled_commits | default(ps.total_commits) }} of {{ ps.total_commits }} total commits
+            analyzed</strong>
+        ({{ ((ps.sampled_commits / ps.total_commits) * 100.0) | round(1) if ps.total_commits and ps.sampled_commits is
+        defined else 100.0 }}% coverage)<br>
+        {% endif %}
+        • <strong>Evaluator / Course Lecturer:</strong> <strong>{{ lecturer_name | default('Course Lecturer')
+            }}</strong>
+    </div>
+
+    <!-- End of Document + Bottom Brand Logo -->
+    <div style="text-align: center; margin-top: 32px; width: 100%; page-break-inside: avoid;">
+
+        {% if logo_uri %}
+        <div style="text-align: center; font-size: 8.5pt; color: #555555; font-weight: regular; width: 100%;">
+            <span style="vertical-align: middle; margin-right: 4px;">Report by</span>
+            <img src="{{ logo_uri }}" style="height: 16px; width: auto; vertical-align: middle;" />
+        </div>
+        {% endif %}
+    </div>
+
+</body>
+
+</html>

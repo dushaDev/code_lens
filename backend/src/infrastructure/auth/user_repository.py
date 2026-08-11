@@ -37,7 +37,7 @@ class UserRepository:
         user = UserModel(
             username=username,
             email=email,
-            hashed_password=hash_password(password),
+            password=hash_password(password),
         )
         self.db.add(user)
         self.db.commit()
@@ -67,7 +67,7 @@ class UserRepository:
         if email is not None:
             user.email = email
         if password is not None:
-            user.hashed_password = hash_password(password)
+            user.password = hash_password(password)
         if is_active is not None:
             user.is_active = is_active
         if github_username is not None:

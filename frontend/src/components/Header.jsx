@@ -70,7 +70,7 @@ export default function Header({
     if (item.type === 'project' && item.project_id) {
       onSelectProject(item.project_id);
     } else if (item.type === 'student') {
-      onNavigateTab('students');
+      onNavigateTab('students', item.title || item.subtitle || '');
     } else if (item.type === 'commit' && item.project_id) {
       onSelectProject(item.project_id);
     } else if (item.type === 'course' && onSelectCourse) {

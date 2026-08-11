@@ -1,4 +1,5 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
+import ReactMarkdown from 'react-markdown';
 import { 
   ArrowLeft, 
   GitCommit, 
@@ -11,23 +12,88 @@ import {
   MessageSquare,
   Bot,
   X,
-  Code
+  XCircle,
+  Code,
+  RefreshCw,
+  Play,
+  Square,
+  CheckCircle2,
+  Clock,
+  ChevronDown,
+  ChevronUp
 } from 'lucide-react';
 import Tag from '../../components/Tag';
 import Tooltip from '../../components/Tooltip';
 import CommitActivityChart from '../../components/CommitActivityChart';
 import CommitCodeViewModal from '../../components/CommitCodeViewModal';
+import FileBrowserModal from '../../components/FileBrowserModal';
+import { formatDeadline } from '../../utils/courseMeta';
 import './Analytics.css';
 
-export default function Analytics({ project, onBack }) {
+export default function Analytics({ project, course, onBack, qualAnalysisState, onStartQualitative, onStopQualitative }) {
   const [analytics, setAnalytics] = useState(null);
+  const courseDeadline = course?.deadline || project?.course?.deadline || project?.deadline;
   const [commits, setCommits] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [activeTab, setActiveTab] = useState('quantitative');
   const [showCommitsModal, setShowCommitsModal] = useState(false);
-  const [selectedAuthor, setSelectedAuthor] = useState(null); // { id, name }
+  const [showFileBrowserModal, setShowFileBrowserModal] = useState(false);
+  const [showRawDataInspector, setShowRawDataInspector] = useState(false);
+  const [selectedAuthor, setSelectedAuthor] = useState(null);
   const [selectedCommitHash, setSelectedCommitHash] = useState(null);
+  const [samplingMode, setSamplingMode] = useState('sample'); // 'sample' | 'full' | 'random'
+
+  const [cloudReport, setCloudReport] = useState(null);
+  const [isCloudGenerating, setIsCloudGenerating] = useState(false);
+  const [cloudError, setCloudError] = useState(null);
+
+  // Shorthand aliases for cleaner JSX
+  const qualStatus = qualAnalysisState?.status || 'idle';
+  const qualProgress = qualAnalysisState?.progress || 0;
+  const qualMessage = qualAnalysisState?.message || '';
+  const qualData = qualAnalysisState?.data || null;
+  const isRunning = qualStatus === 'running';
+  const isCancelling = qualStatus === 'cancelling';
+  const isComplete = qualStatus === 'complete';
+  const isIdle = qualStatus === 'idle' || qualStatus === 'cancelled';
+
+  // Live Timer & ETA Calculation for Local AI Qualitative Analysis
+  const [startTime, setStartTime] = useState(null);
+  const [nowTime, setNowTime] = useState(Date.now());
+
+  useEffect(() => {
+    if (isRunning || isCancelling) {
+      if (!startTime) {
+        setStartTime(Date.now());
+      }
+      const interval = setInterval(() => {
+        setNowTime(Date.now());
+      }, 1000);
+      return () => clearInterval(interval);
+    } else {
+      setStartTime(null);
+    }
+  }, [isRunning, isCancelling, startTime]);
+
+  const elapsedSec = startTime ? Math.max(0, Math.floor((nowTime - startTime) / 1000)) : 0;
+  const etaSec = (startTime && qualProgress > 3 && qualProgress < 100)
+    ? Math.max(0, Math.round(((100 - qualProgress) / qualProgress) * elapsedSec))
+    : null;
+
+  const formatSeconds = (sec) => {
+    if (sec === null || isNaN(sec) || sec < 0) return null;
+    if (sec < 60) return `${sec}s`;
+    const m = Math.floor(sec / 60);
+    const s = sec % 60;
+    return `${m}m ${s}s`;
+  };
+
+
+
+
+
+
 
   const isBot = (name, email) => {
     const nameLower = name.toLowerCase();
@@ -35,7 +101,6 @@ export default function Analytics({ project, onBack }) {
     const botKeywords = ['bot', 'actions', 'workflow', 'ci', 'support', 'helper', 'automated', 'npm-owner', 'greenkeeper', 'snyk'];
     return botKeywords.some(keyword => nameLower.includes(keyword) || emailLower.includes(keyword));
   };
-
   useEffect(() => {
     const fetchAnalytics = async () => {
       setLoading(true);
@@ -43,11 +108,14 @@ export default function Analytics({ project, onBack }) {
       const token = localStorage.getItem('token');
 
       try {
-        const [analyticsRes, commitsRes] = await Promise.all([
+        const [analyticsRes, commitsRes, cloudReportRes] = await Promise.all([
           fetch(`/api/v1/projects/${project.id}/analytics`, {
             headers: { 'Authorization': `Bearer ${token}` }
           }),
           fetch(`/api/v1/projects/${project.id}/commits`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+          }),
+          fetch(`/api/v1/projects/${project.id}/cloud-report`, {
             headers: { 'Authorization': `Bearer ${token}` }
           })
         ]);
@@ -56,6 +124,17 @@ export default function Analytics({ project, onBack }) {
         const commitsData = commitsRes.ok ? await commitsRes.json() : { commits: [] };
         setAnalytics(analyticsData);
         setCommits(commitsData.commits || []);
+
+        if (cloudReportRes && cloudReportRes.ok) {
+          const cloudData = await cloudReportRes.json();
+          if (cloudData && cloudData.cloud_report) {
+            setCloudReport(cloudData.cloud_report);
+          } else {
+            setCloudReport(null);
+          }
+        } else {
+          setCloudReport(null);
+        }
       } catch (err) {
         setError(err.message || 'Failed to load project analytics from database.');
       } finally {
@@ -64,6 +143,53 @@ export default function Analytics({ project, onBack }) {
     };
 
     fetchAnalytics();
+  }, [project]);
+  // Sync sampling mode from completed qualitative analysis data if available
+  useEffect(() => {
+    if (qualData?.project_summary?.sampling_mode) {
+      setSamplingMode(qualData.project_summary.sampling_mode);
+    }
+  }, [qualData]);
+
+  // When entering qualitative tab: if idle, check backend/DB status then auto-start
+  useEffect(() => {
+    if (activeTab !== 'qualitative') return;
+    // Already running or complete: nothing to do, just display
+    if (isRunning || isCancelling || isComplete) return;
+    // If idle: check backend status, then auto-start if no cache found
+    const checkAndStart = async () => {
+      try {
+        const token = localStorage.getItem('token');
+        const res = await fetch(`/api/v1/projects/${project.id}/qualitative-analysis/status`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (!res.ok) throw new Error('Status check failed');
+        const statusData = await res.json();
+        if (statusData.status === 'running') {
+          // Backend is running but this session lost the stream — just show status
+          // The global state in App.jsx will reflect this via RUNNING_PROJECTS on next full start
+          return;
+        }
+        if (statusData.status === 'complete' || statusData.has_db_cache) {
+          // DB has cached data — start stream (will return instantly from cache)
+          onStartQualitative(false, samplingMode);
+          return;
+        }
+        // Truly idle, no cache: auto-start
+        onStartQualitative(false, samplingMode);
+      } catch (err) {
+        console.error('Status check failed, auto-starting:', err);
+        onStartQualitative(false, samplingMode);
+      }
+    };
+    checkAndStart();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, project.id]);
+
+  useEffect(() => {
+    if (project && project.sampling_mode) {
+      setSamplingMode(project.sampling_mode);
+    }
   }, [project]);
 
   if (loading) {
@@ -107,6 +233,132 @@ export default function Analytics({ project, onBack }) {
       return 'progress-fill-warning';
     } else {
       return 'progress-fill-danger';
+    }
+  };
+
+  const getVerdictBadgeStyle = (verdict) => {
+    const v = (verdict || "").toLowerCase();
+    if (v.startsWith("low risk")) {
+      return { backgroundColor: 'rgba(16,185,129,0.12)', color: '#10b981', padding: '3px 8px', borderRadius: '4px', border: '1px solid rgba(16,185,129,0.2)', fontWeight: '600', fontSize: '0.8rem' };
+    }
+    if (v.startsWith("moderate risk") || v.startsWith("medium risk")) {
+      return { backgroundColor: 'rgba(245,158,11,0.12)', color: '#f59e0b', padding: '3px 8px', borderRadius: '4px', border: '1px solid rgba(245,158,11,0.2)', fontWeight: '600', fontSize: '0.8rem' };
+    }
+    if (v.startsWith("high risk")) {
+      return { backgroundColor: 'rgba(239,68,68,0.12)', color: '#ef4444', padding: '3px 8px', borderRadius: '4px', border: '1px solid rgba(239,68,68,0.2)', fontWeight: '600', fontSize: '0.8rem' };
+    }
+    return { backgroundColor: 'var(--bg-app)', color: 'var(--text-muted)', padding: '3px 8px', borderRadius: '4px', border: '1px solid var(--border-color)', fontWeight: '600', fontSize: '0.8rem' };
+  };
+
+  const getRiskScoreBadgeStyle = (score) => {
+    const s = (score || "").toLowerCase();
+    if (s.includes("high") || s.includes("7/") || s.includes("8/") || s.includes("9/") || s.includes("10/")) {
+      return { backgroundColor: 'rgba(239,68,68,0.15)', color: '#ef4444', border: '1px solid rgba(239,68,68,0.3)', padding: '4px 10px', borderRadius: '12px', fontWeight: '700', fontSize: '0.85rem' };
+    }
+    if (s.includes("mod") || s.includes("medium") || s.includes("4/") || s.includes("5/") || s.includes("6/")) {
+      return { backgroundColor: 'rgba(245,158,11,0.15)', color: '#f59e0b', border: '1px solid rgba(245,158,11,0.3)', padding: '4px 10px', borderRadius: '12px', fontWeight: '700', fontSize: '0.85rem' };
+    }
+    return { backgroundColor: 'rgba(16,185,129,0.15)', color: '#10b981', border: '1px solid rgba(16,185,129,0.3)', padding: '4px 10px', borderRadius: '12px', fontWeight: '700', fontSize: '0.85rem' };
+  };
+
+  const handleSamplingModeChange = async (mode) => {
+    setSamplingMode(mode);
+    try {
+      const token = localStorage.getItem('token');
+      const res = await fetch(`/api/v1/projects/${project.id}/sampling-mode`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ sampling_mode: mode })
+      });
+      if (!res.ok) {
+        console.error('Failed to update project sampling mode in DB');
+      }
+    } catch (err) {
+      console.error('Error updating project sampling mode', err);
+    }
+  };
+
+  const generateCloudReportData = async () => {
+    setIsCloudGenerating(true);
+    setCloudError(null);
+    setCloudReport(null);
+    try {
+      const token = localStorage.getItem('token');
+      const res = await fetch(`/api/v1/projects/${project.id}/cloud-report/generate`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (res.status === 402) {
+        setCloudError('NO_API_KEY');
+        setIsCloudGenerating(false);
+        return;
+      }
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        let detailMsg = 'Failed to generate cloud report';
+        if (errData && errData.detail) {
+          detailMsg = typeof errData.detail === 'string' ? errData.detail : JSON.stringify(errData.detail);
+        }
+        throw new Error(detailMsg);
+      }
+      const data = await res.json();
+      setCloudReport(data);
+    } catch (err) {
+      setCloudError(err.message);
+    } finally {
+      setIsCloudGenerating(false);
+    }
+  };
+
+  const downloadCloudReportPDF = async () => {
+    setIsCloudGenerating(true);
+    setCloudError(null);
+    try {
+      const token = localStorage.getItem('token');
+      const res = await fetch(`/api/v1/projects/${project.id}/cloud-report`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (res.status === 402) {
+        setCloudError('NO_API_KEY');
+        setIsCloudGenerating(false);
+        return;
+      }
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        let detailMsg = 'Failed to download PDF report';
+        if (errData && errData.detail) {
+          detailMsg = typeof errData.detail === 'string' ? errData.detail : JSON.stringify(errData.detail);
+        }
+        throw new Error(detailMsg);
+      }
+      
+      let fileName = `Project Report_${(project.course_name || 'Course').replace(/[^\w\-_]/g, '_')}_${(project.name || 'Project').replace(/[^\w\-_]/g, '_')}_${project.id}.pdf`;
+      const disposition = res.headers.get('Content-Disposition');
+      if (disposition && disposition.includes('filename=')) {
+        const match = disposition.match(/filename="?([^";]+)"?/);
+        if (match && match[1]) {
+          fileName = match[1];
+        }
+      }
+      
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.style.display = 'none';
+      a.href = url;
+      a.download = fileName;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+    } catch (err) {
+      setCloudError(err.message);
+    } finally {
+      setIsCloudGenerating(false);
     }
   };
 
@@ -164,6 +416,17 @@ export default function Analytics({ project, onBack }) {
             Qualitative Analysis
           </button>
         </div>
+
+        {/* Right Side: Web File Browser Button */}
+        <button
+          type="button"
+          className="btn btn-secondary"
+          onClick={() => setShowFileBrowserModal(true)}
+          style={{ zIndex: 10, display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.85rem' }}
+        >
+          <Code size={16} className="blue-text" />
+          <span>Browse Project Files</span>
+        </button>
       </div>
 
       <div className="analytics-header" style={{ borderBottom: '1px solid var(--border-color)', paddingBottom: '10px', marginBottom: '14px' }}>
@@ -252,51 +515,115 @@ export default function Analytics({ project, onBack }) {
           {/* Visualizations Section */}
           <div className="analytics-visualization-grid" style={{ display: 'flex', flexWrap: 'wrap', gap: '24px', alignItems: 'flex-start' }}>
             
-            {/* Language Distribution Card */}
-            <div className="card" style={{ padding: '24px', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', flex: '1 1 320px', maxWidth: '420px' }}>
-              <div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-                  <h3 style={{ fontSize: '1rem', fontWeight: '600', color: 'var(--text-main)', margin: 0, textAlign: 'left' }}>Codebase Languages</h3>
-                  <Tooltip 
-                    title="Codebase Languages" 
-                    content="The percentage distribution of different programming languages in the project, calculated based on the total lines of code added." 
-                  />
+            {/* Left Column: Codebase Languages + Submission Deadline Card */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '24px', flex: '1 1 320px', maxWidth: '420px', width: '100%' }}>
+              
+              {/* Language Distribution Card */}
+              <div className="card" style={{ padding: '24px', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+                <div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                    <h3 style={{ fontSize: '1rem', fontWeight: '600', color: 'var(--text-main)', margin: 0, textAlign: 'left' }}>Codebase Languages</h3>
+                    <Tooltip 
+                      title="Codebase Languages" 
+                      content="The percentage distribution of different programming languages in the project, calculated based on the total lines of code added." 
+                    />
+                  </div>
+                  
+                  {/* Segmented language distribution bar */}
+                  <div style={{ display: 'flex', height: '12px', width: '100%', borderRadius: '6px', overflow: 'hidden', backgroundColor: 'var(--bg-app)', marginBottom: '20px' }}>
+                    {Object.entries(analytics.language_distribution || {}).map(([lang, pct], idx) => {
+                      const colors = ['#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#374151'];
+                      const color = colors[idx % colors.length];
+                      return (
+                        <div 
+                          key={lang} 
+                          style={{ 
+                            width: `${pct}%`, 
+                            backgroundColor: color, 
+                            height: '100%' 
+                          }} 
+                          title={`${lang}: ${pct}%`}
+                        />
+                      );
+                    })}
+                  </div>
                 </div>
-                
-                {/* Segmented language distribution bar */}
-                <div style={{ display: 'flex', height: '12px', width: '100%', borderRadius: '6px', overflow: 'hidden', backgroundColor: 'var(--bg-app)', marginBottom: '20px' }}>
+
+                {/* Language labels list */}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '12px', textAlign: 'left' }}>
                   {Object.entries(analytics.language_distribution || {}).map(([lang, pct], idx) => {
                     const colors = ['#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#374151'];
                     const color = colors[idx % colors.length];
                     return (
-                      <div 
-                        key={lang} 
-                        style={{ 
-                          width: `${pct}%`, 
-                          backgroundColor: color, 
-                          height: '100%' 
-                        }} 
-                        title={`${lang}: ${pct}%`}
-                      />
+                      <div key={lang} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: color }} />
+                        <span style={{ fontSize: '0.85rem', fontWeight: '600', color: 'var(--text-main)' }}>{lang}</span>
+                        <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>{pct}%</span>
+                      </div>
                     );
                   })}
                 </div>
               </div>
 
-              {/* Language labels list */}
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '12px', textAlign: 'left' }}>
-                {Object.entries(analytics.language_distribution || {}).map(([lang, pct], idx) => {
-                  const colors = ['#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#374151'];
-                  const color = colors[idx % colors.length];
-                  return (
-                    <div key={lang} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: color }} />
-                      <span style={{ fontSize: '0.85rem', fontWeight: '600', color: 'var(--text-main)' }}>{lang}</span>
-                      <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>{pct}%</span>
+              {/* Submission Deadline & Late Commits Card (rendered if project/course has deadline) */}
+              {(() => {
+                const deadlineDateObj = courseDeadline ? new Date(courseDeadline) : null;
+                const isValidDeadline = deadlineDateObj && !isNaN(deadlineDateObj.getTime());
+                if (!isValidDeadline) return null;
+
+                const allLateCommits = commits.filter(c => new Date(c.timestamp) > deadlineDateObj);
+                const totalLateCount = allLateCommits.length;
+
+                const lateAuthorsMap = {};
+                if (totalLateCount > 0) {
+                  allLateCommits.forEach(c => {
+                    const authorName = c.author_name || c.author?.name || 'Contributor';
+                    lateAuthorsMap[authorName] = (lateAuthorsMap[authorName] || 0) + 1;
+                  });
+                }
+
+                return (
+                  <div className="card" style={{ padding: '24px', textAlign: 'left' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
+                      <h3 style={{ fontSize: '1rem', fontWeight: '600', color: 'var(--text-main)', margin: 0 }}>Submission Deadline</h3>
+                      <Tooltip 
+                        title="Submission Deadline & Late Commits" 
+                        content="Monitors the course cutoff date and tracks all commits submitted after the deadline." 
+                      />
                     </div>
-                  );
-                })}
-              </div>
+
+                    {/* Deadline Info Banner */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px' }}>
+                      <Clock size={16} style={{ color: 'var(--primary)', flexShrink: 0 }} />
+                      <span style={{ fontSize: '0.82rem', fontWeight: '500', color: 'var(--text-main)' }}>
+                        {formatDeadline(courseDeadline)}
+                      </span>
+                    </div>
+
+                    {/* Late Commits Summary Stat */}
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px', backgroundColor: totalLateCount > 0 ? 'rgba(239, 68, 68, 0.08)' : 'rgba(16, 185, 129, 0.08)', borderRadius: '6px', }}>
+                      <div>
+                        <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '2px' }}>Total Late Commits</div>
+                        <strong style={{ fontSize: '1.25rem', color: totalLateCount > 0 ? '#ef4444' : '#10b981', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          {totalLateCount > 0 ? (
+                            <>
+                              <span>{totalLateCount}</span>
+                            </>
+                          ) : (
+                            <>
+                              <CheckCircle2 size={18} color="#10b981" />
+                              <span>0</span>
+                            </>
+                          )}
+                        </strong>
+                      </div>
+                    
+                    </div>
+
+                  </div>
+                );
+              })()}
+
             </div>
 
             {/* Commit History Chart Card */}
@@ -308,7 +635,7 @@ export default function Analytics({ project, onBack }) {
                   content="A historical timeline of commit logs grouped by daily, weekly, or monthly intervals, showing git activity over the selected range." 
                 />
               </div>
-              <CommitActivityChart commits={commits} allCommits={commits} />
+              <CommitActivityChart commits={commits} allCommits={commits} deadline={courseDeadline} />
             </div>
           </div>
 
@@ -350,48 +677,63 @@ export default function Analytics({ project, onBack }) {
                   </tr>
                 </thead>
                 <tbody>
-                  {analytics.contributions?.map((contrib) => (
-                    <tr
-                      key={contrib.author_id}
-                      onClick={() => handleAuthorRowClick(contrib)}
-                      style={{
-                        cursor: 'pointer',
-                        backgroundColor: selectedAuthor?.id === contrib.author_id
-                          ? 'var(--primary-alpha)'
-                          : undefined,
-                        outline: selectedAuthor?.id === contrib.author_id
-                          ? '1px solid var(--primary)'
-                          : undefined,
-                        transition: 'background 0.15s'
-                      }}
-                    >
-                      <td className="student-info-cell" style={{ padding: '8px 12px' }}>
-                        <span className="student-name" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                          {contrib.name}
-                          {isBot(contrib.name, contrib.email) && <Tag text="Bot" variant="danger" style={{ fontSize: '9px', padding: '1.5px 4px' }} />}
-                        </span>
-                      </td>
-                      <td className="muted-cell" title={contrib.email}>{contrib.email}</td>
-                      <td className="bold-cell">{contrib.commit_count}</td>
-                      <td>
-                        <span style={{ display: 'inline-block', backgroundColor: 'rgba(16,185,129,0.12)', color: '#10b981', padding: '2px 7px', borderRadius: '4px', fontSize: '0.82rem', fontWeight: '600', letterSpacing: '0.02em' }}>+{contrib.lines_added}</span>
-                      </td>
-                      <td>
-                        <span style={{ display: 'inline-block', backgroundColor: 'rgba(239,68,68,0.12)', color: '#ef4444', padding: '2px 7px', borderRadius: '4px', fontSize: '0.82rem', fontWeight: '600', letterSpacing: '0.02em' }}>-{contrib.lines_removed || 0}</span>
-                      </td>
-                      <td>
-                        <div className="progress-bar-cell">
-                          <span className="progress-text">{contrib.contribution_percentage?.toFixed(1)}%</span>
-                          <div className="progress-track">
-                            <div 
-                              className={`progress-fill ${getContributionColorClass(contrib.contribution_percentage, analytics.contributions.length)}`}
-                              style={{ width: `${contrib.contribution_percentage}%` }}
-                            ></div>
+                  {analytics.contributions?.map((contrib) => {
+                    const authorCommits = commits.filter(c => c.author_id === contrib.author_id);
+                    const lateCount = courseDeadline 
+                      ? authorCommits.filter(c => new Date(c.timestamp) > new Date(courseDeadline)).length
+                      : 0;
+
+                    return (
+                      <tr
+                        key={contrib.author_id}
+                        onClick={() => handleAuthorRowClick(contrib)}
+                        style={{
+                          cursor: 'pointer',
+                          backgroundColor: selectedAuthor?.id === contrib.author_id
+                            ? 'var(--primary-alpha)'
+                            : undefined,
+                          outline: selectedAuthor?.id === contrib.author_id
+                            ? '1px solid var(--primary)'
+                            : undefined,
+                          transition: 'background 0.15s'
+                        }}
+                      >
+                        <td className="student-info-cell" style={{ padding: '8px 12px' }}>
+                          <span className="student-name" style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                            {contrib.name}
+                            {isBot(contrib.name, contrib.email) && <Tag text="Bot" variant="danger" style={{ fontSize: '9px', padding: '1.5px 4px' }} />}
+                            {lateCount > 0 && (
+                              <Tag 
+                                text={`Late (${lateCount})`} 
+                                variant="danger" 
+                                style={{ fontSize: '9px', padding: '1.5px 5px', fontWeight: '700' }} 
+                                title={`${lateCount} commit(s) pushed after submission deadline`} 
+                              />
+                            )}
+                          </span>
+                        </td>
+                        <td className="muted-cell" title={contrib.email}>{contrib.email}</td>
+                        <td className="bold-cell">{contrib.commit_count}</td>
+                        <td>
+                          <span style={{ display: 'inline-block', backgroundColor: 'rgba(16,185,129,0.12)', color: '#10b981', padding: '2px 7px', borderRadius: '4px', fontSize: '0.82rem', fontWeight: '600', letterSpacing: '0.02em' }}>+{contrib.lines_added}</span>
+                        </td>
+                        <td>
+                          <span style={{ display: 'inline-block', backgroundColor: 'rgba(239,68,68,0.12)', color: '#ef4444', padding: '2px 7px', borderRadius: '4px', fontSize: '0.82rem', fontWeight: '600', letterSpacing: '0.02em' }}>-{contrib.lines_removed || 0}</span>
+                        </td>
+                        <td>
+                          <div className="progress-bar-cell">
+                            <span className="progress-text">{contrib.contribution_percentage?.toFixed(1)}%</span>
+                            <div className="progress-track">
+                              <div 
+                                className={`progress-fill ${getContributionColorClass(contrib.contribution_percentage, analytics.contributions.length)}`}
+                                style={{ width: `${contrib.contribution_percentage}%` }}
+                              ></div>
+                            </div>
                           </div>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -406,7 +748,7 @@ export default function Analytics({ project, onBack }) {
                 backgroundColor: 'rgba(0,0,0,0.55)',
                 backdropFilter: 'blur(4px)',
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
-                zIndex: 9999
+                zIndex: 1000, padding: '20px'
               }}
             >
               <div
@@ -435,6 +777,7 @@ export default function Analytics({ project, onBack }) {
                   commits={commits.filter(c => c.author_id === selectedAuthor.id)}
                   allCommits={commits}
                   authorName={selectedAuthor.name}
+                  deadline={courseDeadline}
                 />
               </div>
             </div>
@@ -680,25 +1023,487 @@ export default function Analytics({ project, onBack }) {
 
 
 
-      {analytics && activeTab === 'qualitative' && (
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '320px', backgroundColor: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: '12px', padding: '40px', textAlign: 'center', marginTop: '24px' }}>
-          <div style={{ padding: '16px', borderRadius: '50%', backgroundColor: 'var(--primary-alpha)', color: 'var(--primary)', marginBottom: '16px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <MessageSquare size={32} />
+      {analytics && activeTab === 'qualitative' && (() => {
+        // Status badge
+
+        // Status badge
+        const statusBadge = () => {
+          if (isRunning) return <span style={{ display:'inline-flex', alignItems:'center', gap:'5px', padding:'3px 10px', borderRadius:'20px', backgroundColor:'rgba(99,102,241,0.15)', color:'var(--primary)', fontSize:'0.78rem', fontWeight:'600', border:'1px solid rgba(99,102,241,0.3)' }}><span style={{width:'6px',height:'6px',borderRadius:'50%',backgroundColor:'var(--primary)',animation:'pulse 1.2s infinite'}} />Running</span>;
+          if (isCancelling) return <span style={{ display:'inline-flex', alignItems:'center', gap:'5px', padding:'3px 10px', borderRadius:'20px', backgroundColor:'rgba(251,191,36,0.15)', color:'#f59e0b', fontSize:'0.78rem', fontWeight:'600', border:'1px solid rgba(251,191,36,0.3)' }}>Cancelling...</span>;
+          if (isComplete) return <span style={{ display:'inline-flex', alignItems:'center', gap:'5px', padding:'3px 10px', borderRadius:'20px', backgroundColor:'rgba(16,185,129,0.15)', color:'#10b981', fontSize:'0.78rem', fontWeight:'600', border:'1px solid rgba(16,185,129,0.3)' }}><CheckCircle2 size={12} />Complete</span>;
+          if (qualStatus === 'cancelled') return <span style={{ display:'inline-flex', alignItems:'center', gap:'5px', padding:'3px 10px', borderRadius:'20px', backgroundColor:'rgba(239,68,68,0.12)', color:'#ef4444', fontSize:'0.78rem', fontWeight:'600', border:'1px solid rgba(239,68,68,0.3)' }}>Stopped</span>;
+          return <span style={{ display:'inline-flex', alignItems:'center', gap:'5px', padding:'3px 10px', borderRadius:'20px', backgroundColor:'var(--bg-app)', color:'var(--text-muted)', fontSize:'0.78rem', fontWeight:'600', border:'1px solid var(--border-color)' }}><Clock size={12} />Idle</span>;
+        };
+
+        return (
+          <div style={{ marginTop: '20px', display: 'flex', flexDirection: 'column', gap: '20px' }}>
+            <style>{`
+              @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+            `}</style>
+
+            {/* ── Row 1: Controls + Progress ─────────────────────────────── */}
+            <div className="card" style={{ padding: '20px 24px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '12px', marginBottom: isRunning ? '16px' : '0' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                  <Bot size={20} style={{ color: 'var(--primary)' }} />
+                  <h2 style={{ margin: 0, fontSize: '1.05rem', fontWeight: '700', color: 'var(--text-main)' }}>
+                    Local AI Qualitative Analysis
+                  </h2>
+                  {statusBadge()}
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                  {/* Sampling mode selector — locked while analysis is running */}
+                  <div style={{
+                    display: 'flex', alignItems: 'center', gap: '4px',
+                    border: '1px solid var(--border-color)', borderRadius: '6px', padding: '2px',
+                    backgroundColor: 'var(--bg-app)',
+                    opacity: (isRunning || isCancelling) ? 0.6 : 1,
+                    pointerEvents: (isRunning || isCancelling) ? 'none' : 'auto'
+                  }}>
+                    {[['sample', 'Smart'], ['full', 'Full'], ['random', 'Random']].map(([m, label]) => (
+                      <button
+                        key={m}
+                        type="button"
+                        onClick={() => handleSamplingModeChange(m)}
+                        disabled={isRunning || isCancelling}
+                        style={{
+                          padding: '3px 9px', borderRadius: '4px', fontSize: '0.73rem', fontWeight: '600',
+                          border: 'none',
+                          cursor: (isRunning || isCancelling) ? 'not-allowed' : 'pointer',
+                          transition: 'all 0.15s',
+                          backgroundColor: samplingMode === m ? 'var(--primary)' : 'transparent',
+                          color: samplingMode === m ? '#fff' : 'var(--text-muted)',
+                        }}
+                        title={(isRunning || isCancelling) ? 'Mode selection is locked while analysis is in progress' : (m === 'sample' ? 'Stratified Smart-Sampling: always-include high-signal commits + 20% per contributor' : m === 'full' ? 'Process every commit (slow on large repos)' : 'Pure random 20% of all commits')}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Start button — only when idle/cancelled */}
+                  {isIdle && (
+                    <button type="button" className="btn btn-secondary"
+                      onClick={() => onStartQualitative(false, samplingMode)}
+                      style={{ display:'inline-flex', alignItems:'center', gap:'6px', fontSize:'0.85rem', color:'var(--primary)', borderColor:'var(--primary)' }}
+                    >
+                      <Play size={14} /><span>Start Analysis</span>
+                    </button>
+                  )}
+                  {/* Stop button — only when running */}
+                  {(isRunning || isCancelling) && (
+                    <button type="button" className="btn btn-secondary"
+                      onClick={onStopQualitative}
+                      disabled={isCancelling}
+                      style={{ display:'inline-flex', alignItems:'center', gap:'6px', fontSize:'0.85rem', borderColor:'#ef4444', color:'#ef4444', backgroundColor:'rgba(239,68,68,0.08)' }}
+                    >
+                      <Square size={14} /><span>{isCancelling ? 'Cancelling...' : 'Stop'}</span>
+                    </button>
+                  )}
+                  {/* Re-analyze — always available */}
+                  <button type="button" className="btn btn-secondary"
+                    onClick={() => onStartQualitative(true, samplingMode)}
+                    disabled={isRunning || isCancelling}
+                    style={{ display:'inline-flex', alignItems:'center', gap:'6px', fontSize:'0.85rem' }}
+                    title="Clear DB cache and re-run from scratch with selected mode"
+                  >
+                    <RefreshCw size={14} /><span>Re-analyze</span>
+                  </button>
+                  {/* View raw JSON */}
+                  <button type="button" className="btn btn-secondary"
+                    onClick={() => setShowRawDataInspector(!showRawDataInspector)}
+                    style={{ display:'inline-flex', alignItems:'center', gap:'6px', fontSize:'0.85rem' }}
+                  >
+                    <Code size={14} /><span>{showRawDataInspector ? 'Hide JSON' : 'View Output JSON'}</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Progress bar with Live Timer & Estimated Time Remaining */}
+              {(isRunning || isCancelling) && (
+                <div style={{ marginTop: '12px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px', flexWrap: 'wrap', gap: '8px' }}>
+                    <p style={{ margin: 0, fontSize: '0.82rem', color: 'var(--text-muted)', fontWeight: '500' }}>
+                      {qualMessage || 'Processing...'}
+                    </p>
+                    {/* Live Timer & ETA Badge */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.78rem' }}>
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', color: 'var(--text-muted)' }}>
+                        <Clock size={13} style={{ color: 'var(--primary)' }} />
+                        <span>Elapsed: <strong>{formatSeconds(elapsedSec)}</strong></span>
+                      </span>
+                      {etaSec !== null ? (
+                        <span style={{
+                          fontWeight: '600', color: 'var(--primary)',
+                          backgroundColor: 'rgba(99,102,241,0.1)',
+                          padding: '2px 8px', borderRadius: '4px',
+                          border: '1px solid rgba(99,102,241,0.2)'
+                        }}>
+                          Est. remaining: ~{formatSeconds(etaSec)}
+                        </span>
+                      ) : qualProgress <= 3 ? (
+                        <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontStyle: 'italic' }}>
+                          Calculating ETA...
+                        </span>
+                      ) : null}
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                    <div style={{ flex: 1, height: '8px', backgroundColor: 'var(--bg-app)', borderRadius: '5px', overflow: 'hidden', border: '1px solid var(--border-color)' }}>
+                      <div style={{ height: '100%', width: `${qualProgress}%`, background: 'linear-gradient(90deg, var(--primary), #818cf8)', borderRadius: '5px', transition: 'width 0.4s ease-out' }} />
+                    </div>
+                    <span style={{ fontSize: '0.9rem', fontWeight: '700', color: 'var(--primary)', minWidth: '42px', textAlign: 'right' }}>{qualProgress}%</span>
+                  </div>
+                </div>
+              )}
+
+              {/* Done status message */}
+              {isComplete && (
+                <p style={{ margin: '8px 0 0 0', fontSize: '0.82rem', color: '#10b981' }}>
+                  ✓ {qualMessage}
+                </p>
+              )}
+              {qualStatus === 'cancelled' && (
+                <p style={{ margin: '8px 0 0 0', fontSize: '0.82rem', color: '#ef4444' }}>
+                  {qualMessage}
+                </p>
+              )}
+            </div>
+
+            {/* ── Row 2: Output JSON Inspector ───────────────────────────── */}
+            {showRawDataInspector && (
+              <div className="card" style={{ padding: '0', overflow: 'hidden' }}>
+                <div style={{ padding: '10px 16px', borderBottom: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'linear-gradient(90deg, rgba(99,102,241,0.08), transparent)' }}>
+                  <span style={{ fontSize: '0.8rem', fontWeight: '700', color: 'var(--primary)', letterSpacing: '0.04em', textTransform: 'uppercase' }}>
+                    Preprocessed JSON Output — Cloud Model Input Payload
+                  </span>
+                  <button type="button" onClick={() => setShowRawDataInspector(false)} style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', display: 'flex', alignItems: 'center' }}>
+                    <X size={14} />
+                  </button>
+                </div>
+                <div style={{ height: '320px', overflowY: 'auto' }}>
+                  {isRunning ? (
+                    <div style={{ padding: '20px', color: 'var(--text-muted)', fontStyle: 'italic', fontSize: '0.85rem' }}>
+                      Analysis in progress... JSON will appear here upon completion.
+                    </div>
+                  ) : qualData ? (
+                    <pre style={{ margin: 0, padding: '16px', fontFamily: 'Fira Code, Consolas, monospace', fontSize: '0.78rem', color: 'var(--text-main)', overflowX: 'auto', lineHeight: '1.6', backgroundColor: 'var(--bg-app)' }}>
+                      {JSON.stringify(qualData, null, 2)}
+                    </pre>
+                  ) : (
+                    <div style={{ padding: '20px', color: 'var(--text-muted)', fontStyle: 'italic', fontSize: '0.85rem' }}>
+                      No qualitative data yet. Start analysis to generate output.
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* ── Row 3: Individual Student Qualitative Contributions Table ── */}
+            {qualData && qualData.contributors && (
+              <div className="card" style={{ padding: '24px' }}>
+                <h2 style={{ fontSize: '1.1rem', fontWeight: '600', color: 'var(--text-main)', margin: '0 0 16px 0', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <User size={20} style={{ color: 'var(--primary)' }} />
+                  <span>Individual Student Qualitative Contributions</span>
+                </h2>
+                <div className="table-container">
+                  <table className="custom-table" style={{ tableLayout: 'fixed', width: '100%' }}>
+                    <thead>
+                      <tr>
+                        <th style={{ width: '22%' }}>Student Name</th>
+                        <th style={{ width: '15%' }}>Commit Share</th>
+                        <th style={{ width: '15%' }}>LOC Share</th>
+                        <th style={{ width: '15%' }}>Vague Msg %</th>
+                        <th style={{ width: '15%' }}>Msg Mismatch %</th>
+                        <th style={{ width: '10%' }}>Risk Score</th>
+                        <th style={{ width: '23%' }}>Status / Red Flags</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {Object.entries(qualData.contributors).map(([name, info]) => {
+                        const stats = info.stats || {};
+                        const riskScore = stats.ai_risk_score ?? 0;
+                        const isFreeRider = stats.free_rider_suspected ?? false;
+                        const flags = stats.detected_red_flags || [];
+
+                        // Risk Badge style helper
+                        const getRiskBadge = (score) => {
+                          const color = score >= 7 ? '#ef4444' : score >= 5 ? '#f59e0b' : '#10b981';
+                          const bg = score >= 7 ? 'rgba(239,68,68,0.1)' : score >= 5 ? 'rgba(245,158,11,0.1)' : 'rgba(16,185,129,0.1)';
+                          return (
+                            <span style={{
+                              display: 'inline-block',
+                              padding: '3px 8px',
+                              borderRadius: '4px',
+                              backgroundColor: bg,
+                              color: color,
+                              fontWeight: '700',
+                              fontSize: '0.82rem'
+                            }}>
+                              {score}/10
+                            </span>
+                          );
+                        };
+
+                        return (
+                          <tr key={name}>
+                            <td className="student-info-cell" style={{ fontWeight: '600' }}>{name}</td>
+                            <td>{stats.commit_share_percentage ?? 0}%</td>
+                            <td>{stats.loc_share_percentage ?? 0}%</td>
+                            <td style={{ color: stats.vague_message_percentage > 30 ? '#ef4444' : 'inherit' }}>
+                              {stats.vague_message_percentage ?? 0}%
+                            </td>
+                            <td style={{ color: stats.message_mismatch_percentage > 20 ? '#ef4444' : 'inherit' }}>
+                              {stats.message_mismatch_percentage ?? 0}%
+                            </td>
+                            <td>{getRiskBadge(riskScore)}</td>
+                            <td>
+                              {isFreeRider ? (
+                                <Tag 
+                                  text="Free-rider Risk" 
+                                  variant="danger" 
+                                  style={{ fontSize: '10px', padding: '3px 6px', fontWeight: '700' }}
+                                  title={flags.join(', ')}
+                                />
+                              ) : (
+                                <span style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>Good Standing</span>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {/* ── Row 4: Cloud AI Final Report ──────────────────────────── */}
+            <div className="card" style={{ padding: '24px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap', gap: '12px', borderBottom: '1px solid var(--border-color)', paddingBottom: '16px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                  <Bot size={22} style={{ color: 'var(--primary)' }} />
+                  <h2 style={{ fontSize: '1.15rem', fontWeight: '700', color: 'var(--text-main)', margin: 0 }}>
+                    Cloud AI Final Evaluation Report
+                  </h2>
+                  {cloudReport && cloudReport.overall_project_risk_score && (
+                    <span style={{
+                      ...getRiskScoreBadgeStyle(cloudReport.overall_project_risk_score),
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '4px'
+                    }}>
+                      <AlertCircle size={13} />
+                      Risk Score: {cloudReport.overall_project_risk_score}
+                    </span>
+                  )}
+                </div>
+
+                {cloudReport && (
+                  <div style={{ display: 'flex', gap: '8px' }}>
+                    <button 
+                      onClick={downloadCloudReportPDF}
+                      disabled={isCloudGenerating}
+                      className="btn btn-secondary btn-sm"
+                      style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.82rem' }}
+                      title="Download PDF Report"
+                    >
+                      <Bot size={14} />
+                      <span>Download PDF</span>
+                    </button>
+                    <button 
+                      onClick={generateCloudReportData}
+                      disabled={isCloudGenerating}
+                      className="btn btn-secondary btn-sm"
+                      style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.82rem' }}
+                      title="Regenerate Report"
+                    >
+                      <RefreshCw size={14} className={isCloudGenerating ? "spin" : ""} />
+                      <span>Regenerate</span>
+                    </button>
+                  </div>
+                )}
+              </div>
+              
+              {!qualData && !isComplete && (
+                <div style={{ padding: '20px', backgroundColor: 'var(--bg-app)', borderRadius: '8px', color: 'var(--text-muted)', fontSize: '0.9rem', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <Info size={16} />
+                  Run the local AI analysis first to gather project data.
+                </div>
+              )}
+
+              {(qualData || isComplete) && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+                  {cloudError === 'NO_API_KEY' ? (
+                    <div style={{ padding: '20px', backgroundColor: 'rgba(245,158,11,0.1)', border: '1px solid rgba(245,158,11,0.2)', borderRadius: '8px', color: '#f59e0b', fontSize: '0.9rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                        <AlertCircle size={18} />
+                        <span><strong>API Key Not Enabled:</strong> You must configure a Cloud AI API key in Settings to generate the final report.</span>
+                      </div>
+                      <button 
+                        onClick={onBack}
+                        style={{ padding: '6px 12px', backgroundColor: '#f59e0b', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: '600', fontSize: '0.85rem' }}
+                      >
+                        Close & Go to Settings
+                      </button>
+                    </div>
+                  ) : cloudError ? (
+                    <div style={{ padding: '16px', backgroundColor: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.2)', borderRadius: '8px', color: '#ef4444', fontSize: '0.9rem' }}>
+                      <strong>Error generating report:</strong> {cloudError}
+                    </div>
+                  ) : null}
+
+                  {!cloudReport ? (
+                    <div style={{ display: 'flex', justifyContent: 'center', padding: '30px', backgroundColor: 'var(--bg-app)', borderRadius: '8px', border: '1px dashed var(--border-color)' }}>
+                      <button 
+                        onClick={generateCloudReportData}
+                        disabled={isCloudGenerating}
+                        className="btn btn-primary"
+                        style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '10px 20px', fontSize: '0.95rem' }}
+                      >
+                        {isCloudGenerating ? (
+                          <>
+                            <RefreshCw size={16} className="spin" />
+                            Generating Cloud AI Report...
+                          </>
+                        ) : (
+                          <>
+                            <Bot size={16} />
+                            Generate Cloud AI Final Report
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  ) : typeof cloudReport === 'object' && cloudReport.executive_summary ? (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+                      
+                      {/* Grid for Executive Summary and Work Distribution */}
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '20px' }}>
+                        <div style={{ backgroundColor: 'var(--bg-app)', padding: '18px', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
+                          <h3 style={{ fontSize: '0.92rem', fontWeight: '600', color: 'var(--primary)', textTransform: 'uppercase', letterSpacing: '0.05em', margin: '0 0 10px 0' }}>
+                            Executive Summary
+                          </h3>
+                          <p style={{ margin: 0, fontSize: '0.88rem', lineHeight: '1.6', color: 'var(--text-main)' }}>
+                            {cloudReport.executive_summary}
+                          </p>
+                        </div>
+                        <div style={{ backgroundColor: 'var(--bg-app)', padding: '18px', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
+                          <h3 style={{ fontSize: '0.92rem', fontWeight: '600', color: 'var(--primary)', textTransform: 'uppercase', letterSpacing: '0.05em', margin: '0 0 10px 0' }}>
+                            Work Distribution & Collaboration
+                          </h3>
+                          <p style={{ margin: 0, fontSize: '0.88rem', lineHeight: '1.6', color: 'var(--text-main)' }}>
+                            {cloudReport.work_distribution_and_fairness}
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Integrity Anomalies (if any) */}
+                      {cloudReport.academic_integrity_anomalies && !cloudReport.academic_integrity_anomalies.includes("No anomalies") && !cloudReport.academic_integrity_anomalies.includes("none") && (
+                        <div style={{ backgroundColor: 'rgba(239,68,68,0.06)', padding: '18px', borderRadius: '8px', border: '1px solid rgba(239,68,68,0.2)', display: 'flex', gap: '12px' }}>
+                          <AlertCircle size={20} style={{ color: '#ef4444', flexShrink: 0, marginTop: '2px' }} />
+                          <div>
+                            <h3 style={{ fontSize: '0.92rem', fontWeight: '700', color: '#ef4444', margin: '0 0 6px 0' }}>
+                              Academic Integrity & Team Dynamics Anomalies
+                            </h3>
+                            <p style={{ margin: 0, fontSize: '0.86rem', lineHeight: '1.5', color: 'var(--text-main)' }}>
+                              {cloudReport.academic_integrity_anomalies}
+                            </p>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Individual Student Evaluations */}
+                      {cloudReport.student_evaluations && cloudReport.student_evaluations.length > 0 && (
+                        <div>
+                          <h3 style={{ fontSize: '0.95rem', fontWeight: '600', color: 'var(--text-main)', margin: '0 0 12px 0', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <User size={16} style={{ color: 'var(--primary)' }} />
+                            <span>Individual Student Qualitative Evaluations</span>
+                          </h3>
+                          <div className="table-container">
+                            <table className="custom-table" style={{ tableLayout: 'fixed', width: '100%' }}>
+                              <thead>
+                                <tr>
+                                  <th style={{ width: '18%' }}>Student</th>
+                                  <th style={{ width: '18%' }}>Verdict</th>
+                                  <th style={{ width: '16%' }}>Commits</th>
+                                  <th style={{ width: '16%' }}>Substance</th>
+                                  <th style={{ width: '16%' }}>Pacing</th>
+                                  <th style={{ width: '16%' }}>Quality Signals</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {cloudReport.student_evaluations.map((student, idx) => (
+                                  <tr key={idx}>
+                                    <td style={{ fontWeight: '600' }}>{student.student_name}</td>
+                                    <td>
+                                      <span style={getVerdictBadgeStyle(student.verdict)}>
+                                        {student.verdict}
+                                      </span>
+                                    </td>
+                                    <td style={{ fontSize: '0.82rem' }}>{student.commits_summary}</td>
+                                    <td style={{ fontSize: '0.82rem' }}>{student.substance_breakdown}</td>
+                                    <td style={{ fontSize: '0.82rem' }}>{student.pacing_and_deadlines}</td>
+                                    <td style={{ fontSize: '0.82rem' }}>{student.quality_and_integrity_signals}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Actionable Recommendations */}
+                      {cloudReport.actionable_recommendations && cloudReport.actionable_recommendations.length > 0 && (
+                        <div style={{ borderTop: '1px solid var(--border-color)', paddingTop: '16px' }}>
+                          <h3 style={{ fontSize: '0.95rem', fontWeight: '600', color: 'var(--text-main)', margin: '0 0 10px 0' }}>
+                            Actionable Recommendations
+                          </h3>
+                          <ul style={{ margin: 0, paddingLeft: '20px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                            {cloudReport.actionable_recommendations.map((rec, idx) => (
+                              <li key={idx} style={{ fontSize: '0.88rem', color: 'var(--text-main)', lineHeight: '1.5' }}>
+                                {rec}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+
+                    </div>
+                  ) : (
+                    <div style={{ padding: '24px', backgroundColor: 'var(--bg-app)', borderRadius: '8px', border: '1px solid var(--border-color)', color: 'var(--text-main)', fontSize: '0.95rem', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '15px' }}>
+                      <div style={{ color: 'var(--success)', fontWeight: 'bold', fontSize: '1.1rem' }}>
+                        ✓ {String(cloudReport)}
+                      </div>
+                      <button 
+                        onClick={downloadCloudReportPDF}
+                        className="btn btn-secondary"
+                        style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 16px' }}
+                      >
+                        <Bot size={16} />
+                        Download PDF Report
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
           </div>
-          <h2 style={{ fontSize: '1.25rem', fontWeight: '600', color: 'var(--text-main)', marginBottom: '8px' }}>Qualitative Code Review Analysis</h2>
-          <p style={{ fontSize: '0.9rem', color: 'var(--text-muted)', maxWidth: '460px', lineHeight: '1.6', margin: '0 auto' }}>
-            This section will house qualitative analysis metrics including code styling check results, code duplication ratios, structural design complexity, and instructor peer reviews.
-          </p>
-          <div style={{ marginTop: '20px', display: 'inline-block', fontSize: '0.75rem', color: 'var(--primary)', fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '0.05em', backgroundColor: 'var(--primary-alpha)', padding: '6px 16px', borderRadius: '100px' }}>
-            Feature Coming Soon
-          </div>
-        </div>
-      )}
+        );
+      })()}
+
+
 
       {selectedCommitHash && (
         <CommitCodeViewModal 
           commitHash={selectedCommitHash}
           onClose={() => setSelectedCommitHash(null)}
+        />
+      )}
+
+      {showFileBrowserModal && (
+        <FileBrowserModal
+          project={project}
+          onClose={() => setShowFileBrowserModal(false)}
         />
       )}
 

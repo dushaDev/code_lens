@@ -116,3 +116,41 @@
   color: var(--text-muted);
   margin-top: 12px;
 }
+
+.local-copy-box {
+  background-color: var(--bg-app);
+  border: 1px solid var(--border-color);
+  padding: 12px 16px;
+  border-radius: var(--radius-md);
+  margin-top: 4px;
+}
+
+.local-copy-label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  font-weight: 500;
+  color: var(--text-main);
+  font-size: 0.9rem;
+}
+
+.local-copy-checkbox {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--primary);
+  cursor: pointer;
+}
+
+.local-copy-note {
+  margin: 6px 0 0 28px;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
+.local-copy-note svg {
+  display: inline-block;
+  margin-right: 4px;
+  vertical-align: middle;
+}

@@ -6,7 +6,8 @@ import {
   ArrowUpRight, 
   FileCheck2, 
   AlertOctagon, 
-  Trash2 
+  Trash2,
+  RefreshCw
 } from 'lucide-react';
 import { getTechDetails } from '../../utils/techIcons';
 import Tag from '../../components/Tag';
@@ -15,25 +16,47 @@ import './Projects.css';
 export default function Projects({ 
   projects, 
   onViewAnalytics, 
-  onDeleteProject 
+  onDeleteProject,
+  onSyncProject
 }) {
   const [filter, setFilter] = useState('all'); // all, good, high-risk
+  const [sortBy, setSortBy] = useState('added'); // 'added' (default), 'risk'
   const [search, setSearch] = useState('');
+  const [syncingId, setSyncingId] = useState(null);
 
-  const filteredProjects = projects.filter((project) => {
-    // Filter condition
-    if (filter === 'good' && project.plagiarismRisk !== 'Good') return false;
-    if (filter === 'high-risk' && project.plagiarismRisk !== 'High Risk') return false;
+  const filteredProjects = projects
+    .filter((project) => {
+      // Filter condition
+      if (filter === 'good' && project.plagiarismRisk !== 'Good') return false;
+      if (filter === 'high-risk' && project.plagiarismRisk !== 'High Risk') return false;
 
-    // Search condition
-    const matchesSearch = 
-      project.name.toLowerCase().includes(search.toLowerCase()) ||
-      project.description?.toLowerCase().includes(search.toLowerCase()) ||
-      project.techStack?.some(tech => tech.toLowerCase().includes(search.toLowerCase())) ||
-      (project.group_no || project.groupNo || '').toLowerCase().includes(search.toLowerCase());
-    
-    return matchesSearch;
-  });
+      // Search condition
+      const matchesSearch = 
+        project.name.toLowerCase().includes(search.toLowerCase()) ||
+        project.description?.toLowerCase().includes(search.toLowerCase()) ||
+        project.techStack?.some(tech => tech.toLowerCase().includes(search.toLowerCase())) ||
+        (project.group_no || project.groupNo || '').toLowerCase().includes(search.toLowerCase());
+      
+      return matchesSearch;
+    })
+    .sort((a, b) => {
+      if (sortBy === 'risk') {
+        const getRiskRank = (p) => {
+          if (p.plagiarismRisk === 'High Risk') return 3;
+          if (p.plagiarismRisk === 'Medium Risk') return 2;
+          return 1;
+        };
+        const rankA = getRiskRank(a);
+        const rankB = getRiskRank(b);
+        if (rankA !== rankB) {
+          return rankB - rankA; // Highest risk first
+        }
+      }
+      // Default: Added time (Newest project first by ID or created_at timestamp)
+      const timeA = a.created_at ? new Date(a.created_at).getTime() : (a.id || 0);
+      const timeB = b.created_at ? new Date(b.created_at).getTime() : (b.id || 0);
+      return timeB - timeA;
+    });
 
   const renderTechBadges = (techStack) => {
     if (!techStack) return null;
@@ -89,7 +112,7 @@ export default function Projects({
       </div>
 
       {/* Filter and Search Action Bar */}
-      <div className="action-bar card">
+      <div className="action-bar card" style={{ display: 'flex', flexWrap: 'wrap', gap: '16px', justifyContent: 'space-between', alignItems: 'center' }}>
         <div className="search-box">
           <Search size={18} />
           <input 
@@ -100,30 +123,51 @@ export default function Projects({
           />
         </div>
 
-        <div className="filter-options">
-          <span className="filter-label">
-            <SlidersHorizontal size={14} />
-            <span>Filter By:</span>
-          </span>
-          <div className="btn-group">
-            <button 
-              className={`filter-btn ${filter === 'all' ? 'active' : ''}`}
-              onClick={() => setFilter('all')}
+        <div className="filter-options" style={{ display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <SlidersHorizontal size={14} style={{ color: 'var(--text-muted)' }} />
+            <span style={{ fontSize: '0.82rem', fontWeight: '600', color: 'var(--text-muted)' }}>Filter:</span>
+            <div className="btn-group">
+              <button 
+                className={`filter-btn ${filter === 'all' ? 'active' : ''}`}
+                onClick={() => setFilter('all')}
+              >
+                All
+              </button>
+              <button 
+                className={`filter-btn ${filter === 'good' ? 'active' : ''}`}
+                onClick={() => setFilter('good')}
+              >
+                Good Health
+              </button>
+              <button 
+                className={`filter-btn ${filter === 'high-risk' ? 'active' : ''}`}
+                onClick={() => setFilter('high-risk')}
+              >
+                High Risk
+              </button>
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <span style={{ fontSize: '0.82rem', fontWeight: '600', color: 'var(--text-muted)' }}>Sort By:</span>
+            <select 
+              value={sortBy} 
+              onChange={(e) => setSortBy(e.target.value)}
+              style={{ 
+                background: 'var(--card-bg, #1e293b)', 
+                color: 'var(--text-primary, #f8fafc)', 
+                border: '1px solid var(--border-color, #334155)', 
+                borderRadius: '6px', 
+                padding: '6px 12px', 
+                fontSize: '0.82rem', 
+                fontWeight: '500',
+                cursor: 'pointer' 
+              }}
             >
-              All Projects
-            </button>
-            <button 
-              className={`filter-btn ${filter === 'good' ? 'active' : ''}`}
-              onClick={() => setFilter('good')}
-            >
-              Good Health
-            </button>
-            <button 
-              className={`filter-btn ${filter === 'high-risk' ? 'active' : ''}`}
-              onClick={() => setFilter('high-risk')}
-            >
-              High Plagiarism Risk
-            </button>
+              <option value="added">Added Time (Newest First)</option>
+              <option value="risk">Risk Level (Highest First)</option>
+            </select>
           </div>
         </div>
       </div>
@@ -151,7 +195,14 @@ export default function Projects({
                       <div className="project-name-cell-content" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                         <FolderGit2 size={16} className="project-icon" />
                         <Tag text={project.group_no || project.groupNo || 'G-00'} variant="muted" style={{ fontSize: '0.75rem', padding: '2px 6px' }} />
-                        <span className="project-title">{project.name}</span>
+                        <span 
+                          className="project-title" 
+                          onClick={() => onViewAnalytics(project)}
+                          style={{ cursor: 'pointer' }}
+                          title="Click to open project analytics"
+                        >
+                          {project.name}
+                        </span>
                       </div>
                     </td>
                     <td>
@@ -183,10 +234,28 @@ export default function Projects({
                     <td>
                       <div className="actions-cell">
                         <button 
+                          className="btn btn-secondary btn-sm"
+                          onClick={async () => {
+                            if (!onSyncProject) return;
+                            setSyncingId(project.id);
+                            try {
+                              await onSyncProject(project.id);
+                            } finally {
+                              setSyncingId(null);
+                            }
+                          }}
+                          disabled={syncingId === project.id}
+                          title="Pull latest git commits from GitHub"
+                          style={{ fontSize: '0.8rem', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                        >
+                          <RefreshCw size={13} className={syncingId === project.id ? 'spin' : ''} />
+                          <span>{syncingId === project.id ? 'Syncing...' : 'Sync Git'}</span>
+                        </button>
+                        <button 
                           className="btn btn-primary btn-sm"
                           onClick={() => onViewAnalytics(project)}
                         >
-                          <span>View Analytics</span>
+                          <span>Analytics</span>
                           <ArrowUpRight size={14} />
                         </button>
                         <button 

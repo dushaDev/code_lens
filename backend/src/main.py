@@ -1,15 +1,35 @@
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 
 load_dotenv()
 
 from src.infrastructure.database.session import init_db
 from src.infrastructure.api.routers import router
+from src.infrastructure.api.similarity_router import similarity_router
 
 app = FastAPI(
     title="Code Lens API",
     description="Git Data Extraction API for Code Lens",
     version="1.0.0"
+)
+
+import os
+
+origins_raw = os.getenv("CORS_ORIGINS", "http://localhost:3000")
+origins = [o.strip() for o in origins_raw.split(",") if o.strip()]
+
+# Credentials are only allowed alongside explicit origins, not wildcard "*"
+allow_credentials = True
+if "*" in origins:
+    allow_credentials = False
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=allow_credentials,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 # Initialize database tables on startup
@@ -19,6 +39,7 @@ def on_startup():
 
 # Include the API routes
 app.include_router(router)
+app.include_router(similarity_router)
 
 @app.get("/health")
 def health_check():

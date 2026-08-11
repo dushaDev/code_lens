@@ -50,18 +50,67 @@ class UsersListResponse(BaseModel):
     users: List[UserResponse]
 
 # ---------------------------------------------------------------------------
+# API Key schemas
+# ---------------------------------------------------------------------------
+
+class UserApiKeyCreateRequest(BaseModel):
+    name: str
+    provider: Optional[str] = "Gemini"
+    api_key: str
+
+class UserApiKeyResponse(BaseModel):
+    id: int
+    name: str
+    provider: str
+    masked_key: str
+    is_active: bool
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+# ---------------------------------------------------------------------------
 # Course schemas
 # ---------------------------------------------------------------------------
 
 class CourseCreateRequest(BaseModel):
     name: str
     description: Optional[str] = None
+    tech_requirements: Optional[str] = None
+    deadline: Optional[datetime] = None
+    default_sampling_mode: Optional[str] = "sample"
+
+class CourseUpdateRequest(BaseModel):
+    """Partial update — only the fields actually sent are applied. Sending an
+    explicit null clears that field, so a deadline can be removed later."""
+    name: Optional[str] = None
+    description: Optional[str] = None
+    tech_requirements: Optional[str] = None
+    deadline: Optional[datetime] = None
+    default_sampling_mode: Optional[str] = None
 
 class CourseResponse(BaseModel):
     id: int
     name: str
     description: Optional[str] = None
+    tech_requirements: Optional[str] = None
+    deadline: Optional[datetime] = None
+    has_api_key: Optional[bool] = False
+    masked_api_key: Optional[str] = None
+    default_sampling_mode: Optional[str] = "sample"
     created_at: datetime
+
+class ApiKeySaveRequest(BaseModel):
+    api_key: str
+
+class ApiKeyStatusResponse(BaseModel):
+    has_api_key: bool
+    masked_api_key: Optional[str] = None
+    message: Optional[str] = None
+
+class CloudReportResponse(BaseModel):
+    report: str
+    model: str = "gemini-1.5-flash"
+    project_id: int
 
 class CoursesListResponse(BaseModel):
     total_courses: int
@@ -73,6 +122,7 @@ class ProjectCreateRequest(BaseModel):
     git_url: str
     course_id: int
     group_no: str
+    store_local_copy: Optional[bool] = True
 
 class ProjectCreateResponse(BaseModel):
     project_id: int
@@ -80,6 +130,9 @@ class ProjectCreateResponse(BaseModel):
     course_id: int
     group_no: Optional[str] = "G-00"
     tech_stack: List[str] = []
+    store_local_copy: bool = True
+    is_local_copy_stored: bool = True
+    sampling_mode: Optional[str] = "sample"
 
 class ExtractResponse(BaseModel):
     status: str
@@ -108,9 +161,12 @@ class ProjectResponse(BaseModel):
     git_url: str
     local_saved_path: str
     group_no: Optional[str] = "G-00"
+    store_local_copy: bool = True
+    is_local_copy_stored: bool = True
     tech_stack: List[str] = []
     created_at: datetime
     course_id: Optional[int] = None
+    sampling_mode: Optional[str] = "sample"
 
 class FileChangeResponse(BaseModel):
     id: int
@@ -259,3 +315,49 @@ class SearchResultItem(BaseModel):
 class SearchResponse(BaseModel):
     results: List[SearchResultItem]
     error: Optional[str] = None
+
+class CommitVerificationResponse(BaseModel):
+    hash: str
+    author_name: str
+    message: str
+    match_percentage: int
+    reason: str
+
+class AuthorQualitativeProfileResponse(BaseModel):
+    author_id: int
+    name: str
+    email: str
+    commit_count: int
+    total_insertions: int
+    squash_count: int
+    risk_flag: str
+
+class ArchitectureAnalysisResponse(BaseModel):
+    pattern_name: str
+    accuracy_score: int
+    assessment: str
+
+class QualitativeAnalysisResponse(BaseModel):
+    project_id: int
+    overall_truthfulness_score: int
+    executive_summary: str
+    architecture_analysis: Optional[ArchitectureAnalysisResponse] = None
+    commit_verifications: List[CommitVerificationResponse]
+    author_profiles: List[AuthorQualitativeProfileResponse]
+
+class StudentReportRow(BaseModel):
+    student_name: str = "Unknown Contributor"
+    commits_summary: Optional[str] = "N/A"
+    substance_breakdown: Optional[str] = "N/A"
+    pacing_and_deadlines: Optional[str] = "N/A"
+    quality_and_integrity_signals: Optional[str] = "N/A"
+    verdict: Optional[str] = "No verdict provided."
+
+class CloudReportData(BaseModel):
+    executive_summary: Optional[str] = "Executive summary not provided."
+    work_distribution_and_fairness: Optional[str] = "Work distribution details not provided."
+    student_evaluations: Optional[List[StudentReportRow]] = []
+    academic_integrity_anomalies: Optional[str] = "No anomalies detailed."
+    overall_project_risk_score: Optional[str] = "5/10 (Moderate)"
+    actionable_recommendations: Optional[List[str]] = []
+
