@@ -270,8 +270,8 @@ class AstParserService:
         try:
             with open(full_file_path, "r", encoding="utf-8", errors="ignore") as f:
                 content = f.read()
-        except Exception as e:
-            logger.warning(f"Could not read file {rel_file_path}: {e}")
+        except OSError as e:
+            logger.warning(f"Could not read file {rel_file_path}: {e}", exc_info=e)
             return []
 
         ext = os.path.splitext(rel_file_path)[1].lower()
@@ -286,7 +286,7 @@ class AstParserService:
                 logger.warning(f"Python Syntax Error in {rel_file_path}: {se}. Skipping.")
                 return []
             except Exception as ex:
-                logger.warning(f"Failed to parse Python AST for {rel_file_path}: {ex}. Skipping.")
+                logger.exception(f"Failed to parse Python AST for {rel_file_path}: {ex}. Skipping.", exc_info=ex)
                 return []
         else:
             # JS, TS, JSX, TSX structural AST normalization

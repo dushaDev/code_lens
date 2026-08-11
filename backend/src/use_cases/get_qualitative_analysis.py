@@ -1,13 +1,20 @@
 import json
 import os
 import concurrent.futures
+import logging
 from datetime import timedelta
 from typing import Dict, Any, List, Optional
 from collections import defaultdict
+from sqlalchemy.exc import SQLAlchemyError
 from src.use_cases.interfaces import IProjectRepository, IAuthorRepository, ICommitRepository
 from src.use_cases.commit_sampler import build_stratified_sample, compute_sampling_stats
 from src.infrastructure.services.local_ai_service import LocalAIService
 from src.domain.metrics import calculate_gini, get_gini_status
+
+logger = logging.getLogger(__name__)
+
+# Module-level thread pool executor for local AI tasks (long-lived)
+_LOCAL_AI_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=8)
 
 # Global in-memory cache for local AI commit classifications to avoid redundant LLM invocations
 # WARNING: The following mutable globals (CLASSIFICATION_CACHE, CANCELLED_PROJECT_IDS,
@@ -21,13 +28,42 @@ CANCELLED_PROJECT_IDS = set()
 # status: 'running' | 'complete' | 'cancelled' | 'idle'
 RUNNING_PROJECTS: Dict[int, Dict] = {}
 
+# Bounded state setters to prevent memory leaks in long-running sessions
+def _add_cancelled_project(project_id: int):
+    CANCELLED_PROJECT_IDS.add(project_id)
+    if len(CANCELLED_PROJECT_IDS) > 1000:
+        # Evict oldest element
+        CANCELLED_PROJECT_IDS.remove(next(iter(CANCELLED_PROJECT_IDS)))
+
+def update_running_project(project_id: int, status: str = None, progress: int = None, message: str = None, new_state: dict = None):
+    if new_state is not None:
+        RUNNING_PROJECTS[project_id] = new_state
+    else:
+        if project_id not in RUNNING_PROJECTS:
+            RUNNING_PROJECTS[project_id] = {"status": "idle", "progress": 0, "message": ""}
+        if status is not None:
+            RUNNING_PROJECTS[project_id]["status"] = status
+        if progress is not None:
+            RUNNING_PROJECTS[project_id]["progress"] = progress
+        if message is not None:
+            RUNNING_PROJECTS[project_id]["message"] = message
+            
+    # Prune running projects if size exceeds 500
+    if len(RUNNING_PROJECTS) > 500:
+        for pid in list(RUNNING_PROJECTS.keys()):
+            if RUNNING_PROJECTS[pid].get("status") not in ("running", "cancelling"):
+                RUNNING_PROJECTS.pop(pid)
+                if len(RUNNING_PROJECTS) <= 500:
+                    break
+
+
 def get_project_analysis_status(project_id: int) -> Dict:
     return RUNNING_PROJECTS.get(project_id, {"status": "idle", "progress": 0, "message": ""})
 
 def cancel_qualitative_analysis(project_id: int):
-    CANCELLED_PROJECT_IDS.add(project_id)
+    _add_cancelled_project(project_id)
     if project_id in RUNNING_PROJECTS:
-        RUNNING_PROJECTS[project_id]["status"] = "cancelling"
+        update_running_project(project_id, status="cancelling")
 
 def extract_extended_quantitative_metrics(db, project_id: int, project=None, commits=None) -> dict:
     """Extract extended quantitative metrics: branches, similarity reports, AST complexity, timeline peak."""
@@ -55,8 +91,8 @@ def extract_extended_quantitative_metrics(db, project_id: int, project=None, com
                 "total_branches": total_b,
                 "top_branches": top_b
             }
-    except Exception as e:
-        print(f"[EXTENDED-METRICS] Branch extraction error: {e}")
+    except SQLAlchemyError as e:
+        logger.warning(f"Branch extraction error: {e}")
 
     # 2. Plagiarism / Similarity summary
     plagiarism_summary = {
@@ -86,8 +122,8 @@ def extract_extended_quantitative_metrics(db, project_id: int, project=None, com
                     "status": top_r.status or "Needs Review",
                     "matched_blocks_count": top_r.matched_hashes_count or 0
                 }
-    except Exception as e:
-        print(f"[EXTENDED-METRICS] Similarity extraction error: {e}")
+    except SQLAlchemyError as e:
+        logger.warning(f"Similarity extraction error: {e}")
 
     # 3. AST Complexity & Squash commits
     ast_complexity_summary = {
@@ -116,8 +152,8 @@ def extract_extended_quantitative_metrics(db, project_id: int, project=None, com
                 "total_functions": tot_func,
                 "squash_suspected_commits": squash_count
             }
-    except Exception as e:
-        print(f"[EXTENDED-METRICS] AST complexity error: {e}")
+    except SQLAlchemyError as e:
+        logger.warning(f"AST complexity error: {e}")
 
     # 4. Pacing peak & daily velocity summary
     pacing_summary = {
@@ -155,7 +191,8 @@ def extract_extended_quantitative_metrics(db, project_id: int, project=None, com
                     "active_days_count": len(daily_counts)
                 }
     except Exception as e:
-        print(f"[EXTENDED-METRICS] Pacing summary error: {e}")
+        # Last-resort boundary to ensure pacing calculation errors do not crash the entire quantitative metrics extraction
+        logger.exception(f"Pacing summary extraction failed: {e}")
 
     return {
         "branches_summary": branches_summary,
@@ -197,7 +234,7 @@ class GetQualitativeAnalysisUseCase:
             CANCELLED_PROJECT_IDS.discard(project_id)
 
         # Mark as running
-        RUNNING_PROJECTS[project_id] = {"status": "running", "progress": 0, "message": "Starting analysis..."}
+        update_running_project(project_id, new_state={"status": "running", "progress": 0, "message": "Starting analysis..."})
 
         project = self.project_repo.get_by_id(project_id)
         if not project:
@@ -210,24 +247,23 @@ class GetQualitativeAnalysisUseCase:
         try:
             if project.course and project.course.deadline:
                 deadline = project.course.deadline
-        except Exception:
-            pass
+        except SQLAlchemyError as deadline_err:
+            logger.warning(f"Course deadline resolution failed: {deadline_err}")
 
         # Check DB cache first unless force_refresh is True
         if not force_refresh and getattr(project, 'qualitative_report', None):
             try:
                 cached_data = json.loads(project.qualitative_report)
-                RUNNING_PROJECTS[project_id] = {"status": "complete", "progress": 100, "message": "Loaded from database cache."}
+                update_running_project(project_id, new_state={"status": "complete", "progress": 100, "message": "Loaded from database cache."})
                 yield {"type": "complete", "progress": 100, "message": "Loaded cached analysis from database.", "data": cached_data}
                 return
-            except Exception as cache_err:
-                print(f"Error reading DB qualitative_report cache: {cache_err}")
+            except (json.JSONDecodeError, SQLAlchemyError) as cache_err:
+                logger.warning(f"Error reading DB qualitative_report cache: {cache_err}")
 
         if force_refresh:
-            RUNNING_PROJECTS[project_id] = {"status": "running", "progress": 2, "message": "Re-analyzing project..."}
+            update_running_project(project_id, new_state={"status": "running", "progress": 2, "message": "Re-analyzing project..."})
 
-        RUNNING_PROJECTS[project_id]["message"] = "Fetching authors and commits..."
-        RUNNING_PROJECTS[project_id]["progress"] = 3
+        update_running_project(project_id, progress=3, message="Fetching authors and commits...")
         yield {"type": "progress", "progress": 3, "message": "Fetching authors and commits..."}
         authors = self.author_repo.get_by_project_id(project_id)
         commits = self.commit_repo.get_by_project_id(project_id)
@@ -265,7 +301,7 @@ class GetQualitativeAnalysisUseCase:
             canonical_aid = canonical_id_map.get(c.author_id, c.author_id)
             commits_by_author[canonical_aid].append(c)
 
-        RUNNING_PROJECTS[project_id]["message"] = f"Building {mode} sample..."
+        update_running_project(project_id, message=f"Building {mode} sample...")
         yield {"type": "progress", "progress": 5, "message": f"Building {mode} sample..."}
 
         commits_to_process = build_stratified_sample(
@@ -300,7 +336,7 @@ class GetQualitativeAnalysisUseCase:
         for idx, c in enumerate(commits_to_process):
             if project_id in CANCELLED_PROJECT_IDS:
                 CANCELLED_PROJECT_IDS.discard(project_id)
-                RUNNING_PROJECTS[project_id] = {"status": "cancelled", "progress": 0, "message": "Analysis cancelled by user."}
+                update_running_project(project_id, new_state={"status": "cancelled", "progress": 0, "message": "Analysis cancelled by user."})
                 yield {"type": "cancelled", "message": "Analysis cancelled by user."}
                 return
 
@@ -308,8 +344,7 @@ class GetQualitativeAnalysisUseCase:
             msg_snippet = c.message[:35].replace('\n', ' ') + ("..." if len(c.message) > 35 else "")
             canonical_aid = canonical_id_map.get(c.author_id, c.author_id)
             author_name = author_map[canonical_aid].name if canonical_aid in author_map else "Unknown"
-            RUNNING_PROJECTS[project_id]["progress"] = pct
-            RUNNING_PROJECTS[project_id]["message"] = f"[{idx+1}/{total_process}] Labeling commit by {author_name}"
+            update_running_project(project_id, progress=pct, message=f"[{idx+1}/{total_process}] Labeling commit by {author_name}")
 
             combined_diff = ""
             if hasattr(c, 'file_changes') and c.file_changes:
@@ -331,8 +366,8 @@ class GetQualitativeAnalysisUseCase:
                     elif delta <= 48:
                         timing_flag = "before_deadline_close"
                         hours_before_deadline = round(delta, 1)
-                except Exception:
-                    pass
+                except (TypeError, ValueError) as timing_err:
+                    logger.warning(f"Timing calculation failed for commit {c.hash}: {timing_err}")
 
             # Check cache first
             cache_key = c.hash
@@ -346,18 +381,18 @@ class GetQualitativeAnalysisUseCase:
                     commit_msg_to_analyze = " ".join(words[:250])
 
                 try:
-                    with concurrent.futures.ThreadPoolExecutor() as executor:
-                        future = executor.submit(
-                            self.local_ai.classify_commit,
-                            commit_message=commit_msg_to_analyze,
-                            code_diff=combined_diff or "No diff body available.",
-                            lines_added=getattr(c, 'insertions', 0) or 0,
-                            lines_removed=getattr(c, 'deletions', 0) or 0,
-                            timing_flag=timing_flag,
-                            hours_before_deadline=hours_before_deadline,
-                        )
-                        labels = future.result(timeout=15.0)
-                except Exception:
+                    future = _LOCAL_AI_EXECUTOR.submit(
+                        self.local_ai.classify_commit,
+                        commit_message=commit_msg_to_analyze,
+                        code_diff=combined_diff or "No diff body available.",
+                        lines_added=getattr(c, 'insertions', 0) or 0,
+                        lines_removed=getattr(c, 'deletions', 0) or 0,
+                        timing_flag=timing_flag,
+                        hours_before_deadline=hours_before_deadline,
+                    )
+                    labels = future.result(timeout=15.0)
+                except concurrent.futures.TimeoutError as te:
+                    logger.warning(f"Local AI classification timed out for commit {c.hash}: {te}")
                     labels = {
                         "type": "other",
                         "substance": "moderate",
@@ -372,6 +407,26 @@ class GetQualitativeAnalysisUseCase:
                         "code_smells": [],
                         "architecture_issues": [],
                         "notes": "Timeout fallback",
+                        "analysis_available": False,
+                    }
+                except Exception as ai_err:
+                    # Last-resort boundary for unexpected thread/execution failures during commit classification
+                    logger.exception(f"Local AI classification failed for commit {c.hash}: {ai_err}")
+                    labels = {
+                        "type": "other",
+                        "substance": "moderate",
+                        "message_quality": "descriptive",
+                        "consistent": True,
+                        "message_diff_consistency": "consistent",
+                        "consistency_note": "Analysis failure fallback",
+                        "timing_flag": timing_flag,
+                        "hours_before_deadline": hours_before_deadline,
+                        "has_security_risk": False,
+                        "security_risk_type": "none",
+                        "code_smells": [],
+                        "architecture_issues": [],
+                        "notes": "Failure fallback",
+                        "analysis_available": False,
                     }
                 CLASSIFICATION_CACHE[cache_key] = labels
                 # Bounded cache eviction (cap at 10,000 to prevent memory leaks)
@@ -421,15 +476,12 @@ class GetQualitativeAnalysisUseCase:
                     f"Parse failure rate: {parse_fail_rate:.1%}, Fallback rate: {fallback_rate:.1%}. "
                     f"This exceeds the allowed 15% threshold. Please check if your local LLM is running correctly."
                 )
-                RUNNING_PROJECTS[project_id] = {"status": "failed", "progress": 0, "message": err_msg}
+                update_running_project(project_id, new_state={"status": "failed", "progress": 0, "message": err_msg})
                 raise ValueError(err_msg)
-
-        RUNNING_PROJECTS[project_id]["progress"] = 92
-        RUNNING_PROJECTS[project_id]["message"] = "Aggregating qualitative data..."
-        yield {"type": "progress", "progress": 92, "message": "Aggregating qualitative data..."}
 
         # ── Per-Contributor Aggregation ───────────────────────────────────────
         contributors_data = {}
+        ai_degraded = False
 
         proj_type_dist = defaultdict(int)
         proj_substance_dist = {"trivial": 0, "moderate": 0, "substantial": 0}
@@ -439,6 +491,7 @@ class GetQualitativeAnalysisUseCase:
         proj_code_smells_dist = defaultdict(int)
         proj_architecture_dist = defaultdict(int)
         proj_total_sampled = 0
+        proj_total_sampled_ai = 0
         proj_late_commits = 0
 
         # Pacing: count substantial commits in the final 3 days before deadline
@@ -482,6 +535,7 @@ class GetQualitativeAnalysisUseCase:
             author_architecture_dist = defaultdict(int)
             late_commits_count = 0
             deadline_close_count = 0
+            total_sampled_ai = 0
 
             substantial_examples = []
             trivial_examples = []
@@ -489,6 +543,12 @@ class GetQualitativeAnalysisUseCase:
 
             for pc in author_processed:
                 lbls = pc["labels"]
+                if lbls.get("analysis_available", True) == False:
+                    ai_degraded = True
+                    continue
+
+                total_sampled_ai += 1
+                proj_total_sampled_ai += 1
 
                 c_type = lbls.get("type", "other")
                 type_dist[c_type] += 1
@@ -514,8 +574,8 @@ class GetQualitativeAnalysisUseCase:
                         ts_dt = __import__("datetime").datetime.fromisoformat(ts) if isinstance(ts, str) else ts
                         if ts_dt and (deadline - ts_dt).total_seconds() <= 3 * 86400:
                             proj_final_3d_substantial += 1
-                    except Exception:
-                        pass
+                    except Exception as pacing_err:
+                        logger.warning(f"Pacing timestamp parsing failed: {pacing_err}")
 
                 example_obj = {"hash": pc["hash"], "message": pc["message"], "type": c_type}
                 if sub == "substantial" and len(substantial_examples) < 3:
@@ -576,8 +636,8 @@ class GetQualitativeAnalysisUseCase:
 
             # Calculate individual quality risk
             quality_risk = 0
-            if total_sampled > 0:
-                vague_pct = (vague_count / total_sampled) * 100
+            if total_sampled_ai > 0:
+                vague_pct = (vague_count / total_sampled_ai) * 100
                 if vague_pct > 50:
                     quality_risk += 3
                 elif vague_pct > 30:
@@ -585,7 +645,7 @@ class GetQualitativeAnalysisUseCase:
                 elif vague_pct > 10:
                     quality_risk += 1
 
-                mismatch_pct = (mismatch_count / total_sampled) * 100
+                mismatch_pct = (mismatch_count / total_sampled_ai) * 100
                 if mismatch_pct > 30:
                     quality_risk += 4
                 elif mismatch_pct > 15:
@@ -623,15 +683,15 @@ class GetQualitativeAnalysisUseCase:
                     "lines_changed": author_loc,
                     "type_distribution": dict(type_dist),
                     "substance_distribution": substance_dist,
-                    "vague_message_percentage": round((vague_count / total_sampled) * 100, 1) if total_sampled else 0,
-                    "message_mismatch_percentage": round((mismatch_count / total_sampled) * 100, 1) if total_sampled else 0,
+                    "vague_message_percentage": round((vague_count / total_sampled_ai) * 100, 1) if total_sampled_ai else 0,
+                    "message_mismatch_percentage": round((mismatch_count / total_sampled_ai) * 100, 1) if total_sampled_ai else 0,
                     "security_risk_commits": sec_risk_count,
                     "code_smell_distribution": dict(author_code_smells_dist),
                     "architecture_issue_distribution": dict(author_architecture_dist),
                     "late_commits": late_commits_count if deadline else None,
                     "commits_near_deadline": deadline_close_count if deadline else None,
                     "timing_pattern": timing_pattern if deadline else "Not Tracked (No deadline configured)",
-                    "ai_risk_score": final_individual_risk,
+                    "ai_risk_score": final_individual_risk if total_sampled_ai > 0 else 0,
                     "free_rider_suspected": is_free_rider_suspected,
                     "detected_red_flags": red_flags_list if red_flags_list else ["None"]
                 },
@@ -666,14 +726,19 @@ class GetQualitativeAnalysisUseCase:
             for add_item in added_snippets:
                 if del_item["author"] != add_item["author"]:
                     try:
-                        with concurrent.futures.ThreadPoolExecutor() as executor:
-                            future = executor.submit(self.local_ai.compare_snippets, del_item["code"], add_item["code"])
-                            res = future.result(timeout=2.5)
-                    except Exception:
-                        res = {"is_duplicate_or_revert": False, "similarity_type": "independent_work"}
+                        future = _LOCAL_AI_EXECUTOR.submit(self.local_ai.compare_snippets, del_item["code"], add_item["code"])
+                        res = future.result(timeout=2.5)
+                    except concurrent.futures.TimeoutError as te:
+                        logger.warning(f"Timeout comparing snippets for {del_item['hash']} and {add_item['hash']}: {te}")
+                        res = {"is_duplicate_or_revert": False, "similarity_type": "independent_work", "analysis_available": False}
+                    except Exception as e:
+                        logger.warning(f"Error comparing snippets for {del_item['hash']} and {add_item['hash']}: {e}")
+                        res = {"is_duplicate_or_revert": False, "similarity_type": "independent_work", "analysis_available": False}
 
                     compare_count += 1
-                    if res.get("is_duplicate_or_revert"):
+                    if res.get("analysis_available", True) == False:
+                        ai_degraded = True
+                    elif res.get("is_duplicate_or_revert"):
                         resurrection_flags.append({
                             "original_author": del_item["author"],
                             "restored_author": add_item["author"],
@@ -694,11 +759,18 @@ class GetQualitativeAnalysisUseCase:
         for author_id, author_processed in processed_commits.items():
             for pc in author_processed[:1]:
                 try:
-                    with concurrent.futures.ThreadPoolExecutor() as executor:
-                        future = executor.submit(self.local_ai.evaluate_review_comment, pc["message"])
-                        eval_res = future.result(timeout=2.5)
-                except Exception:
-                    eval_res = {"substance": "constructive_review", "quality_score": 7}
+                    future = _LOCAL_AI_EXECUTOR.submit(self.local_ai.evaluate_review_comment, pc["message"])
+                    eval_res = future.result(timeout=2.5)
+                except concurrent.futures.TimeoutError as te:
+                    logger.warning(f"Timeout evaluating review comment for commit {pc['hash']}: {te}")
+                    eval_res = {"substance": "minor_feedback", "quality_score": 5, "analysis_available": False}
+                except Exception as e:
+                    logger.warning(f"Error evaluating review comment for commit {pc['hash']}: {e}")
+                    eval_res = {"substance": "minor_feedback", "quality_score": 5, "analysis_available": False}
+
+                if eval_res.get("analysis_available", True) == False:
+                    ai_degraded = True
+                    continue
 
                 total_review_score += eval_res.get("quality_score", 5)
                 review_count += 1
@@ -760,7 +832,7 @@ class GetQualitativeAnalysisUseCase:
             if hasattr(self.project_repo, 'get_language_distribution'):
                 lang_dist = self.project_repo.get_language_distribution(project_id) or {}
         except Exception as lang_err:
-            print(f"Error fetching language distribution: {lang_err}")
+            logger.warning(f"Error fetching language distribution: {lang_err}")
 
         # Folder Structure & README Quality Inspection
         folder_structure = {
@@ -831,8 +903,8 @@ class GetQualitativeAnalysisUseCase:
                                 has_setup = True
                             if any(k in content for k in ['architecture', 'design', 'structure', 'api', 'component', 'overview']):
                                 has_arch = True
-                    except Exception:
-                        pass
+                    except Exception as readme_err:
+                        logger.warning(f"Failed to read README file at '{readme_file}': {readme_err}")
 
                     if size_kb > 2.0 and has_setup and has_arch:
                         doc_score = "Comprehensive (9/10)"
@@ -851,7 +923,7 @@ class GetQualitativeAnalysisUseCase:
                 else:
                     readme_quality["documentation_score"] = "Missing (0/10)"
             except Exception as repo_err:
-                print(f"Error inspecting repo folder structure / README: {repo_err}")
+                logger.warning(f"Error inspecting repo folder structure / README: {repo_err}")
 
         # ── Extract Extended Quantitative Metrics (Branches, Plagiarism, AST, Peak Timeline) ──
         ext_metrics = {}
@@ -864,7 +936,8 @@ class GetQualitativeAnalysisUseCase:
                 commits=commits
             )
         except Exception as ext_err:
-            print(f"[QUAL-ANALYSIS] Error generating extended metrics: {ext_err}")
+            # Last-resort boundary to prevent failure in extended metrics from halting the main qualitative analysis
+            logger.exception(f"Error generating extended metrics: {ext_err}")
 
         project_summary = {
             **sampling_stats,
@@ -877,8 +950,8 @@ class GetQualitativeAnalysisUseCase:
             "readme_quality": readme_quality,
             "type_distribution": dict(proj_type_dist),
             "substance_distribution": proj_substance_dist,
-            "vague_message_percentage": round((proj_vague_count / proj_total_sampled) * 100, 1) if proj_total_sampled else 0,
-            "message_mismatch_percentage": round((proj_mismatch_count / proj_total_sampled) * 100, 1) if proj_total_sampled else 0,
+            "vague_message_percentage": round((proj_vague_count / proj_total_sampled_ai) * 100, 1) if proj_total_sampled_ai else 0,
+            "message_mismatch_percentage": round((proj_mismatch_count / proj_total_sampled_ai) * 100, 1) if proj_total_sampled_ai else 0,
             "security_risk_commits": proj_security_risk_count,
             "code_smell_distribution": dict(proj_code_smells_dist),
             "architecture_issue_distribution": dict(proj_architecture_dist),
@@ -893,11 +966,11 @@ class GetQualitativeAnalysisUseCase:
         # Data Quality Assessment object
         classification_reliability = "high"
         for sub_cat, count in proj_substance_dist.items():
-            if proj_total_sampled > 0 and (count / proj_total_sampled) > 0.90:
+            if proj_total_sampled_ai > 0 and (count / proj_total_sampled_ai) > 0.90:
                 classification_reliability = "low"
                 break
         for t_cat, count in proj_type_dist.items():
-            if proj_total_sampled > 0 and (count / proj_total_sampled) > 0.90:
+            if proj_total_sampled_ai > 0 and (count / proj_total_sampled_ai) > 0.90:
                 classification_reliability = "low"
                 break
 
@@ -906,7 +979,8 @@ class GetQualitativeAnalysisUseCase:
             "fallback_rate_type": round(total_fallbacks / max(1, total_process), 3) if total_process > 0 else 0.0,
             "fallback_rate_substance": round(total_fallbacks / max(1, total_process), 3) if total_process > 0 else 0.0,
             "parse_failure_rate": round(total_parse_failures / max(1, total_process), 3) if total_process > 0 else 0.0,
-            "missing_fields": []
+            "missing_fields": [],
+            "partial_analysis_degraded": ai_degraded
         }
         if not deadline:
             data_quality["missing_fields"].append("deadline_compliance")
@@ -918,15 +992,16 @@ class GetQualitativeAnalysisUseCase:
             "project_name": project.name,
             "project_summary": project_summary,
             "contributors": contributors_data,
-            "data_quality": data_quality
+            "data_quality": data_quality,
+            "partial_analysis_degraded": ai_degraded
         }
 
         # Persist finalized report JSON into ProjectModel database column
         try:
             if hasattr(self.project_repo, 'save_qualitative_report'):
                 self.project_repo.save_qualitative_report(project_id, json.dumps(final_payload))
-        except Exception as db_save_err:
-            print(f"Failed to persist qualitative_report to DB: {db_save_err}")
+        except SQLAlchemyError as db_save_err:
+            logger.warning(f"Failed to persist qualitative_report to DB: {db_save_err}")
 
         RUNNING_PROJECTS[project_id] = {"status": "complete", "progress": 100, "message": "Analysis Complete!"}
         yield {"type": "complete", "progress": 100, "message": "Analysis Complete!", "data": final_payload}

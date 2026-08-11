@@ -10,6 +10,7 @@ from datetime import datetime
 import json
 import logging
 from typing import Dict, List, Optional, Tuple
+from collections import defaultdict
 
 from sqlalchemy.orm import Session
 from src.infrastructure.database.models import (
@@ -17,6 +18,7 @@ from src.infrastructure.database.models import (
     ProjectFingerprintModel,
     ProjectModel,
     SimilarityReportModel,
+    ComparisonCoverageModel,
 )
 from src.infrastructure.services.winnowing_engine import (
     AstParserService,
@@ -212,8 +214,6 @@ def detect_similarity_clusters(
     Pass 2: For any cluster with 3+ projects, triggers reanalyze_cluster_pairs
     to resolve unflagged intra-cluster pairs without corpus stopword self-suppression.
     """
-    from collections import defaultdict
-
     all_pids = set()
     for r in reports:
         all_pids.add(r["project_a_id"])
@@ -304,7 +304,6 @@ def sync_project_comparison_coverage(db: Session, course_id: int):
     Ensures complete pairwise comparison coverage for all projects in a course.
     Updates the comparison_coverage table to reflect required vs completed comparisons.
     """
-    from src.infrastructure.database.models import ComparisonCoverageModel
     projects = db.query(ProjectModel).filter(ProjectModel.course_id == course_id).all()
     total_projects = len(projects)
     required_per_proj = max(0, total_projects - 1)
@@ -338,7 +337,6 @@ def sync_project_comparison_coverage(db: Session, course_id: int):
 
 def get_course_comparison_coverage(db: Session, course_id: int) -> Dict:
     """Retrieves pairwise comparison coverage metrics for administrative visibility."""
-    from src.infrastructure.database.models import ComparisonCoverageModel
     sync_project_comparison_coverage(db, course_id)
 
     projects = db.query(ProjectModel).filter(ProjectModel.course_id == course_id).all()

@@ -1,8 +1,9 @@
 import os
 import shutil
+import logging
 from collections import Counter
 from datetime import datetime
-from typing import List, Optional
+from typing import List, Optional, Tuple, Set
 from sqlalchemy.orm import Session, selectinload, joinedload, defer
 from src.domain.entities import ProjectEntity, AuthorEntity, CommitEntity, FileChangeEntity, BranchEntity, CourseEntity
 from src.use_cases.interfaces import IProjectRepository, IAuthorRepository, ICommitRepository, IDatabaseService, ICourseRepository
@@ -10,7 +11,31 @@ from src.infrastructure.database.models import (
     ProjectModel, AuthorModel, CommitModel, FileChangeModel, BranchModel, CourseModel, Base,
     ProjectFingerprintModel, SimilarityReportModel, ComparisonCoverageModel
 )
-from src.infrastructure.database.session import engine
+from src.infrastructure.database.session import engine, SessionLocal
+from src.domain.constants import (
+    DEFAULT_GROUP, DEFAULT_SAMPLING_MODE, EXTENSION_TO_LANGUAGE,
+    SAVED_REPOS_PATH_TEMPLATE, TEMP_REPOS_PATH_TEMPLATE
+)
+
+logger = logging.getLogger(__name__)
+
+def _resolve_canonical_author(db: Session, author_model: AuthorModel) -> Tuple[AuthorModel, List[int]]:
+    """
+    Resolves an author to their root canonical parent, returning the root parent
+    and a list of all IDs including the root and all its aliases.
+    """
+    root = author_model
+    visited = {author_model.id}
+    while root.canonical_author_id is not None and root.canonical_author_id not in visited:
+        visited.add(root.canonical_author_id)
+        parent = db.query(AuthorModel).filter(AuthorModel.id == root.canonical_author_id).first()
+        if not parent:
+            break
+        root = parent
+    
+    alias_ids = [alias.id for alias in root.aliases]
+    author_ids = [root.id] + alias_ids
+    return root, author_ids
 
 class ProjectRepository(IProjectRepository):
     def __init__(self, db: Session):
@@ -23,39 +48,12 @@ class ProjectRepository(IProjectRepository):
             .filter(CommitModel.project_id == project_id)
             .all()
         )
-        extension_map = {
-            '.py': 'Python',
-            '.js': 'JavaScript',
-            '.jsx': 'JavaScript',
-            '.ts': 'TypeScript',
-            '.tsx': 'TypeScript',
-            '.java': 'Java',
-            '.cpp': 'C++',
-            '.cc': 'C++',
-            '.cxx': 'C++',
-            '.c': 'C',
-            '.h': 'C/C++',
-            '.cs': 'C#',
-            '.go': 'Go',
-            '.rs': 'Rust',
-            '.rb': 'Ruby',
-            '.php': 'PHP',
-            '.swift': 'Swift',
-            '.kt': 'Kotlin',
-            '.kts': 'Kotlin',
-            '.dart': 'Dart',
-            '.html': 'HTML',
-            '.css': 'CSS',
-            '.scss': 'CSS',
-            '.sql': 'SQL',
-            '.sh': 'Shell'
-        }
         counter = Counter()
         for row in results:
             filename = row[0]
             ext = os.path.splitext(filename)[1].lower()
-            if ext in extension_map:
-                counter[extension_map[ext]] += 1
+            if ext in EXTENSION_TO_LANGUAGE:
+                counter[EXTENSION_TO_LANGUAGE[ext]] += 1
                 
         if not counter:
             project = self.db.query(ProjectModel).filter(ProjectModel.id == project_id).first()
@@ -78,38 +76,11 @@ class ProjectRepository(IProjectRepository):
             .filter(CommitModel.project_id == project_id)
             .all()
         )
-        extension_map = {
-            '.py': 'Python',
-            '.js': 'JavaScript',
-            '.jsx': 'JavaScript',
-            '.ts': 'TypeScript',
-            '.tsx': 'TypeScript',
-            '.java': 'Java',
-            '.cpp': 'C++',
-            '.cc': 'C++',
-            '.cxx': 'C++',
-            '.c': 'C',
-            '.h': 'C/C++',
-            '.cs': 'C#',
-            '.go': 'Go',
-            '.rs': 'Rust',
-            '.rb': 'Ruby',
-            '.php': 'PHP',
-            '.swift': 'Swift',
-            '.kt': 'Kotlin',
-            '.kts': 'Kotlin',
-            '.dart': 'Dart',
-            '.html': 'HTML',
-            '.css': 'CSS',
-            '.scss': 'CSS',
-            '.sql': 'SQL',
-            '.sh': 'Shell'
-        }
         counter = Counter()
         for filename, lines_added in results:
             ext = os.path.splitext(filename)[1].lower()
             if ext in extension_map:
-                counter[extension_map[ext]] += lines_added
+                counter[EXTENSION_TO_LANGUAGE[ext]] += lines_added
                 
         if not counter:
             techs = self._detect_tech_stack(project_id)
@@ -142,18 +113,18 @@ class ProjectRepository(IProjectRepository):
             description=project_model.description,
             git_url=project_model.git_url,
             local_saved_path=project_model.local_saved_path,
-            group_no=project_model.group_no or "G-00",
+            group_no=project_model.group_no or DEFAULT_GROUP,
             store_local_copy=project_model.store_local_copy or False,
             is_local_copy_stored=project_model.is_local_copy_stored or False,
             created_at=project_model.created_at,
             course_id=project_model.course_id,
-            sampling_mode=project_model.sampling_mode or "sample",
+            sampling_mode=project_model.sampling_mode or DEFAULT_SAMPLING_MODE,
             tech_stack=self._detect_tech_stack(project_model.id)
         )
 
     def create(self, name: str, description: Optional[str], git_url: str, course_id: int, group_no: str, store_local_copy: bool = True) -> ProjectEntity:
         course = self.db.query(CourseModel).filter(CourseModel.id == course_id).first()
-        def_mode = course.default_sampling_mode if (course and course.default_sampling_mode) else "sample"
+        def_mode = course.default_sampling_mode if (course and course.default_sampling_mode) else DEFAULT_SAMPLING_MODE
         # Initial saved path is empty, updated via update_local_path once ID is flushed/committed
         project_model = ProjectModel(
             name=name,
@@ -175,7 +146,7 @@ class ProjectRepository(IProjectRepository):
             description=project_model.description,
             git_url=project_model.git_url,
             local_saved_path=project_model.local_saved_path,
-            group_no=project_model.group_no or "G-00",
+            group_no=project_model.group_no or DEFAULT_GROUP,
             store_local_copy=project_model.store_local_copy,
             is_local_copy_stored=project_model.is_local_copy_stored,
             created_at=project_model.created_at,
@@ -211,9 +182,23 @@ class ProjectRepository(IProjectRepository):
         local_path = project_model.local_saved_path
         if local_path and os.path.exists(local_path):
             try:
-                shutil.rmtree(local_path, ignore_errors=True)
+                shutil.rmtree(local_path)
             except Exception as e:
-                pass
+                logger.warning(f"Failed to delete local clone directory at '{local_path}': {e}")
+
+        fallback_path = SAVED_REPOS_PATH_TEMPLATE.format(project_id)
+        if os.path.exists(fallback_path):
+            try:
+                shutil.rmtree(fallback_path)
+            except Exception as e:
+                logger.warning(f"Failed to delete fallback directory at '{fallback_path}': {e}")
+
+        temp_path = TEMP_REPOS_PATH_TEMPLATE.format(project_id)
+        if os.path.exists(temp_path):
+            try:
+                shutil.rmtree(temp_path)
+            except Exception as e:
+                logger.warning(f"Failed to delete temp directory at '{temp_path}': {e}")
 
         # 2. Delete all related DB records explicitly
         self.db.query(ProjectFingerprintModel).filter(ProjectFingerprintModel.project_id == project_id).delete(synchronize_session=False)
@@ -242,7 +227,7 @@ class ProjectRepository(IProjectRepository):
                 name=m.name,
                 git_url=m.git_url,
                 local_saved_path=m.local_saved_path,
-                group_no=m.group_no or "G-00",
+                group_no=m.group_no or DEFAULT_GROUP,
                 store_local_copy=m.store_local_copy or False,
                 is_local_copy_stored=m.is_local_copy_stored or False,
                 description=m.description,
@@ -267,7 +252,7 @@ class ProjectRepository(IProjectRepository):
                 name=m.name,
                 git_url=m.git_url,
                 local_saved_path=m.local_saved_path,
-                group_no=m.group_no or "G-00",
+                group_no=m.group_no or DEFAULT_GROUP,
                 store_local_copy=m.store_local_copy or False,
                 is_local_copy_stored=m.is_local_copy_stored or False,
                 description=m.description,
@@ -289,26 +274,6 @@ class ProjectRepository(IProjectRepository):
             )
             for m in branch_models
         ]
-
-    def delete(self, project_id: int) -> bool:
-        project_model = self.db.query(ProjectModel).filter(ProjectModel.id == project_id).first()
-        if not project_model:
-            return False
-
-        # Delete local clone repository directory from disk
-        if project_model.local_saved_path and os.path.exists(project_model.local_saved_path):
-            shutil.rmtree(project_model.local_saved_path, ignore_errors=True)
-
-        fallback_path = f"./saved_repos/project_{project_id}"
-        if os.path.exists(fallback_path):
-            shutil.rmtree(fallback_path, ignore_errors=True)
-        temp_path = f"./temp_repos/project_{project_id}"
-        if os.path.exists(temp_path):
-            shutil.rmtree(temp_path, ignore_errors=True)
-
-        self.db.delete(project_model)
-        self.db.commit()
-        return True
 
 
 class AuthorRepository(IAuthorRepository):
@@ -333,22 +298,9 @@ class AuthorRepository(IAuthorRepository):
             return None
 
         # 2. If this author is an alias, recursively redirect to their root canonical parent
-        if author_model.canonical_author_id is not None:
-            root_id = author_model.canonical_author_id
-            # Resolve root to prevent infinite loop just in case
-            visited = {author_id}
-            while root_id is not None and root_id not in visited:
-                visited.add(root_id)
-                parent = self.db.query(AuthorModel).filter(AuthorModel.id == root_id).first()
-                if not parent:
-                    break
-                if parent.canonical_author_id is None:
-                    return self.get_full_profile(parent.id, project_id=project_id)
-                root_id = parent.canonical_author_id
-
-        # 3. Retrieve all alias IDs pointing to this canonical author
-        alias_ids = [alias.id for alias in author_model.aliases]
-        author_ids = [author_id] + alias_ids
+        root, author_ids = _resolve_canonical_author(self.db, author_model)
+        if root.id != author_id:
+            return self.get_full_profile(root.id, project_id=project_id)
 
         # 4. Build the commits query, filtering by project_id and combining all alias commits
         commits_query = (
@@ -430,14 +382,7 @@ class AuthorRepository(IAuthorRepository):
         # Map aliases to their canonical root authors
         resolved_authors = {}
         for m in author_models:
-            root = m
-            visited = {m.id}
-            while root.canonical_author_id is not None and root.canonical_author_id not in visited:
-                visited.add(root.canonical_author_id)
-                parent = self.db.query(AuthorModel).filter(AuthorModel.id == root.canonical_author_id).first()
-                if not parent:
-                    break
-                root = parent
+            root, _ = _resolve_canonical_author(self.db, m)
             resolved_authors[root.id] = root
 
         return [
@@ -467,14 +412,7 @@ class AuthorRepository(IAuthorRepository):
         # Map aliases to their canonical root authors
         resolved_authors = {}
         for m in author_models:
-            root = m
-            visited = {m.id}
-            while root.canonical_author_id is not None and root.canonical_author_id not in visited:
-                visited.add(root.canonical_author_id)
-                parent = self.db.query(AuthorModel).filter(AuthorModel.id == root.canonical_author_id).first()
-                if not parent:
-                    break
-                root = parent
+            root, _ = _resolve_canonical_author(self.db, m)
             resolved_authors[root.id] = root
 
         return [
@@ -515,17 +453,7 @@ class CommitRepository(ICommitRepository):
         # Find root and all aliases of the author to include their commits
         author = self.db.query(AuthorModel).filter(AuthorModel.id == author_id).first()
         if author:
-            root = author
-            visited = {author.id}
-            while root.canonical_author_id is not None and root.canonical_author_id not in visited:
-                visited.add(root.canonical_author_id)
-                parent = self.db.query(AuthorModel).filter(AuthorModel.id == root.canonical_author_id).first()
-                if not parent:
-                    break
-                root = parent
-            
-            alias_ids = [alias.id for alias in root.aliases]
-            author_ids = [root.id] + alias_ids
+            root, author_ids = _resolve_canonical_author(self.db, author)
             query = self.db.query(CommitModel).filter(CommitModel.author_id.in_(author_ids))
         else:
             query = self.db.query(CommitModel).filter(CommitModel.author_id == author_id)
@@ -601,17 +529,7 @@ class CommitRepository(ICommitRepository):
             # Find root and all aliases of the author to include their commits
             author = self.db.query(AuthorModel).filter(AuthorModel.id == author_id).first()
             if author:
-                root = author
-                visited = {author.id}
-                while root.canonical_author_id is not None and root.canonical_author_id not in visited:
-                    visited.add(root.canonical_author_id)
-                    parent = self.db.query(AuthorModel).filter(AuthorModel.id == root.canonical_author_id).first()
-                    if not parent:
-                        break
-                    root = parent
-                
-                alias_ids = [alias.id for alias in root.aliases]
-                author_ids = [root.id] + alias_ids
+                root, author_ids = _resolve_canonical_author(self.db, author)
                 query = query.filter(CommitModel.author_id.in_(author_ids))
             else:
                 query = query.filter(CommitModel.author_id == author_id)
@@ -645,7 +563,7 @@ class DatabaseService(IDatabaseService):
         self.db = db
 
     def reset_course(self, course_id: int, user_id: int) -> None:
-        from src.infrastructure.database.session import SessionLocal
+
 
         session = self.db or SessionLocal()
         try:
@@ -661,10 +579,10 @@ class DatabaseService(IDatabaseService):
                 if project.local_saved_path and os.path.exists(project.local_saved_path):
                     shutil.rmtree(project.local_saved_path, ignore_errors=True)
 
-                fallback_path = f"./saved_repos/project_{project.id}"
+                fallback_path = SAVED_REPOS_PATH_TEMPLATE.format(project.id)
                 if os.path.exists(fallback_path):
                     shutil.rmtree(fallback_path, ignore_errors=True)
-                temp_path = f"./temp_repos/project_{project.id}"
+                temp_path = TEMP_REPOS_PATH_TEMPLATE.format(project.id)
                 if os.path.exists(temp_path):
                     shutil.rmtree(temp_path, ignore_errors=True)
 
@@ -689,7 +607,7 @@ class CourseRepository(ICourseRepository):
             description=m.description,
             tech_requirements=m.tech_requirements,
             deadline=m.deadline,
-            default_sampling_mode=m.default_sampling_mode or "sample",
+            default_sampling_mode=m.default_sampling_mode or DEFAULT_SAMPLING_MODE,
             created_at=m.created_at,
             user_id=m.user_id
         )
@@ -701,7 +619,7 @@ class CourseRepository(ICourseRepository):
         user_id: int,
         tech_requirements: Optional[str] = None,
         deadline: Optional[datetime] = None,
-        default_sampling_mode: Optional[str] = "sample",
+        default_sampling_mode: Optional[str] = DEFAULT_SAMPLING_MODE,
     ) -> CourseEntity:
         course_model = CourseModel(
             name=name,
@@ -709,7 +627,7 @@ class CourseRepository(ICourseRepository):
             user_id=user_id,
             tech_requirements=tech_requirements,
             deadline=deadline,
-            default_sampling_mode=default_sampling_mode or "sample",
+            default_sampling_mode=default_sampling_mode or DEFAULT_SAMPLING_MODE,
         )
         self.db.add(course_model)
         self.db.commit()
@@ -769,11 +687,11 @@ class CourseRepository(ICourseRepository):
                 name=m.name,
                 git_url=m.git_url,
                 local_saved_path=m.local_saved_path,
-                group_no=m.group_no or "G-00",
+                group_no=m.group_no or DEFAULT_GROUP,
                 description=m.description,
                 created_at=m.created_at,
                 course_id=m.course_id,
-                sampling_mode=m.sampling_mode or "sample",
+                sampling_mode=m.sampling_mode or DEFAULT_SAMPLING_MODE,
                 tech_stack=project_repo._detect_tech_stack(m.id)
             )
             for m in project_models

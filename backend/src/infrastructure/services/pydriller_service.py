@@ -3,6 +3,9 @@ import shutil
 import re
 import time
 import stat
+import subprocess
+import json
+import logging
 from datetime import timezone
 from sqlalchemy.orm import Session
 from pydriller import Repository
@@ -11,6 +14,8 @@ from src.domain.entities import ProjectEntity
 from src.use_cases.interfaces import IGitExtractorService
 from src.infrastructure.database.models import ProjectModel, AuthorModel, CommitModel, FileChangeModel, BranchModel
 from src.infrastructure.services.ast_parser import parse_source, get_language_for_file
+
+logger = logging.getLogger(__name__)
 
 
 def clean_branch_short_name(full_name: str) -> str:
@@ -64,8 +69,8 @@ def parse_mailmap(file_path: str) -> dict:
                     if name_match:
                         proper_name = name_match.group(1).strip()
                     mapping[commit_email] = {"email": proper_email, "name": proper_name}
-    except Exception as e:
-        print(f"[WARN] Error parsing .mailmap: {e}")
+    except OSError as e:
+        logger.warning(f"Error parsing .mailmap: {e}", exc_info=e)
     return mapping
 
 
@@ -309,8 +314,6 @@ class PyDrillerService(IGitExtractorService):
                     # 6. Extract Git Blame (if file exists and is not deleted)
                     if mod.change_type.name != "DELETE" and mod.new_path:
                         try:
-                            import subprocess
-                            import json
                             blame_res = subprocess.run(
                                 ['git', '-C', target_dir, 'blame', '-e', commit.hash, '--', mod.new_path],
                                 stdout=subprocess.PIPE,
@@ -349,8 +352,11 @@ class PyDrillerService(IGitExtractorService):
             self.db.commit()
 
         except Exception as e:
+            logger.exception("Error during project extraction, rolling back transaction")
             self.db.rollback()
             raise
+
+
 
         finally:
             # Delete directory ONLY if store_local_copy is False

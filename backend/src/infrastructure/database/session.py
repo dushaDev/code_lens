@@ -1,9 +1,12 @@
 import os
+import logging
 from dotenv import load_dotenv
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.orm import sessionmaker
 
 from src.infrastructure.database.models import Base
+
+logger = logging.getLogger(__name__)
 
 load_dotenv()
 
@@ -56,7 +59,7 @@ def init_db():
                 with engine.begin() as conn:
                     conn.execute(text("ALTER TABLE similarity_reports ADD COLUMN status VARCHAR DEFAULT 'Needs Review';"))
     except Exception as e:
-        print(f"Database migration check failed/skipped: {e}")
+        logger.exception("Database migration check failed/skipped")
 
 def get_db():
     db = SessionLocal()

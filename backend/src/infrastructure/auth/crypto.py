@@ -1,5 +1,6 @@
 import os
 import base64
+import logging
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -7,6 +8,9 @@ load_dotenv()
 from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+from src.domain.constants import PBKDF2_ITERATIONS
+
+logger = logging.getLogger(__name__)
 
 # NOTE: Decoupled encryption secret. Rotating SECRET_KEY for JWT signing MUST NOT alter
 # ENCRYPTION_KEY, as doing so would render existing encrypted stored API keys unreadable.
@@ -20,7 +24,7 @@ kdf = PBKDF2HMAC(
     algorithm=hashes.SHA256(),
     length=32,
     salt=SALT,
-    iterations=100_000,
+    iterations=PBKDF2_ITERATIONS,
 )
 FERNET_KEY = base64.urlsafe_b64encode(kdf.derive(ENCRYPTION_KEY.encode()))
 fernet = Fernet(FERNET_KEY)
@@ -39,7 +43,8 @@ def decrypt_api_key(encrypted_key: str) -> str:
         return ""
     try:
         return fernet.decrypt(encrypted_key.encode()).decode()
-    except Exception:
+    except Exception as e:
+        logger.warning(f"Decryption failed: invalid key or payload ({e})")
         return ""
 
 
@@ -48,3 +53,4 @@ def mask_api_key(plain_key: str) -> str:
     if not plain_key or len(plain_key) < 10:
         return "••••••••"
     return f"{plain_key[:4]}...{plain_key[-4:]}"
+

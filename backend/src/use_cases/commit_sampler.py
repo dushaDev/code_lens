@@ -18,8 +18,11 @@ Always-include rules (for 'sample' mode):
 
 import math
 import random
+import logging
 from datetime import datetime, timedelta
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 
 def build_stratified_sample(
@@ -28,6 +31,7 @@ def build_stratified_sample(
     deadline: Optional[datetime] = None,
     mode: str = "sample",
     sample_pct: float = 0.20,
+
     min_per_author: int = 3,
     top_n_large_diffs: int = 10,
     short_msg_threshold: int = 15,
@@ -88,8 +92,8 @@ def build_stratified_sample(
                 if ts >= window_start or ts > deadline:
                     always_include_hashes.add(c.hash)
                     selected.append(c)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"Failed to check deadline criteria for commit {c.hash}: {e}")
 
     # Rule 3 — Top-N largest diffs globally
     def diff_size(c) -> int:
@@ -162,8 +166,8 @@ def compute_sampling_stats(
                     after_deadline += 1
                 elif ts >= window_start:
                     within_48h += 1
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"Failed to calculate stats for commit {c.hash}: {e}")
 
     date_range = ""
     if all_commits:

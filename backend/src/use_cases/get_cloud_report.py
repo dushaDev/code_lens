@@ -23,8 +23,23 @@ import os
 import json
 import io
 import base64
+import logging
+import urllib.request
+import urllib.error
+import time
 from typing import Optional
+from pydantic import ValidationError
+try:
+    from google.api_core.exceptions import GoogleAPIError
+except ImportError:
+    class GoogleAPIError(Exception):
+        pass
+
 from src.domain.metrics import calculate_gini, get_gini_status
+from src.domain.constants import GEMINI_MODEL
+
+logger = logging.getLogger(__name__)
+
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -49,8 +64,8 @@ def _build_logo_uri() -> str:
                     svg_bytes = f.read()
                 b64 = base64.b64encode(svg_bytes).decode("utf-8")
                 return f"data:image/svg+xml;base64,{b64}"
-    except Exception as e:
-        print(f"[CLOUD-REPORT-LOG] Logo read error: {e}")
+    except OSError as e:
+        logger.exception(f"Logo read error: {e}")
     return ""
 
 
@@ -179,8 +194,8 @@ def _build_charts(qual_data: Optional[dict], deadline: Optional[str] = None) -> 
                                 if timeline_dt[idx] <= dl_dt <= timeline_dt[idx+1]:
                                     ax3.axvline(x=idx + 0.5, color="#ef4444", linestyle="--", linewidth=2.2, label=f"Deadline ({dl_date_str})", zorder=5)
                                     break
-                    except Exception as dl_err:
-                        print(f"[CLOUD-REPORT-LOG] Chart C deadline line warning: {dl_err}")
+                    except (ValueError, TypeError, IndexError) as dl_err:
+                        logger.warning(f"Chart C deadline line warning: {dl_err}")
 
                 if len(dates) > 10:
                     step = max(1, len(dates) // 6)
@@ -203,11 +218,13 @@ def _build_charts(qual_data: Optional[dict], deadline: Optional[str] = None) -> 
                 buf_c.seek(0)
                 uri_c = f"data:image/png;base64,{base64.b64encode(buf_c.getvalue()).decode('utf-8')}"
             except Exception as chart_err:
-                print(f"[CLOUD-REPORT-LOG] [USE-CASE] Chart C timeline warning: {chart_err}")
+                # Last-resort boundary to ensure matplotlib plotting errors do not crash other chart generation
+                logger.exception(f"Chart C timeline generation failed: {chart_err}")
 
         return {"commit_bar": uri_a, "lorenz_curve": uri_b, "commit_timeline": uri_c}
     except Exception as e:
-        print(f"[CLOUD-REPORT-LOG] [USE-CASE] Chart generation warning: {e}")
+        # Last-resort boundary to ensure that any matplotlib error doesn't halt the entire report rendering
+        logger.exception(f"Chart generation failed: {e}")
         return {}
 
 
@@ -397,6 +414,7 @@ def _call_agentrouter_api(prompt: str, api_key: str) -> str:
     ]
 
     last_err = None
+    last_exc = None
     no_channel_count = 0
     for idx, model in enumerate(models_to_try, 1):
         payload = {
@@ -435,27 +453,32 @@ def _call_agentrouter_api(prompt: str, api_key: str) -> str:
                 else:
                     print(f"[CLOUD-REPORT-LOG] [AGENTROUTER] Warning: Model '{model}' returned empty choices or message content.")
         except urllib.error.HTTPError as e:
+            last_exc = e
             err_body = e.read().decode("utf-8", errors="ignore")
-            print(f"[CLOUD-REPORT-LOG] [AGENTROUTER] Model '{model}' FAILED with HTTP {e.code}: {err_body[:200]}")
+            logger.warning(f"Model '{model}' FAILED with HTTP {e.code}: {err_body[:200]}")
             if e.code in (401, 403):
-                raise ValueError(f"AgentRouter Auth Error (HTTP {e.code}): Invalid API key or token expired.")
+                raise ValueError(f"AgentRouter Auth Error (HTTP {e.code}): Invalid API key or token expired.") from e
             if e.code == 429:
-                raise ValueError(f"AgentRouter Quota Exceeded (HTTP 429): Token balance exhausted.")
+                raise ValueError(f"AgentRouter Quota Exceeded (HTTP 429): Token balance exhausted.") from e
             if e.code == 503 and ("无可用渠道" in err_body or "channel" in err_body.lower()):
                 no_channel_count += 1
                 last_err = f"Model {model} has no active channel on AgentRouter."
                 continue
             last_err = f"Model {model} failed (HTTP {e.code}): {err_body}"
-        except Exception as e:
-            print(f"[CLOUD-REPORT-LOG] [AGENTROUTER] Exception for model '{model}': {type(e).__name__}: {str(e)}")
+        except (urllib.error.URLError, ConnectionError, TimeoutError, json.JSONDecodeError, ValueError) as e:
+            last_exc = e
+            logger.exception(f"Exception for model '{model}': {e}")
             last_err = str(e)
 
     if no_channel_count == len(models_to_try):
         print(f"[CLOUD-REPORT-LOG] [AGENTROUTER] Error: All {len(models_to_try)} models returned 503 (no channel).")
         raise ValueError("AgentRouter error: No active routing channels available for the selected models. Please try again later.")
 
-    print(f"[CLOUD-REPORT-LOG] [AGENTROUTER] All model attempts failed. Last error: {last_err}")
-    raise RuntimeError(f"AgentRouter API error: {last_err or 'Failed to get completion.'}")
+    logger.error(f"All model attempts failed. Last error: {last_err}")
+    if last_exc:
+        raise RuntimeError(f"AgentRouter API error: {last_err or 'Failed to get completion.'}") from last_exc
+    else:
+        raise RuntimeError(f"AgentRouter API error: {last_err or 'Failed to get completion.'}")
 
 
 def generate_cloud_report(qual_data: dict, api_key: str, course_name: str, tech_requirements: Optional[str] = None, deadline: Optional[str] = None):
@@ -469,7 +492,7 @@ def generate_cloud_report(qual_data: dict, api_key: str, course_name: str, tech_
     provider_type = "AgentRouter" if clean_key.startswith("sk-") else "Google Gemini"
     
     prompt = build_gemini_prompt(qual_data, course_name, tech_requirements, deadline=deadline)
-    print(f"[CLOUD-REPORT-LOG] [USE-CASE] Built prompt successfully ({len(prompt)} characters).")
+    logger.info(f"Built prompt successfully ({len(prompt)} characters).")
 
     def _clean_json_output(text: str) -> str:
         text = text.strip()
@@ -485,11 +508,11 @@ def generate_cloud_report(qual_data: dict, api_key: str, course_name: str, tech_
             print("[CLOUD-REPORT-LOG] [USE-CASE] Key starts with 'sk-', routing request to AgentRouter API handler.")
             return _call_agentrouter_api(prompt, clean_key)
 
-        print("[CLOUD-REPORT-LOG] [GEMINI] Key is Google Gemini style. Initializing google.generativeai...")
+        logger.info("Key is Google Gemini style. Initializing google.generativeai...")
         try:
             import google.generativeai as genai
         except ImportError:
-            print("[CLOUD-REPORT-LOG] [GEMINI] ERROR: google-generativeai package not installed.")
+            logger.error("ERROR: google-generativeai package not installed.")
             raise RuntimeError("google-generativeai package not installed. Run: pip install google-generativeai")
 
         genai.configure(api_key=clean_key)
@@ -499,16 +522,17 @@ def generate_cloud_report(qual_data: dict, api_key: str, course_name: str, tech_
             "gemini-1.5-flash-latest",
             "gemini-1.5-pro-latest",
             "gemma-4-26b-a4b-it",
-            "gemini-2.5-flash",
+            GEMINI_MODEL,
             "gemini-2.5-pro",
             "gemini-1.5-flash",
             "gemini-1.5-pro"
         ]
 
         last_error = None
+        last_exc = None
         quota_error = None
         for idx, model_name in enumerate(model_candidates, 1):
-            print(f"[CLOUD-REPORT-LOG] [GEMINI] Attempt {idx}/{len(model_candidates)}: Calling model '{model_name}'...")
+            logger.info(f"Attempt {idx}/{len(model_candidates)}: Calling model '{model_name}'...")
             try:
                 model = genai.GenerativeModel(model_name)
                 response = model.generate_content(
@@ -523,27 +547,34 @@ def generate_cloud_report(qual_data: dict, api_key: str, course_name: str, tech_
                     print(f"[CLOUD-REPORT-LOG] [GEMINI] Model '{model_name}' SUCCESS. Returned {len(response.text)} characters.")
                     return response.text
                 else:
-                    print(f"[CLOUD-REPORT-LOG] [GEMINI] Model '{model_name}' returned empty response text.")
-            except Exception as e:
+                    logger.warning(f"Model '{model_name}' returned empty response text.")
+            except (GoogleAPIError, ConnectionError, TimeoutError, ValueError) as e:
+                last_exc = e
                 error_msg = str(e)
-                print(f"[CLOUD-REPORT-LOG] [GEMINI] Model '{model_name}' FAILED: {error_msg[:200]}")
+                logger.warning(f"Model '{model_name}' FAILED: {error_msg[:200]}")
                 if "API_KEY_INVALID" in error_msg or "API key not valid" in error_msg or ("400" in error_msg and "key" in error_msg.lower()):
-                    raise ValueError("Invalid Gemini API key. Please update your key in Settings.")
+                    raise ValueError("Invalid Gemini API key. Please update your key in Settings.") from e
                 if "QUOTA_EXCEEDED" in error_msg or "quota" in error_msg.lower() or "429" in error_msg:
                     quota_error = "Gemini API quota exceeded (HTTP 429). Please check your Google AI Studio quota or switch to an active key."
                     continue
                 last_error = error_msg
 
         if quota_error:
-            print("[CLOUD-REPORT-LOG] [GEMINI] Raising quota exceeded exception.")
-            raise ValueError(quota_error)
+            logger.warning("Raising quota exceeded exception.")
+            if last_exc:
+                raise ValueError(quota_error) from last_exc
+            else:
+                raise ValueError(quota_error)
 
-        print(f"[CLOUD-REPORT-LOG] [GEMINI] All Gemini candidates failed. Last error: {last_error}")
-        raise RuntimeError(f"Cloud AI API error: {last_error or 'All model candidates failed.'}")
+        logger.error(f"All Gemini candidates failed. Last error: {last_error}")
+        if last_exc:
+            raise RuntimeError(f"Cloud AI API error: {last_error or 'All model candidates failed.'}") from last_exc
+        else:
+            raise RuntimeError(f"Cloud AI API error: {last_error or 'All model candidates failed.'}")
 
     last_parse_error = None
     for attempt in range(1, 4):
-        print(f"[CLOUD-REPORT-LOG] [USE-CASE] Cloud AI LLM call attempt {attempt}/3...")
+        logger.info(f"Cloud AI LLM call attempt {attempt}/3...")
         raw_output = _call_model()
         cleaned_json = _clean_json_output(raw_output)
         print(f"[CLOUD-REPORT-LOG] [USE-CASE] Attempt {attempt}: Received raw output. Cleaned JSON length: {len(cleaned_json)} chars.")
@@ -553,13 +584,13 @@ def generate_cloud_report(qual_data: dict, api_key: str, course_name: str, tech_
             report_data = CloudReportData(**parsed_data)
             print(f"[CLOUD-REPORT-LOG] [USE-CASE] Attempt {attempt}: Successfully validated Pydantic CloudReportData model!")
             return report_data
-        except Exception as e:
+        except (json.JSONDecodeError, ValidationError) as e:
             print(f"[CLOUD-REPORT-LOG] [USE-CASE] Attempt {attempt}: JSON/Pydantic validation failed: {type(e).__name__}: {str(e)}")
             last_parse_error = e
             continue
             
-    print(f"[CLOUD-REPORT-LOG] [USE-CASE] ERROR: All 3 parse attempts failed.")
-    raise RuntimeError(f"Cloud AI failed to return valid JSON after 3 attempts. Last error: {last_parse_error}")
+    logger.error("ERROR: All 3 parse attempts failed.")
+    raise RuntimeError(f"Cloud AI failed to return valid JSON after 3 attempts. Last error: {last_parse_error}") from last_parse_error
 
 
 def render_pdf_report(
@@ -611,8 +642,8 @@ def render_pdf_report(
     if hasattr(report_data, "student_evaluations") and report_data.student_evaluations:
         try:
             report_data.student_evaluations = sorted(report_data.student_evaluations, key=_risk_rank)
-        except Exception as e:
-            print(f"[CLOUD-REPORT-LOG] Warning sorting student_evaluations: {e}")
+        except (TypeError, AttributeError) as e:
+            logger.warning(f"Warning sorting student_evaluations: {e}")
 
     charts = _build_charts(qual_data, deadline=deadline) if qual_data else {}
     logo_uri = _build_logo_uri()
@@ -637,7 +668,8 @@ def render_pdf_report(
     def lang_color_filter(idx):
         try:
             return colors[int(idx) % len(colors)]
-        except Exception:
+        except (ValueError, TypeError, IndexError) as e:
+            logger.warning(f"Error resolving language color index '{idx}': {e}")
             return '#2b5c8f'
 
     env.filters["md"] = md_filter

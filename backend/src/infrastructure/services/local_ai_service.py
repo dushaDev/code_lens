@@ -1,5 +1,9 @@
 import ollama
 import json
+import logging
+import httpx
+
+logger = logging.getLogger(__name__)
 
 class LocalAIService:
     def __init__(self, model_name: str = "qwen2.5-coder:3b"):
@@ -43,9 +47,10 @@ class LocalAIService:
             # Clamp percentage between 0 and 100
             match_pct = max(0, min(100, match_pct))
             reason = str(result.get("reason", "Analysis completed."))
-            return {"match_percentage": match_pct, "reason": reason}
-        except Exception as e:
-            return {"match_percentage": 50, "reason": f"Analysis default fallback (Ollama unavailable or timeout)"}
+            return {"match_percentage": match_pct, "reason": reason, "analysis_available": True}
+        except (ollama.RequestError, ollama.ResponseError, httpx.HTTPError, json.JSONDecodeError, ValueError, ConnectionError, TimeoutError) as e:
+            logger.warning(f"Error in verify_commit_message: {e}", exc_info=True)
+            return {"match_percentage": 50, "reason": "Analysis default fallback (Ollama unavailable or timeout)", "analysis_available": False}
 
     def compare_snippets(self, snippet_a: str, snippet_b: str) -> dict:
         safe_a = snippet_a[:300] if snippet_a else "None"
@@ -82,13 +87,16 @@ class LocalAIService:
             return {
                 "is_duplicate_or_revert": is_dup,
                 "similarity_type": sim_type,
-                "explanation": explanation
+                "explanation": explanation,
+                "analysis_available": True
             }
-        except Exception as e:
+        except (ollama.RequestError, ollama.ResponseError, httpx.HTTPError, json.JSONDecodeError, ValueError, ConnectionError, TimeoutError) as e:
+            logger.warning(f"Error in compare_snippets: {e}", exc_info=True)
             return {
                 "is_duplicate_or_revert": False,
                 "similarity_type": "independent_work",
-                "explanation": f"Fallback: {str(e)}"
+                "explanation": "Comparison unavailable",
+                "analysis_available": False
             }
 
     def evaluate_review_comment(self, comment_text: str) -> dict:
@@ -131,14 +139,17 @@ class LocalAIService:
                 "substance": substance,
                 "quality_score": score,
                 "feedback_type": fb_type,
-                "summary": summary
+                "summary": summary,
+                "analysis_available": True
             }
-        except Exception as e:
+        except (ollama.RequestError, ollama.ResponseError, httpx.HTTPError, json.JSONDecodeError, ValueError, ConnectionError, TimeoutError) as e:
+            logger.warning(f"Error in evaluate_review_comment: {e}", exc_info=True)
             return {
                 "substance": "minor_feedback",
                 "quality_score": 5,
                 "feedback_type": "approval",
-                "summary": f"Fallback: {str(e)}"
+                "summary": "Review evaluation unavailable",
+                "analysis_available": False
             }
 
     def classify_commit(
@@ -237,13 +248,13 @@ Respond ONLY with a JSON object conforming exactly to the one-shot example forma
             if validate_labels(result):
                 parsed_successfully = True
             else:
-                print(f"[PARSE_FAILURE] Attempt 1 failed validation rules: {response['message']['content']}")
-        except Exception as e:
-            print(f"[PARSE_FAILURE] Attempt 1 malformed JSON: {e}")
+                logger.warning(f"[PARSE_FAILURE] Attempt 1 failed validation rules: {response['message']['content']}")
+        except (json.JSONDecodeError, KeyError, ValueError, TypeError, ollama.RequestError, ollama.ResponseError, httpx.HTTPError, ConnectionError, TimeoutError) as e:
+            logger.warning(f"[PARSE_FAILURE] Attempt 1 malformed JSON or AI error: {e}", exc_info=True)
 
         # Retry once if Attempt 1 failed
         if not parsed_successfully:
-            print("[PARSE_FAILURE] Retrying commit classification with stricter prompt reminder...")
+            logger.info("[PARSE_FAILURE] Retrying commit classification with stricter prompt reminder...")
             retry_prompt = f"""The previous response was invalid. Ensure that:
 1. Output is valid JSON.
 2. "type" is strictly one of: ["feature", "bugfix", "refactor", "docs", "test", "config", "style", "merge", "other"]
@@ -265,9 +276,9 @@ Respond ONLY with a corrected valid JSON object:"""
                 if validate_labels(result):
                     parsed_successfully = True
                 else:
-                    print(f"[PARSE_FAILURE] Retry failed validation rules: {response['message']['content']}")
-            except Exception as e:
-                print(f"[PARSE_FAILURE] Retry malformed JSON: {e}")
+                    logger.warning(f"[PARSE_FAILURE] Retry failed validation rules: {response['message']['content']}")
+            except (json.JSONDecodeError, KeyError, ValueError, TypeError, ollama.RequestError, ollama.ResponseError, httpx.HTTPError, ConnectionError, TimeoutError) as e:
+                logger.warning(f"[PARSE_FAILURE] Retry malformed JSON or AI error: {e}", exc_info=True)
 
         if not parsed_successfully:
             # Mark fallback
@@ -282,7 +293,8 @@ Respond ONLY with a corrected valid JSON object:"""
                 "security_risk_type": "none",
                 "code_smells": [],
                 "architecture_issues": [],
-                "notes": "Parsing failure fallback"
+                "notes": "Parsing failure fallback",
+                "analysis_available": False
             }
 
         c_type = str(result.get("type", "other")).lower()
@@ -323,7 +335,8 @@ Respond ONLY with a corrected valid JSON object:"""
             "architecture_issues": clean_arch,
             "notes": notes,
             "parse_failure": not parsed_successfully,
-            "fell_back": fell_back
+            "fell_back": fell_back,
+            "analysis_available": parsed_successfully
         }
 
 
@@ -357,13 +370,16 @@ Respond ONLY with a corrected valid JSON object:"""
             return {
                 "pattern_name": str(result.get("pattern_name", "Layered Architecture")),
                 "accuracy_score": score,
-                "assessment": str(result.get("assessment", "Standard directory structure detected."))
+                "assessment": str(result.get("assessment", "Standard directory structure detected.")),
+                "analysis_available": True
             }
-        except Exception as e:
+        except (ollama.RequestError, ollama.ResponseError, httpx.HTTPError, json.JSONDecodeError, ValueError, ConnectionError, TimeoutError) as e:
+            logger.warning(f"Error in analyze_architecture: {e}", exc_info=True)
             return {
                 "pattern_name": "Standard Layout",
                 "accuracy_score": 75,
-                "assessment": "Directory structure parsed successfully."
+                "assessment": "Directory structure evaluation unavailable",
+                "analysis_available": False
             }
 
 
@@ -388,5 +404,6 @@ Respond ONLY with a corrected valid JSON object:"""
                 options={'num_predict': 500} # limit output size to keep it fast
             )
             return response['message']['content']
-        except Exception as e:
-            return f"Error generating report: {str(e)}"
+        except (ollama.RequestError, ollama.ResponseError, httpx.HTTPError, ConnectionError, TimeoutError) as e:
+            logger.warning(f"Error in generate_final_report: {e}", exc_info=True)
+            return "Report generation unavailable."

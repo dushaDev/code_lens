@@ -5,6 +5,12 @@ from datetime import datetime
 
 GIT_URL_REGEX = re.compile(r'^(https?|git)://[^\s<>"\'{}|\\^`]+$', re.IGNORECASE)
 
+def validate_password_strength_logic(v: str) -> None:
+    if not v or len(v) < 8:
+        raise ValueError("Password must be at least 8 characters long.")
+    if not re.search(r"[A-Za-z]", v) or not re.search(r"[0-9!@#$%^&*()_+\-=\[\]{};':\",./<>?]", v):
+        raise ValueError("Password must contain both letters and numbers or special characters.")
+
 # ---------------------------------------------------------------------------
 # Auth schemas
 # ---------------------------------------------------------------------------
@@ -17,10 +23,7 @@ class UserRegisterRequest(BaseModel):
     @field_validator('password')
     @classmethod
     def validate_password_strength(cls, v: str) -> str:
-        if not v or len(v) < 8:
-            raise ValueError("Password must be at least 8 characters long.")
-        if not re.search(r"[A-Za-z]", v) or not re.search(r"[0-9!@#$%^&*()_+\-=\[\]{};':\",./<>?]", v):
-            raise ValueError("Password must contain both letters and numbers or special characters.")
+        validate_password_strength_logic(v)
         return v
 
 class LoginRequest(BaseModel):
@@ -61,11 +64,9 @@ class UserUpdateRequest(BaseModel):
     @classmethod
     def validate_password_strength(cls, v: Optional[str]) -> Optional[str]:
         if v is not None:
-            if len(v) < 8:
-                raise ValueError("Password must be at least 8 characters long.")
-            if not re.search(r"[A-Za-z]", v) or not re.search(r"[0-9!@#$%^&*()_+\-=\[\]{};':\",./<>?]", v):
-                raise ValueError("Password must contain both letters and numbers or special characters.")
+            validate_password_strength_logic(v)
         return v
+
 
 class UsersListResponse(BaseModel):
     total_users: int
