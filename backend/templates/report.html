@@ -291,53 +291,70 @@
 
     {% if qual_data and qual_data.project_summary %}
     {% set ps = qual_data.project_summary %}
-    <div class="health-box">
-        <strong>Repository Architecture, Branches & AST Complexity:</strong><br>
-        {% if ps.readme_quality %}
-        • <strong>Documentation Score:</strong> {{ ps.readme_quality.documentation_score }}
-        {% if ps.readme_quality.has_readme %}(README size: {{ ps.readme_quality.readme_size_kb }} KB, Setup Guide: {{
-        "Yes" if ps.readme_quality.has_setup_guide else "No" }}){% endif %}
-        <br>
-        {% endif %}
-        {% if ps.folder_structure %}
-        • <strong>Repository Modularity:</strong> {{ ps.folder_structure.modularity_score }}
-        ({{ ps.folder_structure.total_files }} files in {{ ps.folder_structure.total_directories }} directories, Tests
-        Dir: {{ "Present" if ps.folder_structure.has_tests_dir else "None" }})
-        <br>
-        {% endif %}
-        {% if ps.ast_complexity_summary %}
-        • <strong>AST Code Metrics:</strong> Avg Cyclomatic Complexity: {{
-        ps.ast_complexity_summary.avg_complexity_score }} &nbsp;|&nbsp; Total Parsed Functions: {{
-        ps.ast_complexity_summary.total_functions }} &nbsp;|&nbsp; Squash-Suspected Commits: {{
-        ps.ast_complexity_summary.squash_suspected_commits }}
-        <br>
-        {% endif %}
-        {% if ps.pacing_summary and ps.pacing_summary.peak_commit_date != 'N/A' %}
-        • <strong>Timeline Velocity:</strong> Peak Activity: {{ ps.pacing_summary.peak_commit_date }} ({{
-        ps.pacing_summary.peak_commit_count }} commits) &nbsp;|&nbsp; Avg Velocity: {{
-        ps.pacing_summary.avg_commits_per_active_day }} commits/active day
-        {% if ps.pacing_summary.project_span_days is defined %}
-        &nbsp;|&nbsp; Project Span: {{ ps.pacing_summary.project_span_days }} days &nbsp;|&nbsp; Active Days (at least 1 commit): {{ ps.pacing_summary.active_days_count }} days
-        {% endif %}
-        <br>
-        {% endif %}
-        {% if ps.branches_summary and ps.branches_summary.top_branches %}
-        <div style="margin-top: 4px;">
-            • <strong>Git Branches List ({{ ps.branches_summary.total_branches }} total):</strong>
-            <table style="width: 100%; border-collapse: collapse; margin-top: 3px; font-size: 8pt;">
-                {% for b in ps.branches_summary.top_branches %}
-                <tr>
-                    <td style="padding: 1px 4px; border-bottom: 1px dotted #e0e0e0; width: 75%;">
-                        <code>{{ b.name }}</code>
-                    </td>
-                    <td
-                        style="padding: 1px 4px; border-bottom: 1px dotted #e0e0e0; width: 25%; text-align: right; color: #555555; font-weight: bold;">
-                        {{ b.commits }} commits</td>
-                </tr>
-                {% endfor %}
-            </table>
+    <div class="health-box" style="background-color: #f8fafe; border: 1px solid #d2e3fc; border-left: 4px solid #1a73e8; padding: 10px 14px; border-radius: 6px; margin-top: 10px; margin-bottom: 12px;">
+        <div style="font-size: 9.5pt; font-weight: bold; color: #1a73e8; margin-bottom: 8px; border-bottom: 1px solid #d2e3fc; padding-bottom: 4px; text-transform: uppercase; letter-spacing: 0.5px;">
+            Repository Architecture, Branches & AST Complexity
         </div>
-        {% endif %}
+        
+        <div style="line-height: 1.6; font-size: 8.5pt; color: #202124;">
+            {% if ps.readme_quality %}
+            <div style="margin-bottom: 4px;">
+                • <strong>Documentation Score:</strong> 
+                <span style="background-color: #e8f0fe; color: #1967d2; padding: 1px 6px; border-radius: 4px; font-weight: bold;">{{ ps.readme_quality.documentation_score }}</span>
+                {% if ps.readme_quality.has_readme %}
+                <span style="color: #5f6368; font-size: 8pt;">(README size: <strong>{{ ps.readme_quality.readme_size_kb }} KB</strong>, Setup Guide: <strong>{{ "Yes" if ps.readme_quality.has_setup_guide else "No" }}</strong>)</span>
+                {% endif %}
+            </div>
+            {% endif %}
+
+            {% if ps.folder_structure %}
+            <div style="margin-bottom: 4px;">
+                • <strong>Repository Modularity:</strong> 
+                <span style="background-color: #e8f0fe; color: #1967d2; padding: 1px 6px; border-radius: 4px; font-weight: bold;">{{ ps.folder_structure.modularity_score }}</span>
+                <span style="color: #5f6368; font-size: 8pt;">(<strong>{{ ps.folder_structure.total_files }}</strong> files in <strong>{{ ps.folder_structure.total_directories }}</strong> directories, Tests Dir: <strong>{{ "Present" if ps.folder_structure.has_tests_dir else "None" }}</strong>)</span>
+            </div>
+            {% endif %}
+
+            {% if ps.ast_complexity_summary %}
+            <div style="margin-bottom: 4px;">
+                • <strong>AST Code Metrics:</strong> 
+                Avg Complexity: <span style="background-color: #e8f0fe; color: #1967d2; padding: 1px 6px; border-radius: 4px; font-weight: bold;">{{ ps.ast_complexity_summary.avg_complexity_score }}</span>
+                &nbsp;|&nbsp; Total Parsed Functions: <strong>{{ ps.ast_complexity_summary.total_functions }}</strong>
+                &nbsp;|&nbsp; Squash-Suspected Commits: 
+                <span style="background-color: {% if ps.ast_complexity_summary.squash_suspected_commits > 0 %}#fce8e6; color: #c5221f{% else %}#e6f4ea; color: #137333{% endif %}; padding: 1px 6px; border-radius: 4px; font-weight: bold;">{{ ps.ast_complexity_summary.squash_suspected_commits }}</span>
+            </div>
+            {% endif %}
+
+            {% if ps.pacing_summary and ps.pacing_summary.peak_commit_date != 'N/A' %}
+            <div style="margin-bottom: 4px;">
+                • <strong>Timeline Velocity:</strong> 
+                Peak Activity: <strong>{{ ps.pacing_summary.peak_commit_date }}</strong> (<span style="background-color: #e8f0fe; color: #1967d2; padding: 1px 5px; border-radius: 3px; font-weight: bold;">{{ ps.pacing_summary.peak_commit_count }} commits</span>)
+                &nbsp;|&nbsp; Avg Velocity: <strong>{{ ps.pacing_summary.avg_commits_per_active_day }}</strong> commits/active day
+                {% if ps.pacing_summary.project_span_days is defined %}
+                &nbsp;|&nbsp; Project Span: <strong>{{ ps.pacing_summary.project_span_days }}</strong> days
+                &nbsp;|&nbsp; Active Days: <span style="background-color: #e8f0fe; color: #1967d2; padding: 1px 5px; border-radius: 3px; font-weight: bold;">{{ ps.pacing_summary.active_days_count }} days</span>
+                {% endif %}
+            </div>
+            {% endif %}
+
+            {% if ps.branches_summary and ps.branches_summary.top_branches %}
+            <div style="margin-top: 6px; padding-top: 4px; border-top: 1px dotted #d2e3fc;">
+                • <strong>Git Branches List ({{ ps.branches_summary.total_branches }} total):</strong>
+                <table style="width: 100%; border-collapse: collapse; margin-top: 3px; font-size: 8pt;">
+                    {% for b in ps.branches_summary.top_branches %}
+                    <tr>
+                        <td style="padding: 2px 4px; border-bottom: 1px dotted #d2e3fc; width: 75%;">
+                            <code style="background-color: #edf2fa; padding: 1px 4px; border-radius: 3px; color: #1a73e8; font-weight: bold;">{{ b.name }}</code>
+                        </td>
+                        <td style="padding: 2px 4px; border-bottom: 1px dotted #d2e3fc; width: 25%; text-align: right; color: #3c4043; font-weight: bold;">
+                            {{ b.commits }} commits
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </table>
+            </div>
+            {% endif %}
+        </div>
     </div>
     {% endif %}
 

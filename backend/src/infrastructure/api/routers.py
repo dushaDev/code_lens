@@ -1,11 +1,20 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from typing import List, Optional
+import logging
 import os
 import json
 import io
+from slowapi import Limiter
+from slowapi.util import get_remote_address
+
+# Module logger — all 500-level errors are logged here
+logger = logging.getLogger(__name__)
+
+# Rate limiter — wired to app state in main.py
+limiter = Limiter(key_func=get_remote_address)
 
 
 from src.infrastructure.database.session import get_db
@@ -65,19 +74,15 @@ router = APIRouter(prefix="/api/v1")
     status_code=status.HTTP_201_CREATED,
     tags=["Auth"]
 )
-def register(request: UserRegisterRequest, db: Session = Depends(get_db)):
+@limiter.limit("3/minute")
+def register(request: UserRegisterRequest, req: Request, db: Session = Depends(get_db)):
     """Register a new user account."""
     user_repo = UserRepository(db)
 
-    if user_repo.get_by_email(request.email):
+    if user_repo.get_by_email(request.email) or user_repo.get_by_username(request.username):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="A user with this email already exists."
-        )
-    if user_repo.get_by_username(request.username):
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="A user with this username already exists."
+            detail="Registration failed: an account with these details already exists."
         )
 
     user = user_repo.create(
@@ -101,7 +106,8 @@ def register(request: UserRegisterRequest, db: Session = Depends(get_db)):
     response_model=TokenResponse,
     tags=["Auth"]
 )
-def login(request: LoginRequest, db: Session = Depends(get_db)):
+@limiter.limit("5/minute")
+def login(request: LoginRequest, req: Request, db: Session = Depends(get_db)):
     """Login with email and password to receive a JWT access token."""
     user_repo = UserRepository(db)
     user = user_repo.get_by_email(request.email)
@@ -137,16 +143,20 @@ def get_all_users(
     db: Session = Depends(get_db),
     current_user: UserModel = Depends(get_current_user)
 ):
-    """List all registered users."""
-    user_repo = UserRepository(db)
-    users = user_repo.get_all()
+    """Return only the currently authenticated user's own record.
+    Full user-directory listing is intentionally removed to prevent email harvesting."""
     return UsersListResponse(
-        total_users=len(users),
+        total_users=1,
         users=[
-            UserResponse(id=u.id, username=u.username, email=u.email,
-                         is_active=u.is_active, github_username=u.github_username,
-                         is_dark_mode=u.is_dark_mode, created_at=u.created_at)
-            for u in users
+            UserResponse(
+                id=current_user.id,
+                username=current_user.username,
+                email=current_user.email,
+                is_active=current_user.is_active,
+                github_username=current_user.github_username,
+                is_dark_mode=current_user.is_dark_mode,
+                created_at=current_user.created_at
+            )
         ]
     )
 
@@ -426,7 +436,8 @@ def create_course(
             created_at=course.created_at
         )
     except Exception as e:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+        logger.error(e, exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Internal server error")
 
 
 @router.get(
@@ -453,7 +464,8 @@ def get_all_courses(
         ]
         return CoursesListResponse(total_courses=len(courses_list), courses=courses_list)
     except Exception as e:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+        logger.error(e, exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Internal server error")
 
 
 def _make_course_response(course) -> CourseResponse:
@@ -490,7 +502,8 @@ def get_course_by_id(
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     except Exception as e:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+        logger.error(e, exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Internal server error")
 
 
 @router.put(
@@ -522,7 +535,8 @@ def update_course(
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=detail)
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=detail)
     except Exception as e:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+        logger.error(e, exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Internal server error")
 
 
 @router.post(
@@ -639,7 +653,8 @@ def delete_course(
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     except Exception as e:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+        logger.error(e, exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Internal server error")
 
 @router.get(
     "/courses/{course_id}/projects",
@@ -675,7 +690,8 @@ def get_course_projects(
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     except Exception as e:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+        logger.error(e, exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Internal server error")
 
 
 # ---------------------------------------------------------------------------
@@ -804,9 +820,10 @@ def extract_git_data(
     except RuntimeError as e:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
     except Exception as e:
+        logger.error(e, exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"{type(e).__name__}: {str(e)}"
+            detail="Internal server error"
         )
 
 
@@ -838,9 +855,10 @@ def sync_project_updates(
     except RuntimeError as e:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
     except Exception as e:
+        logger.error(e, exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"{type(e).__name__}: {str(e)}"
+            detail="Internal server error"
         )
 
 
@@ -910,7 +928,8 @@ def get_project_file_tree(
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except Exception as e:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+        logger.error(e, exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Internal server error")
 
 
 @router.get(
@@ -936,7 +955,8 @@ def get_project_file_content(
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except Exception as e:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+        logger.error(e, exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Internal server error")
 
 
 @router.get(
@@ -975,7 +995,8 @@ def get_all_projects(
         ]
         return ProjectsListResponse(total_projects=len(projects_list), projects=projects_list)
     except Exception as e:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+        logger.error(e, exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Internal server error")
 
 
 @router.get(
@@ -1035,7 +1056,8 @@ def get_project_branches(
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     except Exception as e:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+        logger.error(e, exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Internal server error")
 
 
 @router.get(
@@ -1075,7 +1097,8 @@ def get_project_commits(
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     except Exception as e:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+        logger.error(e, exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Internal server error")
 
 
 @router.get(
@@ -1104,7 +1127,8 @@ def get_project_authors(
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     except Exception as e:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+        logger.error(e, exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Internal server error")
 
 
 @router.get(
@@ -1128,7 +1152,8 @@ def get_project_analytics(
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     except Exception as e:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+        logger.error(e, exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Internal server error")
 
 
 @router.post(
@@ -1228,9 +1253,10 @@ def get_cached_cloud_report(
         report_data = json.loads(report_json)
         return {"cloud_report": report_data}
     except Exception as e:
+        logger.error(e, exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Malformed cached cloud report: {str(e)}"
+            detail="Internal server error"
         )
 
 
@@ -1299,8 +1325,6 @@ def generate_and_cache_cloud_report(
             status_code=status.HTTP_402_PAYMENT_REQUIRED,
             detail="NO_API_KEY"
         )
-
-    print(f"[CLOUD-REPORT-LOG] [ROUTER] Successfully decrypted key. Key prefix: '{plain_key[:8]}...' (Length: {len(plain_key)})")
 
     # Load local AI qualitative report from DB cache
     qual_report_json = getattr(project, 'qualitative_report', None)
@@ -1451,7 +1475,8 @@ def generate_and_cache_cloud_report(
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(re))
     except Exception as ex:
         print(f"[CLOUD-REPORT-LOG] [ROUTER] Caught unexpected Exception: {ex}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Unexpected server error: {str(ex)}")
+        logger.error(ex, exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Internal server error")
 
 
 @router.post(
@@ -1650,7 +1675,8 @@ def generate_cloud_ai_report(
         except RuntimeError as re:
             raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(re))
         except Exception as ex:
-            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Unexpected server error: {str(ex)}")
+            logger.error(ex, exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Internal server error")
 
     # 3. Render PDF
     try:
@@ -1687,7 +1713,8 @@ def generate_cloud_ai_report(
     except Exception as ex:
         import traceback
         traceback.print_exc()
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"PDF generation failed: {str(ex)}")
+        logger.error(ex, exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Internal server error")
 
 
 @router.get(
@@ -1760,21 +1787,42 @@ def get_commit_by_hash(
     tags=["Authors"],
     responses={401: {"model": ErrorResponse}, 500: {"model": ErrorResponse}}
 )
+def _check_author_belongs_to_user(db: Session, author_id: int, user_id: int) -> bool:
+    user_author_exists = db.query(CommitModel.author_id)\
+        .join(ProjectModel, CommitModel.project_id == ProjectModel.id)\
+        .join(CourseModel, ProjectModel.course_id == CourseModel.id)\
+        .filter(CourseModel.user_id == user_id, CommitModel.author_id == author_id)\
+        .first()
+    return user_author_exists is not None
+
+
+@router.get(
+    "/authors",
+    response_model=AuthorsListResponse,
+    tags=["Authors"],
+    responses={401: {"model": ErrorResponse}, 500: {"model": ErrorResponse}}
+)
 def get_all_authors(
     db: Session = Depends(get_db),
     current_user: UserModel = Depends(get_current_user)
 ):
-    author_repo = AuthorRepository(db)
-    use_case = GetAllAuthorsUseCase(author_repo)
     try:
-        authors = use_case.execute()
+        user_author_rows = db.query(CommitModel.author_id)\
+            .join(ProjectModel, CommitModel.project_id == ProjectModel.id)\
+            .join(CourseModel, ProjectModel.course_id == CourseModel.id)\
+            .filter(CourseModel.user_id == current_user.id)\
+            .distinct().all()
+        user_author_ids = [r[0] for r in user_author_rows if r[0] is not None]
+
+        authors = db.query(AuthorModel).filter(AuthorModel.id.in_(user_author_ids)).all() if user_author_ids else []
         authors_list = [
             AuthorResponse(id=a.id, name=a.name, email=a.email)
             for a in authors
         ]
         return AuthorsListResponse(total_authors=len(authors_list), authors=authors_list)
     except Exception as e:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+        logger.error(f"Error fetching authors: {e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Internal server error")
 
 
 @router.get(
@@ -1788,15 +1836,19 @@ def get_author_by_id(
     db: Session = Depends(get_db),
     current_user: UserModel = Depends(get_current_user)
 ):
+    if not _check_author_belongs_to_user(db, author_id, current_user.id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Author with id {author_id} not found.")
+
     author_repo = AuthorRepository(db)
     use_case = GetAuthorByIdUseCase(author_repo)
     try:
         a = use_case.execute(author_id)
         return AuthorResponse(id=a.id, name=a.name, email=a.email)
     except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Author not found.")
     except Exception as e:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+        logger.error(f"Error fetching author {author_id}: {e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Internal server error")
 
 
 @router.get(
@@ -1812,6 +1864,9 @@ def get_author_commits(
     db: Session = Depends(get_db),
     current_user: UserModel = Depends(get_current_user)
 ):
+    if not _check_author_belongs_to_user(db, author_id, current_user.id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Author with id {author_id} not found.")
+
     author_repo = AuthorRepository(db)
     commit_repo = CommitRepository(db)
     use_case = GetAuthorCommitsUseCase(author_repo, commit_repo)
@@ -1833,9 +1888,10 @@ def get_author_commits(
         ]
         return AuthorCommitsResponse(total_commits=len(commits_list), commits=commits_list)
     except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Author not found.")
     except Exception as e:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+        logger.error(f"Error fetching commits for author {author_id}: {e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Internal server error")
 
 
 @router.get(
@@ -1850,6 +1906,9 @@ def get_author_full_profile(
     db: Session = Depends(get_db),
     current_user: UserModel = Depends(get_current_user)
 ):
+    if not _check_author_belongs_to_user(db, author_id, current_user.id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Author with id {author_id} not found.")
+
     author_repo = AuthorRepository(db)
     project_repo = ProjectRepository(db)
     use_case = GetAuthorFullProfileUseCase(author_repo, project_repo)
@@ -1890,9 +1949,10 @@ def get_author_full_profile(
             commits=commits_resp
         )
     except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Author not found.")
     except Exception as e:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+        logger.error(f"Error fetching full profile for author {author_id}: {e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Internal server error")
 
 
 @router.get(
@@ -1906,6 +1966,9 @@ def get_projects_by_author(
     db: Session = Depends(get_db),
     current_user: UserModel = Depends(get_current_user)
 ):
+    if not _check_author_belongs_to_user(db, author_id, current_user.id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Author with id {author_id} not found.")
+
     author_repo = AuthorRepository(db)
     project_repo = ProjectRepository(db)
     use_case = GetProjectsByAuthorUseCase(author_repo, project_repo)
@@ -1925,9 +1988,10 @@ def get_projects_by_author(
         ]
         return ProjectsListResponse(total_projects=len(projects_list), projects=projects_list)
     except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Author not found.")
     except Exception as e:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+        logger.error(f"Error fetching projects for author {author_id}: {e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Internal server error")
 
 
 @router.post(
@@ -1941,6 +2005,10 @@ def merge_authors(
     db: Session = Depends(get_db),
     current_user: UserModel = Depends(get_current_user)
 ):
+    for aid in [request.source_author_id, request.target_author_id]:
+        if not _check_author_belongs_to_user(db, aid, current_user.id):
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Author with id {aid} not found.")
+
     author_repo = AuthorRepository(db)
     use_case = MergeAuthorsUseCase(author_repo)
     try:
@@ -1949,11 +2017,12 @@ def merge_authors(
     except ValueError as e:
         detail = str(e)
         if "not found" in detail:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=detail)
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Author not found.")
         else:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=detail)
     except Exception as e:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+        logger.error(f"Error merging authors: {e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Internal server error")
 
 
 # ---------------------------------------------------------------------------
@@ -2117,7 +2186,8 @@ def reset_course(
         use_case.execute(course_id, user_id=current_user.id)
         return {"status": "success", "message": f"Course projects and data cleared successfully."}
     except Exception as e:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+        logger.error(e, exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Internal server error")
 
 @router.get(
     "/search",

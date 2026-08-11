@@ -1,14 +1,39 @@
 """
 Cloud AI Report Use Case
 Generates a final comprehensive project evaluation using Google Gemini API
-based on the structured qualitative analysis data from the local AI pass.
+or AgentRouter (Claude/GPT) based on the structured qualitative analysis data
+from the local AI pass.
+
+DATA EGRESS NOTICE
+------------------
+This module makes outbound HTTPS requests to external AI providers:
+  1. AgentRouter (AGENTROUTER_URL, default https://agentrouter.org/v1/chat/completions)
+     - Triggered when the stored API key starts with "sk-"
+     - Transmits: the full evaluation prompt (contains repo metrics and commit
+       data) plus the user's decrypted API key in the Authorization header.
+  2. Google Gemini (https://generativelanguage.googleapis.com)
+     - Triggered for all other key formats.
+     - Transmits: the full evaluation prompt plus the user's Gemini API key.
+
+The AgentRouter destination URL can be overridden via the AGENTROUTER_URL
+environment variable to point at a self-hosted or staging endpoint.
+No raw API key values are written to logs anywhere in this module.
 """
+import os
 import json
 import io
 import base64
 from typing import Optional
 from src.domain.metrics import calculate_gini, get_gini_status
 
+# ---------------------------------------------------------------------------
+# Configuration
+# ---------------------------------------------------------------------------
+# AgentRouter endpoint — override via AGENTROUTER_URL env var for staging/self-hosted.
+AGENTROUTER_URL: str = os.environ.get(
+    "AGENTROUTER_URL",
+    "https://agentrouter.org/v1/chat/completions"
+)
 
 def _build_logo_uri() -> str:
     """Generate base64 SVG data URI for the official Code Lens logo."""
@@ -357,9 +382,9 @@ def _call_agentrouter_api(prompt: str, api_key: str) -> str:
     import urllib.request
     import urllib.error
 
-    url = "https://agentrouter.org/v1/chat/completions"
-    masked_prefix = api_key.strip()[:8] + "..." if len(api_key.strip()) > 8 else "***"
-    print(f"[CLOUD-REPORT-LOG] [AGENTROUTER] Initializing AgentRouter request. Key prefix: '{masked_prefix}'")
+    # DATA EGRESS: sends evaluation prompt + decrypted API key to AGENTROUTER_URL.
+    # See module-level EGRESS NOTICE for full details.
+    url = AGENTROUTER_URL
 
     models_to_try = [
         "claude-opus-4-8",
@@ -374,7 +399,6 @@ def _call_agentrouter_api(prompt: str, api_key: str) -> str:
     last_err = None
     no_channel_count = 0
     for idx, model in enumerate(models_to_try, 1):
-        print(f"[CLOUD-REPORT-LOG] [AGENTROUTER] Attempt {idx}/{len(models_to_try)}: Trying model '{model}' at {url}...")
         payload = {
             "model": model,
             "messages": [
@@ -391,9 +415,7 @@ def _call_agentrouter_api(prompt: str, api_key: str) -> str:
             headers={
                 "Content-Type": "application/json",
                 "Authorization": f"Bearer {api_key.strip()}",
-                "User-Agent": "codex_cli_rs/0.101.0 (x86_64-pc-windows-msvc)",
-                "Originator": "codex_cli_rs",
-                "Version": "0.101.0"
+                "User-Agent": "CodeLens-Backend/1.0"
             },
             method="POST"
         )
@@ -444,10 +466,8 @@ def generate_cloud_report(qual_data: dict, api_key: str, course_name: str, tech_
     import re
     
     clean_key = api_key.strip()
-    key_prefix = clean_key[:8] + "..." if len(clean_key) > 8 else "***"
     provider_type = "AgentRouter" if clean_key.startswith("sk-") else "Google Gemini"
     
-    print(f"[CLOUD-REPORT-LOG] [USE-CASE] Starting generate_cloud_report. Provider: '{provider_type}', Key prefix: '{key_prefix}', Course: '{course_name}'")
     prompt = build_gemini_prompt(qual_data, course_name, tech_requirements, deadline=deadline)
     print(f"[CLOUD-REPORT-LOG] [USE-CASE] Built prompt successfully ({len(prompt)} characters).")
 

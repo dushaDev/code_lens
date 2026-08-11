@@ -46,6 +46,7 @@ export default function Analytics({ project, course, onBack, qualAnalysisState, 
 
   const [cloudReport, setCloudReport] = useState(null);
   const [isCloudGenerating, setIsCloudGenerating] = useState(false);
+  const [isPdfDownloading, setIsPdfDownloading] = useState(false);
   const [cloudError, setCloudError] = useState(null);
 
   // Shorthand aliases for cleaner JSX
@@ -313,8 +314,16 @@ export default function Analytics({ project, course, onBack, qualAnalysisState, 
     }
   };
 
+  // Automatically trigger Cloud AI report generation when qualitative analysis is ready/complete if not already generated
+  useEffect(() => {
+    if ((qualData || isComplete) && !cloudReport && !isCloudGenerating && !cloudError) {
+      generateCloudReportData();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [qualData, isComplete, cloudReport, isCloudGenerating, cloudError]);
+
   const downloadCloudReportPDF = async () => {
-    setIsCloudGenerating(true);
+    setIsPdfDownloading(true);
     setCloudError(null);
     try {
       const token = localStorage.getItem('token');
@@ -324,7 +333,7 @@ export default function Analytics({ project, course, onBack, qualAnalysisState, 
       });
       if (res.status === 402) {
         setCloudError('NO_API_KEY');
-        setIsCloudGenerating(false);
+        setIsPdfDownloading(false);
         return;
       }
       if (!res.ok) {
@@ -358,7 +367,7 @@ export default function Analytics({ project, course, onBack, qualAnalysisState, 
     } catch (err) {
       setCloudError(err.message);
     } finally {
-      setIsCloudGenerating(false);
+      setIsPdfDownloading(false);
     }
   };
 
@@ -1303,13 +1312,22 @@ export default function Analytics({ project, course, onBack, qualAnalysisState, 
                   <div style={{ display: 'flex', gap: '8px' }}>
                     <button 
                       onClick={downloadCloudReportPDF}
-                      disabled={isCloudGenerating}
+                      disabled={isPdfDownloading || isCloudGenerating}
                       className="btn btn-secondary btn-sm"
                       style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.82rem' }}
                       title="Download PDF Report"
                     >
-                      <Bot size={14} />
-                      <span>Download PDF</span>
+                      {isPdfDownloading ? (
+                        <>
+                          <RefreshCw size={14} className="spin" />
+                          <span>Processing...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Bot size={14} />
+                          <span>Download PDF</span>
+                        </>
+                      )}
                     </button>
                     <button 
                       onClick={generateCloudReportData}
@@ -1476,11 +1494,21 @@ export default function Analytics({ project, course, onBack, qualAnalysisState, 
                       </div>
                       <button 
                         onClick={downloadCloudReportPDF}
+                        disabled={isPdfDownloading || isCloudGenerating}
                         className="btn btn-secondary"
                         style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 16px' }}
                       >
-                        <Bot size={16} />
-                        Download PDF Report
+                        {isPdfDownloading ? (
+                          <>
+                            <RefreshCw size={16} className="spin" />
+                            <span>Processing...</span>
+                          </>
+                        ) : (
+                          <>
+                            <Bot size={16} />
+                            <span>Download PDF Report</span>
+                          </>
+                        )}
                       </button>
                     </div>
                   )}

@@ -122,6 +122,8 @@ class PyDrillerService(IGitExtractorService):
             # Step 1: Clone — wrap separately so Git errors are human-readable
             # ----------------------------------------------------------------
             try:
+                # Constrain git transport protocols to prevent SSRF and local file access
+                os.environ["GIT_ALLOW_PROTOCOL"] = "https:git"
                 repo = Repository(
                     project.git_url,
                     clone_repo_to=target_dir,

@@ -55,3 +55,8 @@ D. File Changes (file_changes)
 Columns: id (PK), commit_hash (FK commits.hash, ondelete="CASCADE"), filename (String), status (String), lines_added (Int), lines_removed (Int), raw_diff (Text).
 
 Relations: Many-to-One with commits.
+
+Default User / Testing Credentials
+For testing, manual verification, or system inspection, use the following credentials:
+- Email: dushanmadushankabeligala9@gmail.com
+- Password: @dushadev

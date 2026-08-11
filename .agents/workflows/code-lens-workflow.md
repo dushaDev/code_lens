@@ -38,3 +38,7 @@ Database Initialization: Scripts or lifecycle events that trigger Base.metadata.
 Pydantic Validation: Explicit schemas mapping to the API routes: POST /api/v1/projects, POST /api/v1/extract/{project_id}, and DELETE /api/v1/projects/{project_id}.
 
 Standardized Connections: Default to the synchronous PostgreSQL connection string for testing: postgresql://postgres:admin@localhost:5432/codelens_db.
+
+Default User / Testing Credentials:
+- Email: dushanmadushankabeligala9@gmail.com
+- Password: @dushadev

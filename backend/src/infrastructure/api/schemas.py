@@ -1,6 +1,9 @@
-from pydantic import BaseModel, ConfigDict, EmailStr
+import re
+from pydantic import BaseModel, ConfigDict, EmailStr, field_validator
 from typing import List, Optional
 from datetime import datetime
+
+GIT_URL_REGEX = re.compile(r'^(https?|git)://[^\s<>"\'{}|\\^`]+$', re.IGNORECASE)
 
 # ---------------------------------------------------------------------------
 # Auth schemas
@@ -10,6 +13,15 @@ class UserRegisterRequest(BaseModel):
     username: str
     email: EmailStr
     password: str
+
+    @field_validator('password')
+    @classmethod
+    def validate_password_strength(cls, v: str) -> str:
+        if not v or len(v) < 8:
+            raise ValueError("Password must be at least 8 characters long.")
+        if not re.search(r"[A-Za-z]", v) or not re.search(r"[0-9!@#$%^&*()_+\-=\[\]{};':\",./<>?]", v):
+            raise ValueError("Password must contain both letters and numbers or special characters.")
+        return v
 
 class LoginRequest(BaseModel):
     email: EmailStr
@@ -44,6 +56,16 @@ class UserUpdateRequest(BaseModel):
     is_active: Optional[bool] = None
     github_username: Optional[str] = None
     is_dark_mode: Optional[bool] = None
+
+    @field_validator('password')
+    @classmethod
+    def validate_password_strength(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None:
+            if len(v) < 8:
+                raise ValueError("Password must be at least 8 characters long.")
+            if not re.search(r"[A-Za-z]", v) or not re.search(r"[0-9!@#$%^&*()_+\-=\[\]{};':\",./<>?]", v):
+                raise ValueError("Password must contain both letters and numbers or special characters.")
+        return v
 
 class UsersListResponse(BaseModel):
     total_users: int
@@ -123,6 +145,18 @@ class ProjectCreateRequest(BaseModel):
     course_id: int
     group_no: str
     store_local_copy: Optional[bool] = True
+
+    @field_validator('git_url')
+    @classmethod
+    def validate_git_url(cls, v: str) -> str:
+        if not v or not isinstance(v, str):
+            raise ValueError("git_url must be a non-empty string.")
+        v_clean = v.strip()
+        if v_clean.startswith("-"):
+            raise ValueError("Invalid git_url: URL cannot start with a hyphen.")
+        if not GIT_URL_REGEX.match(v_clean):
+            raise ValueError("Invalid git_url: Only HTTP(S) and Git protocols (e.g. https://github.com/user/repo.git) are allowed.")
+        return v_clean
 
 class ProjectCreateResponse(BaseModel):
     project_id: int

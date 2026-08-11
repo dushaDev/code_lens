@@ -1,12 +1,18 @@
 import os
 from datetime import datetime, timedelta, timezone
 from typing import Optional
+from dotenv import load_dotenv
+
+load_dotenv()
 
 from jose import JWTError, jwt
 
-SECRET_KEY: str = os.getenv("SECRET_KEY", "fallback-secret-change-me")
+SECRET_KEY: str = os.getenv("SECRET_KEY", "").strip()
+if not SECRET_KEY:
+    raise RuntimeError("SECRET_KEY environment variable is missing or empty. Refusing to boot with insecure fallback.")
+
 ALGORITHM: str = os.getenv("ALGORITHM", "HS256")
-ACCESS_TOKEN_EXPIRE_MINUTES: int = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "360"))
+ACCESS_TOKEN_EXPIRE_MINUTES: int = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "60"))
 
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:

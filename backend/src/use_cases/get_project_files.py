@@ -83,7 +83,7 @@ class GetProjectFileContentUseCase:
         # Path Traversal Prevention
         target_abs = os.path.abspath(os.path.join(local_path, file_path))
         base_abs = os.path.abspath(local_path)
-        if not target_abs.startswith(base_abs):
+        if os.path.commonpath([target_abs, base_abs]) != base_abs:
             raise PermissionError("Access denied: Invalid file path.")
 
         if not os.path.exists(target_abs) or not os.path.isfile(target_abs):

@@ -1,6 +1,11 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from dotenv import load_dotenv
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
 
 load_dotenv()
 
@@ -8,11 +13,21 @@ from src.infrastructure.database.session import init_db
 from src.infrastructure.api.routers import router
 from src.infrastructure.api.similarity_router import similarity_router
 
+# ---------------------------------------------------------------------------
+# Rate limiter — keyed by client IP
+# ---------------------------------------------------------------------------
+limiter = Limiter(key_func=get_remote_address)
+
 app = FastAPI(
     title="Code Lens API",
     description="Git Data Extraction API for Code Lens",
     version="1.0.0"
 )
+
+# Attach limiter to app state so @limiter.limit decorators can find it
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+app.add_middleware(SlowAPIMiddleware)
 
 import os
 
