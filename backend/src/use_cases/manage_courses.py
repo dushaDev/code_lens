@@ -15,6 +15,7 @@ class CreateCourseUseCase:
         description: str = None,
         tech_requirements: Optional[str] = None,
         deadline: Optional[datetime] = None,
+        default_sampling_mode: Optional[str] = "sample",
     ) -> CourseEntity:
         return self.course_repo.create(
             name=name,
@@ -22,6 +23,7 @@ class CreateCourseUseCase:
             user_id=user_id,
             tech_requirements=tech_requirements,
             deadline=deadline,
+            default_sampling_mode=default_sampling_mode,
         )
 
 
@@ -30,7 +32,7 @@ class UpdateCourseUseCase:
     so an instructor can fill in tech requirements or a deadline later, or clear
     one without touching the rest of the course."""
 
-    EDITABLE_FIELDS = {"name", "description", "tech_requirements", "deadline"}
+    EDITABLE_FIELDS = {"name", "description", "tech_requirements", "deadline", "default_sampling_mode"}
 
     def __init__(self, course_repo: ICourseRepository):
         self.course_repo = course_repo

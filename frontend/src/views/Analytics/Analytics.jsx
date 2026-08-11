@@ -101,7 +101,6 @@ export default function Analytics({ project, course, onBack, qualAnalysisState, 
     const botKeywords = ['bot', 'actions', 'workflow', 'ci', 'support', 'helper', 'automated', 'npm-owner', 'greenkeeper', 'snyk'];
     return botKeywords.some(keyword => nameLower.includes(keyword) || emailLower.includes(keyword));
   };
-
   useEffect(() => {
     const fetchAnalytics = async () => {
       setLoading(true);
@@ -109,11 +108,14 @@ export default function Analytics({ project, course, onBack, qualAnalysisState, 
       const token = localStorage.getItem('token');
 
       try {
-        const [analyticsRes, commitsRes] = await Promise.all([
+        const [analyticsRes, commitsRes, cloudReportRes] = await Promise.all([
           fetch(`/api/v1/projects/${project.id}/analytics`, {
             headers: { 'Authorization': `Bearer ${token}` }
           }),
           fetch(`/api/v1/projects/${project.id}/commits`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+          }),
+          fetch(`/api/v1/projects/${project.id}/cloud-report`, {
             headers: { 'Authorization': `Bearer ${token}` }
           })
         ]);
@@ -122,6 +124,17 @@ export default function Analytics({ project, course, onBack, qualAnalysisState, 
         const commitsData = commitsRes.ok ? await commitsRes.json() : { commits: [] };
         setAnalytics(analyticsData);
         setCommits(commitsData.commits || []);
+
+        if (cloudReportRes && cloudReportRes.ok) {
+          const cloudData = await cloudReportRes.json();
+          if (cloudData && cloudData.cloud_report) {
+            setCloudReport(cloudData.cloud_report);
+          } else {
+            setCloudReport(null);
+          }
+        } else {
+          setCloudReport(null);
+        }
       } catch (err) {
         setError(err.message || 'Failed to load project analytics from database.');
       } finally {
@@ -131,9 +144,6 @@ export default function Analytics({ project, course, onBack, qualAnalysisState, 
 
     fetchAnalytics();
   }, [project]);
-
-
-
   // Sync sampling mode from completed qualitative analysis data if available
   useEffect(() => {
     if (qualData?.project_summary?.sampling_mode) {
@@ -175,6 +185,12 @@ export default function Analytics({ project, course, onBack, qualAnalysisState, 
     checkAndStart();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab, project.id]);
+
+  useEffect(() => {
+    if (project && project.sampling_mode) {
+      setSamplingMode(project.sampling_mode);
+    }
+  }, [project]);
 
   if (loading) {
     return (
@@ -220,10 +236,86 @@ export default function Analytics({ project, course, onBack, qualAnalysisState, 
     }
   };
 
-  const generateCloudReport = async () => {
+  const getVerdictBadgeStyle = (verdict) => {
+    const v = (verdict || "").toLowerCase();
+    if (v.startsWith("low risk")) {
+      return { backgroundColor: 'rgba(16,185,129,0.12)', color: '#10b981', padding: '3px 8px', borderRadius: '4px', border: '1px solid rgba(16,185,129,0.2)', fontWeight: '600', fontSize: '0.8rem' };
+    }
+    if (v.startsWith("moderate risk") || v.startsWith("medium risk")) {
+      return { backgroundColor: 'rgba(245,158,11,0.12)', color: '#f59e0b', padding: '3px 8px', borderRadius: '4px', border: '1px solid rgba(245,158,11,0.2)', fontWeight: '600', fontSize: '0.8rem' };
+    }
+    if (v.startsWith("high risk")) {
+      return { backgroundColor: 'rgba(239,68,68,0.12)', color: '#ef4444', padding: '3px 8px', borderRadius: '4px', border: '1px solid rgba(239,68,68,0.2)', fontWeight: '600', fontSize: '0.8rem' };
+    }
+    return { backgroundColor: 'var(--bg-app)', color: 'var(--text-muted)', padding: '3px 8px', borderRadius: '4px', border: '1px solid var(--border-color)', fontWeight: '600', fontSize: '0.8rem' };
+  };
+
+  const getRiskScoreBadgeStyle = (score) => {
+    const s = (score || "").toLowerCase();
+    if (s.includes("high") || s.includes("7/") || s.includes("8/") || s.includes("9/") || s.includes("10/")) {
+      return { backgroundColor: 'rgba(239,68,68,0.15)', color: '#ef4444', border: '1px solid rgba(239,68,68,0.3)', padding: '4px 10px', borderRadius: '12px', fontWeight: '700', fontSize: '0.85rem' };
+    }
+    if (s.includes("mod") || s.includes("medium") || s.includes("4/") || s.includes("5/") || s.includes("6/")) {
+      return { backgroundColor: 'rgba(245,158,11,0.15)', color: '#f59e0b', border: '1px solid rgba(245,158,11,0.3)', padding: '4px 10px', borderRadius: '12px', fontWeight: '700', fontSize: '0.85rem' };
+    }
+    return { backgroundColor: 'rgba(16,185,129,0.15)', color: '#10b981', border: '1px solid rgba(16,185,129,0.3)', padding: '4px 10px', borderRadius: '12px', fontWeight: '700', fontSize: '0.85rem' };
+  };
+
+  const handleSamplingModeChange = async (mode) => {
+    setSamplingMode(mode);
+    try {
+      const token = localStorage.getItem('token');
+      const res = await fetch(`/api/v1/projects/${project.id}/sampling-mode`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ sampling_mode: mode })
+      });
+      if (!res.ok) {
+        console.error('Failed to update project sampling mode in DB');
+      }
+    } catch (err) {
+      console.error('Error updating project sampling mode', err);
+    }
+  };
+
+  const generateCloudReportData = async () => {
     setIsCloudGenerating(true);
     setCloudError(null);
     setCloudReport(null);
+    try {
+      const token = localStorage.getItem('token');
+      const res = await fetch(`/api/v1/projects/${project.id}/cloud-report/generate`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (res.status === 402) {
+        setCloudError('NO_API_KEY');
+        setIsCloudGenerating(false);
+        return;
+      }
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        let detailMsg = 'Failed to generate cloud report';
+        if (errData && errData.detail) {
+          detailMsg = typeof errData.detail === 'string' ? errData.detail : JSON.stringify(errData.detail);
+        }
+        throw new Error(detailMsg);
+      }
+      const data = await res.json();
+      setCloudReport(data);
+    } catch (err) {
+      setCloudError(err.message);
+    } finally {
+      setIsCloudGenerating(false);
+    }
+  };
+
+  const downloadCloudReportPDF = async () => {
+    setIsCloudGenerating(true);
+    setCloudError(null);
     try {
       const token = localStorage.getItem('token');
       const res = await fetch(`/api/v1/projects/${project.id}/cloud-report`, {
@@ -237,7 +329,7 @@ export default function Analytics({ project, course, onBack, qualAnalysisState, 
       }
       if (!res.ok) {
         const errData = await res.json().catch(() => ({}));
-        let detailMsg = 'Failed to generate cloud report';
+        let detailMsg = 'Failed to download PDF report';
         if (errData && errData.detail) {
           detailMsg = typeof errData.detail === 'string' ? errData.detail : JSON.stringify(errData.detail);
         }
@@ -263,8 +355,6 @@ export default function Analytics({ project, course, onBack, qualAnalysisState, 
       a.click();
       window.URL.revokeObjectURL(url);
       document.body.removeChild(a);
-      
-      setCloudReport("PDF Generated Successfully!");
     } catch (err) {
       setCloudError(err.message);
     } finally {
@@ -974,7 +1064,7 @@ export default function Analytics({ project, course, onBack, qualAnalysisState, 
                       <button
                         key={m}
                         type="button"
-                        onClick={() => setSamplingMode(m)}
+                        onClick={() => handleSamplingModeChange(m)}
                         disabled={isRunning || isCancelling}
                         style={{
                           padding: '3px 9px', borderRadius: '4px', fontSize: '0.73rem', fontWeight: '600',
@@ -1190,11 +1280,49 @@ export default function Analytics({ project, course, onBack, qualAnalysisState, 
 
             {/* ── Row 4: Cloud AI Final Report ──────────────────────────── */}
             <div className="card" style={{ padding: '24px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '12px' }}>
-                <h2 style={{ fontSize: '1.1rem', fontWeight: '600', color: 'var(--text-main)', margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <Bot size={20} style={{ color: 'var(--primary)' }} />
-                  <span>Cloud AI Final Report</span>
-                </h2>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap', gap: '12px', borderBottom: '1px solid var(--border-color)', paddingBottom: '16px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                  <Bot size={22} style={{ color: 'var(--primary)' }} />
+                  <h2 style={{ fontSize: '1.15rem', fontWeight: '700', color: 'var(--text-main)', margin: 0 }}>
+                    Cloud AI Final Evaluation Report
+                  </h2>
+                  {cloudReport && cloudReport.overall_project_risk_score && (
+                    <span style={{
+                      ...getRiskScoreBadgeStyle(cloudReport.overall_project_risk_score),
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '4px'
+                    }}>
+                      <AlertCircle size={13} />
+                      Risk Score: {cloudReport.overall_project_risk_score}
+                    </span>
+                  )}
+                </div>
+
+                {cloudReport && (
+                  <div style={{ display: 'flex', gap: '8px' }}>
+                    <button 
+                      onClick={downloadCloudReportPDF}
+                      disabled={isCloudGenerating}
+                      className="btn btn-secondary btn-sm"
+                      style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.82rem' }}
+                      title="Download PDF Report"
+                    >
+                      <Bot size={14} />
+                      <span>Download PDF</span>
+                    </button>
+                    <button 
+                      onClick={generateCloudReportData}
+                      disabled={isCloudGenerating}
+                      className="btn btn-secondary btn-sm"
+                      style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.82rem' }}
+                      title="Regenerate Report"
+                    >
+                      <RefreshCw size={14} className={isCloudGenerating ? "spin" : ""} />
+                      <span>Regenerate</span>
+                    </button>
+                  </div>
+                )}
               </div>
               
               {!qualData && !isComplete && (
@@ -1205,7 +1333,7 @@ export default function Analytics({ project, course, onBack, qualAnalysisState, 
               )}
 
               {(qualData || isComplete) && (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
                   {cloudError === 'NO_API_KEY' ? (
                     <div style={{ padding: '20px', backgroundColor: 'rgba(245,158,11,0.1)', border: '1px solid rgba(245,158,11,0.2)', borderRadius: '8px', color: '#f59e0b', fontSize: '0.9rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
@@ -1228,7 +1356,7 @@ export default function Analytics({ project, course, onBack, qualAnalysisState, 
                   {!cloudReport ? (
                     <div style={{ display: 'flex', justifyContent: 'center', padding: '30px', backgroundColor: 'var(--bg-app)', borderRadius: '8px', border: '1px dashed var(--border-color)' }}>
                       <button 
-                        onClick={generateCloudReport}
+                        onClick={generateCloudReportData}
                         disabled={isCloudGenerating}
                         className="btn btn-primary"
                         style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '10px 20px', fontSize: '0.95rem' }}
@@ -1236,28 +1364,123 @@ export default function Analytics({ project, course, onBack, qualAnalysisState, 
                         {isCloudGenerating ? (
                           <>
                             <RefreshCw size={16} className="spin" />
-                            Generating PDF Report...
+                            Generating Cloud AI Report...
                           </>
                         ) : (
                           <>
                             <Bot size={16} />
-                            Generate & Download PDF Report
+                            Generate Cloud AI Final Report
                           </>
                         )}
                       </button>
                     </div>
+                  ) : typeof cloudReport === 'object' && cloudReport.executive_summary ? (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+                      
+                      {/* Grid for Executive Summary and Work Distribution */}
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '20px' }}>
+                        <div style={{ backgroundColor: 'var(--bg-app)', padding: '18px', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
+                          <h3 style={{ fontSize: '0.92rem', fontWeight: '600', color: 'var(--primary)', textTransform: 'uppercase', letterSpacing: '0.05em', margin: '0 0 10px 0' }}>
+                            Executive Summary
+                          </h3>
+                          <p style={{ margin: 0, fontSize: '0.88rem', lineHeight: '1.6', color: 'var(--text-main)' }}>
+                            {cloudReport.executive_summary}
+                          </p>
+                        </div>
+                        <div style={{ backgroundColor: 'var(--bg-app)', padding: '18px', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
+                          <h3 style={{ fontSize: '0.92rem', fontWeight: '600', color: 'var(--primary)', textTransform: 'uppercase', letterSpacing: '0.05em', margin: '0 0 10px 0' }}>
+                            Work Distribution & Collaboration
+                          </h3>
+                          <p style={{ margin: 0, fontSize: '0.88rem', lineHeight: '1.6', color: 'var(--text-main)' }}>
+                            {cloudReport.work_distribution_and_fairness}
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Integrity Anomalies (if any) */}
+                      {cloudReport.academic_integrity_anomalies && !cloudReport.academic_integrity_anomalies.includes("No anomalies") && !cloudReport.academic_integrity_anomalies.includes("none") && (
+                        <div style={{ backgroundColor: 'rgba(239,68,68,0.06)', padding: '18px', borderRadius: '8px', border: '1px solid rgba(239,68,68,0.2)', display: 'flex', gap: '12px' }}>
+                          <AlertCircle size={20} style={{ color: '#ef4444', flexShrink: 0, marginTop: '2px' }} />
+                          <div>
+                            <h3 style={{ fontSize: '0.92rem', fontWeight: '700', color: '#ef4444', margin: '0 0 6px 0' }}>
+                              Academic Integrity & Team Dynamics Anomalies
+                            </h3>
+                            <p style={{ margin: 0, fontSize: '0.86rem', lineHeight: '1.5', color: 'var(--text-main)' }}>
+                              {cloudReport.academic_integrity_anomalies}
+                            </p>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Individual Student Evaluations */}
+                      {cloudReport.student_evaluations && cloudReport.student_evaluations.length > 0 && (
+                        <div>
+                          <h3 style={{ fontSize: '0.95rem', fontWeight: '600', color: 'var(--text-main)', margin: '0 0 12px 0', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <User size={16} style={{ color: 'var(--primary)' }} />
+                            <span>Individual Student Qualitative Evaluations</span>
+                          </h3>
+                          <div className="table-container">
+                            <table className="custom-table" style={{ tableLayout: 'fixed', width: '100%' }}>
+                              <thead>
+                                <tr>
+                                  <th style={{ width: '18%' }}>Student</th>
+                                  <th style={{ width: '18%' }}>Verdict</th>
+                                  <th style={{ width: '16%' }}>Commits</th>
+                                  <th style={{ width: '16%' }}>Substance</th>
+                                  <th style={{ width: '16%' }}>Pacing</th>
+                                  <th style={{ width: '16%' }}>Quality Signals</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {cloudReport.student_evaluations.map((student, idx) => (
+                                  <tr key={idx}>
+                                    <td style={{ fontWeight: '600' }}>{student.student_name}</td>
+                                    <td>
+                                      <span style={getVerdictBadgeStyle(student.verdict)}>
+                                        {student.verdict}
+                                      </span>
+                                    </td>
+                                    <td style={{ fontSize: '0.82rem' }}>{student.commits_summary}</td>
+                                    <td style={{ fontSize: '0.82rem' }}>{student.substance_breakdown}</td>
+                                    <td style={{ fontSize: '0.82rem' }}>{student.pacing_and_deadlines}</td>
+                                    <td style={{ fontSize: '0.82rem' }}>{student.quality_and_integrity_signals}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Actionable Recommendations */}
+                      {cloudReport.actionable_recommendations && cloudReport.actionable_recommendations.length > 0 && (
+                        <div style={{ borderTop: '1px solid var(--border-color)', paddingTop: '16px' }}>
+                          <h3 style={{ fontSize: '0.95rem', fontWeight: '600', color: 'var(--text-main)', margin: '0 0 10px 0' }}>
+                            Actionable Recommendations
+                          </h3>
+                          <ul style={{ margin: 0, paddingLeft: '20px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                            {cloudReport.actionable_recommendations.map((rec, idx) => (
+                              <li key={idx} style={{ fontSize: '0.88rem', color: 'var(--text-main)', lineHeight: '1.5' }}>
+                                {rec}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+
+                    </div>
                   ) : (
                     <div style={{ padding: '24px', backgroundColor: 'var(--bg-app)', borderRadius: '8px', border: '1px solid var(--border-color)', color: 'var(--text-main)', fontSize: '0.95rem', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '15px' }}>
                       <div style={{ color: 'var(--success)', fontWeight: 'bold', fontSize: '1.1rem' }}>
-                        ✓ {cloudReport}
+                        ✓ {String(cloudReport)}
                       </div>
                       <button 
-                        onClick={generateCloudReport}
+                        onClick={downloadCloudReportPDF}
                         className="btn btn-secondary"
                         style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 16px' }}
                       >
-                        <RefreshCw size={16} />
-                        Regenerate & Download PDF
+                        <Bot size={16} />
+                        Download PDF Report
                       </button>
                     </div>
                   )}

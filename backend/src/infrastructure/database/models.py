@@ -58,6 +58,7 @@ class CourseModel(Base):
     deadline: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     # Optional encrypted Gemini API key for cloud qualitative analysis.
     encrypted_api_key: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    default_sampling_mode: Mapped[Optional[str]] = mapped_column(String, nullable=True, default="sample")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     user_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
@@ -83,6 +84,8 @@ class ProjectModel(Base):
     is_local_copy_stored: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     qualitative_report: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    cloud_report: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    sampling_mode: Mapped[Optional[str]] = mapped_column(String, nullable=True, default="sample")
     course_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("courses.id", ondelete="CASCADE"), nullable=False
     )

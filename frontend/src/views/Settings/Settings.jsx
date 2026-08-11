@@ -20,6 +20,7 @@ export default function Settings({ course, onCourseReset, onCourseDeleted, onCou
   const [techRequirements, setTechRequirements] = useState('');
   const [deadlineDate, setDeadlineDate] = useState('');
   const [deadlineTime, setDeadlineTime] = useState('');
+  const [defaultSamplingMode, setDefaultSamplingMode] = useState('sample');
 
   // ── User API Keys (Multi-Key Management) ──────────────────────────────────
   const [apiKeys, setApiKeys] = useState([]);
@@ -57,7 +58,8 @@ export default function Settings({ course, onCourseReset, onCourseDeleted, onCou
     setTechRequirements(course.tech_requirements || '');
     setDeadlineDate(date);
     setDeadlineTime(time || '00:00');
-  }, [course?.id, course?.deadline, course?.tech_requirements, course?.name, course?.description]);
+    setDefaultSamplingMode(course.default_sampling_mode || 'sample');
+  }, [course?.id, course?.deadline, course?.tech_requirements, course?.name, course?.description, course?.default_sampling_mode]);
 
   const handleCreateApiKey = async (e) => {
     e.preventDefault();
@@ -161,7 +163,8 @@ export default function Settings({ course, onCourseReset, onCourseDeleted, onCou
           name: name.trim(),
           description: description.trim() || null,
           tech_requirements: techRequirements.trim() || null,
-          deadline: buildDeadline(deadlineDate, deadlineTime)
+          deadline: buildDeadline(deadlineDate, deadlineTime),
+          default_sampling_mode: defaultSamplingMode
         })
       });
 
@@ -374,6 +377,22 @@ export default function Settings({ course, onCourseReset, onCourseDeleted, onCou
               </div>
               <span className="settings-hint">
                 Blank time means midnight (00:00). Clear the date to remove the deadline.
+              </span>
+            </div>
+            <div className="form-group">
+              <label className="form-label" htmlFor="course-default-sampling-mode">Default Qualitative Sampling Mode</label>
+              <select
+                id="course-default-sampling-mode"
+                className="input-field"
+                value={defaultSamplingMode}
+                onChange={(e) => setDefaultSamplingMode(e.target.value)}
+              >
+                <option value="sample">Smart (Stratified Sampling)</option>
+                <option value="full">Full (Process All Commits)</option>
+                <option value="random">Random (Random 20% Sampling)</option>
+              </select>
+              <span className="settings-hint">
+                The default mode loaded for new projects and qualitative scan sessions.
               </span>
             </div>
             <button type="submit" className="btn btn-primary btn-sm settings-action-btn" disabled={detailsLoading}>

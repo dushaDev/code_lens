@@ -77,6 +77,7 @@ class CourseCreateRequest(BaseModel):
     description: Optional[str] = None
     tech_requirements: Optional[str] = None
     deadline: Optional[datetime] = None
+    default_sampling_mode: Optional[str] = "sample"
 
 class CourseUpdateRequest(BaseModel):
     """Partial update — only the fields actually sent are applied. Sending an
@@ -85,6 +86,7 @@ class CourseUpdateRequest(BaseModel):
     description: Optional[str] = None
     tech_requirements: Optional[str] = None
     deadline: Optional[datetime] = None
+    default_sampling_mode: Optional[str] = None
 
 class CourseResponse(BaseModel):
     id: int
@@ -94,6 +96,7 @@ class CourseResponse(BaseModel):
     deadline: Optional[datetime] = None
     has_api_key: Optional[bool] = False
     masked_api_key: Optional[str] = None
+    default_sampling_mode: Optional[str] = "sample"
     created_at: datetime
 
 class ApiKeySaveRequest(BaseModel):
@@ -129,6 +132,7 @@ class ProjectCreateResponse(BaseModel):
     tech_stack: List[str] = []
     store_local_copy: bool = True
     is_local_copy_stored: bool = True
+    sampling_mode: Optional[str] = "sample"
 
 class ExtractResponse(BaseModel):
     status: str
@@ -162,6 +166,7 @@ class ProjectResponse(BaseModel):
     tech_stack: List[str] = []
     created_at: datetime
     course_id: Optional[int] = None
+    sampling_mode: Optional[str] = "sample"
 
 class FileChangeResponse(BaseModel):
     id: int

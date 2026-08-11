@@ -147,10 +147,13 @@ class ProjectRepository(IProjectRepository):
             is_local_copy_stored=project_model.is_local_copy_stored or False,
             created_at=project_model.created_at,
             course_id=project_model.course_id,
+            sampling_mode=project_model.sampling_mode or "sample",
             tech_stack=self._detect_tech_stack(project_model.id)
         )
 
     def create(self, name: str, description: Optional[str], git_url: str, course_id: int, group_no: str, store_local_copy: bool = True) -> ProjectEntity:
+        course = self.db.query(CourseModel).filter(CourseModel.id == course_id).first()
+        def_mode = course.default_sampling_mode if (course and course.default_sampling_mode) else "sample"
         # Initial saved path is empty, updated via update_local_path once ID is flushed/committed
         project_model = ProjectModel(
             name=name,
@@ -160,6 +163,7 @@ class ProjectRepository(IProjectRepository):
             group_no=group_no,
             store_local_copy=True,
             is_local_copy_stored=True,
+            sampling_mode=def_mode,
             course_id=course_id
         )
         self.db.add(project_model)
@@ -176,6 +180,7 @@ class ProjectRepository(IProjectRepository):
             is_local_copy_stored=project_model.is_local_copy_stored,
             created_at=project_model.created_at,
             course_id=project_model.course_id,
+            sampling_mode=project_model.sampling_mode,
             tech_stack=self._detect_tech_stack(project_model.id)
         )
 
@@ -684,6 +689,7 @@ class CourseRepository(ICourseRepository):
             description=m.description,
             tech_requirements=m.tech_requirements,
             deadline=m.deadline,
+            default_sampling_mode=m.default_sampling_mode or "sample",
             created_at=m.created_at,
             user_id=m.user_id
         )
@@ -695,6 +701,7 @@ class CourseRepository(ICourseRepository):
         user_id: int,
         tech_requirements: Optional[str] = None,
         deadline: Optional[datetime] = None,
+        default_sampling_mode: Optional[str] = "sample",
     ) -> CourseEntity:
         course_model = CourseModel(
             name=name,
@@ -702,6 +709,7 @@ class CourseRepository(ICourseRepository):
             user_id=user_id,
             tech_requirements=tech_requirements,
             deadline=deadline,
+            default_sampling_mode=default_sampling_mode or "sample",
         )
         self.db.add(course_model)
         self.db.commit()
@@ -765,6 +773,7 @@ class CourseRepository(ICourseRepository):
                 description=m.description,
                 created_at=m.created_at,
                 course_id=m.course_id,
+                sampling_mode=m.sampling_mode or "sample",
                 tech_stack=project_repo._detect_tech_stack(m.id)
             )
             for m in project_models

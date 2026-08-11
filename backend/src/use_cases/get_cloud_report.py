@@ -7,6 +7,7 @@ import json
 import io
 import base64
 from typing import Optional
+from src.domain.metrics import calculate_gini, get_gini_status
 
 
 def _build_logo_uri() -> str:
@@ -250,20 +251,8 @@ def build_gemini_prompt(qual_data: dict, course_name: str, tech_requirements: Op
                 contrib_commit_counts.append(tot_commits)
         
         if contrib_commit_counts and sum(contrib_commit_counts) > 0:
-            n = len(contrib_commit_counts)
-            s_counts = sorted(contrib_commit_counts)
-            tot = sum(s_counts)
-            if n > 1 and tot > 0:
-                idx_sum = sum((i + 1) * val for i, val in enumerate(s_counts))
-                gini_val = max(0.0, round((2 * idx_sum) / (n * tot) - (n + 1) / n, 3))
-            else:
-                gini_val = 0.0
-            
-            gini_status = (
-                "Low Risk (Well Distributed)" if gini_val < 0.3
-                else "Medium Risk (Slightly Unequal)" if gini_val < 0.5
-                else "High Risk (Inequal / Free-rider Risk)"
-            )
+            gini_val = calculate_gini(contrib_commit_counts)
+            gini_status = get_gini_status(gini_val)
             gini_coeff = f"{gini_val} ({gini_status})"
         else:
             gini_coeff = "0.0 (Low Risk (Well Distributed))"

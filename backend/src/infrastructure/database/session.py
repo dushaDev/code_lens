@@ -24,6 +24,12 @@ def init_db():
         if 'qualitative_report' not in columns:
             with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE projects ADD COLUMN qualitative_report TEXT NULL;"))
+        if 'cloud_report' not in columns:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE projects ADD COLUMN cloud_report TEXT NULL;"))
+        if 'sampling_mode' not in columns:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE projects ADD COLUMN sampling_mode VARCHAR NULL DEFAULT 'sample';"))
 
         # Proactively inspect and run schema migration for optional course metadata
         if inspector.has_table('courses'):
@@ -37,6 +43,9 @@ def init_db():
             if 'encrypted_api_key' not in course_columns:
                 with engine.begin() as conn:
                     conn.execute(text("ALTER TABLE courses ADD COLUMN encrypted_api_key TEXT NULL;"))
+            if 'default_sampling_mode' not in course_columns:
+                with engine.begin() as conn:
+                    conn.execute(text("ALTER TABLE courses ADD COLUMN default_sampling_mode VARCHAR NULL DEFAULT 'sample';"))
 
         # Proactively inspect and run schema migration for similarity_reports.status if missing
         if inspector.has_table('similarity_reports'):

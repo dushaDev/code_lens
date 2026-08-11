@@ -1,18 +1,6 @@
 from typing import List, Dict, Any
 from src.use_cases.interfaces import IProjectRepository, IAuthorRepository, ICommitRepository
-
-def calculate_gini(contributions: List[int]) -> float:
-    if not contributions or sum(contributions) == 0:
-        return 0.0
-    n = len(contributions)
-    if n == 1:
-        return 0.0
-    
-    sorted_contribs = sorted(contributions)
-    height_sum = sum((i + 1) * val for i, val in enumerate(sorted_contribs))
-    total_sum = sum(sorted_contribs)
-    
-    return (2.0 * height_sum) / (n * total_sum) - (n + 1.0) / n
+from src.domain.metrics import calculate_gini, get_gini_status
 
 class GetProjectAnalyticsUseCase:
     def __init__(
@@ -87,18 +75,12 @@ class GetProjectAnalyticsUseCase:
         # Sort contributions descending by lines added
         contributions_list.sort(key=lambda x: x["lines_added"], reverse=True)
 
-        # 4. Calculate Gini Coefficient
-        # Extract lines added for each author as contribution values
+        # 4. Calculate Gini Coefficient using central domain metric
         lines_list = [contrib["lines_added"] for contrib in contributions_list]
-        gini = round(calculate_gini(lines_list), 4)
+        gini = calculate_gini(lines_list)
 
         # 5. Determine distribution status / risk category
-        if gini < 0.3:
-            status = "Low Risk (Well Distributed)"
-        elif gini < 0.5:
-            status = "Medium Risk (Slightly Unequal)"
-        else:
-            status = "High Risk (Knowledge Siloed)"
+        status = get_gini_status(gini)
 
         return {
             "project_id": project_id,

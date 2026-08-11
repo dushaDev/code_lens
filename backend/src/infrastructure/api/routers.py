@@ -27,7 +27,7 @@ from src.infrastructure.api.schemas import (
     UserRegisterRequest, UserResponse, UserUpdateRequest, UsersListResponse, TokenResponse, LoginRequest,
     UserApiKeyCreateRequest, UserApiKeyResponse,
     CourseResetRequest, SearchResultItem, SearchResponse, QualitativeAnalysisResponse,
-    ApiKeySaveRequest, ApiKeyStatusResponse, CloudReportResponse
+    ApiKeySaveRequest, ApiKeyStatusResponse, CloudReportResponse, CloudReportData
 )
 from src.infrastructure.auth.crypto import encrypt_api_key, decrypt_api_key, mask_api_key
 from src.use_cases.get_cloud_report import generate_cloud_report
@@ -466,6 +466,7 @@ def _make_course_response(course) -> CourseResponse:
         deadline=course.deadline,
         has_api_key=bool(plain_key),
         masked_api_key=mask_api_key(plain_key) if plain_key else None,
+        default_sampling_mode=getattr(course, 'default_sampling_mode', 'sample') or 'sample',
         created_at=course.created_at
     )
 
@@ -665,7 +666,8 @@ def get_course_projects(
                 group_no=p.group_no,
                 tech_stack=p.tech_stack,
                 created_at=p.created_at,
-                course_id=p.course_id
+                course_id=p.course_id,
+                sampling_mode=getattr(p, 'sampling_mode', 'sample') or 'sample'
             )
             for p in projects
         ]
@@ -772,7 +774,8 @@ def create_project(
         group_no=project.group_no,
         tech_stack=project.tech_stack,
         store_local_copy=project.store_local_copy,
-        is_local_copy_stored=project.is_local_copy_stored
+        is_local_copy_stored=project.is_local_copy_stored,
+        sampling_mode=getattr(project, 'sampling_mode', 'sample') or 'sample'
     )
 
 
@@ -860,6 +863,33 @@ def delete_project(
     return None
 
 
+from pydantic import BaseModel
+
+class ProjectSamplingModeUpdateRequest(BaseModel):
+    sampling_mode: str
+
+
+@router.put(
+    "/projects/{project_id}/sampling-mode",
+    tags=["Projects"],
+    responses={400: {"model": ErrorResponse}, 401: {"model": ErrorResponse}, 404: {"model": ErrorResponse}, 500: {"model": ErrorResponse}}
+)
+def update_project_sampling_mode(
+    project_id: int,
+    request: ProjectSamplingModeUpdateRequest,
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_user)
+):
+    project = _get_project_for_user(project_id, current_user.id, db)
+    mode = request.sampling_mode.strip().lower()
+    if mode not in ("sample", "full", "random"):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid sampling mode. Must be one of: sample, full, random")
+    
+    project.sampling_mode = mode
+    db.commit()
+    return {"status": "success", "sampling_mode": project.sampling_mode}
+
+
 @router.get(
     "/projects/{project_id}/files/tree",
     tags=["Projects"],
@@ -938,7 +968,8 @@ def get_all_projects(
                 group_no=p.group_no,
                 tech_stack=project_repo._detect_tech_stack(p.id),
                 created_at=p.created_at,
-                course_id=p.course_id
+                course_id=p.course_id,
+                sampling_mode=getattr(p, 'sampling_mode', 'sample') or 'sample'
             )
             for p in projects
         ]
@@ -969,7 +1000,8 @@ def get_project_by_id(
         group_no=proj.group_no,
         tech_stack=project_repo._detect_tech_stack(proj.id),
         created_at=proj.created_at,
-        course_id=proj.course_id
+        course_id=proj.course_id,
+        sampling_mode=getattr(proj, 'sampling_mode', 'sample') or 'sample'
     )
 
 
@@ -1178,19 +1210,44 @@ def get_qualitative_analysis_status_route(
             return {"status": "complete", "progress": 100, "message": "Loaded from database cache.", "has_db_cache": True}
         return {"status": "idle", "progress": 0, "message": "", "has_db_cache": False}
     return status_data
-@router.post(
+@router.get(
     "/projects/{project_id}/cloud-report",
     tags=["Projects"]
 )
-def generate_cloud_ai_report(
+def get_cached_cloud_report(
     project_id: int,
     db: Session = Depends(get_db),
     current_user: UserModel = Depends(get_current_user)
 ):
-    """Generate a final narrative report using Cloud AI based on the stored qualitative analysis data, returning a PDF."""
+    """Retrieve the cached Cloud AI report for a project if it has already been generated."""
+    project = _get_project_for_user(project_id, current_user.id, db)
+    report_json = getattr(project, 'cloud_report', None)
+    if not report_json:
+        return {"cloud_report": None}
+    try:
+        report_data = json.loads(report_json)
+        return {"cloud_report": report_data}
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Malformed cached cloud report: {str(e)}"
+        )
+
+
+@router.post(
+    "/projects/{project_id}/cloud-report/generate",
+    response_model=CloudReportData,
+    tags=["Projects"]
+)
+def generate_and_cache_cloud_report(
+    project_id: int,
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_user)
+):
+    """Generate a final narrative report using Cloud AI based on the stored qualitative analysis data, cache and return it as JSON."""
     import json as _json
     print(f"\n================================================================================")
-    print(f"[CLOUD-REPORT-LOG] [ROUTER] HTTP POST /projects/{project_id}/cloud-report received.")
+    print(f"[CLOUD-REPORT-LOG] [ROUTER] HTTP POST /projects/{project_id}/cloud-report/generate received.")
     print(f"[CLOUD-REPORT-LOG] [ROUTER] Request User: ID {current_user.id} ({current_user.username}) | Target Project: ID {project_id}")
 
     project = _get_project_for_user(project_id, current_user.id, db)
@@ -1262,6 +1319,8 @@ def generate_cloud_ai_report(
         
         # Dynamic on-the-fly enrichment for legacy DB caches
         ps = qual_data.get("project_summary", {})
+        project_repo = ProjectRepository(db)
+        commit_repo = CommitRepository(db)
         if not ps.get("folder_structure") or not ps.get("readme_quality") or not ps.get("language_distribution"):
             import os
             try:
@@ -1376,14 +1435,232 @@ def generate_cloud_ai_report(
         )
         print(f"[CLOUD-REPORT-LOG] [ROUTER] generate_cloud_report returned valid CloudReportData object!")
         
+        # Save cache in DB
+        project.cloud_report = report_data.model_dump_json()
+        db.commit()
+        print(f"[CLOUD-REPORT-LOG] [ROUTER] Saved generated report JSON to project {project_id} cloud_report column.")
+        
+        return report_data
+    except HTTPException:
+        raise
+    except ValueError as ve:
+        print(f"[CLOUD-REPORT-LOG] [ROUTER] Caught ValueError: {ve}")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(ve))
+    except RuntimeError as re:
+        print(f"[CLOUD-REPORT-LOG] [ROUTER] Caught RuntimeError: {re}")
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(re))
+    except Exception as ex:
+        print(f"[CLOUD-REPORT-LOG] [ROUTER] Caught unexpected Exception: {ex}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Unexpected server error: {str(ex)}")
+
+
+@router.post(
+    "/projects/{project_id}/cloud-report",
+    tags=["Projects"]
+)
+def generate_cloud_ai_report(
+    project_id: int,
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_user)
+):
+    """Generate a final narrative report using Cloud AI based on the stored qualitative analysis data, returning a PDF (uses cache if available)."""
+    import json as _json
+    print(f"\n================================================================================")
+    print(f"[CLOUD-REPORT-LOG] [ROUTER] HTTP POST /projects/{project_id}/cloud-report received (PDF download request).")
+    print(f"[CLOUD-REPORT-LOG] [ROUTER] Request User: ID {current_user.id} ({current_user.username}) | Target Project: ID {project_id}")
+
+    project = _get_project_for_user(project_id, current_user.id, db)
+    print(f"[CLOUD-REPORT-LOG] [ROUTER] Found Project '{project.name}' (ID: {project.id}). Course ID: {project.course_id}")
+
+    course = getattr(project, 'course', None)
+    course_name = getattr(course, 'name', 'Unknown Course') if course else 'Unknown Course'
+    tech_req = getattr(course, 'tech_requirements', None) if course else None
+    deadline_val = getattr(course, 'deadline', None) if course else None
+    deadline_str = deadline_val.strftime("%Y-%m-%d %H:%M UTC") if deadline_val else None
+
+    # Load local AI qualitative report from DB cache
+    qual_report_json = getattr(project, 'qualitative_report', None)
+    if not qual_report_json:
+        print(f"[CLOUD-REPORT-LOG] [ROUTER] ERROR: Project {project_id} has no qualitative_report stored in DB.")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No local AI analysis found. Run Local AI Analysis first."
+        )
+
+    try:
+        qual_data = _json.loads(qual_report_json)
+        # Apply on-the-fly enrichment same as in the PDF generator...
+        ps = qual_data.get("project_summary", {})
+        project_repo = ProjectRepository(db)
+        commit_repo = CommitRepository(db)
+        if not ps.get("folder_structure") or not ps.get("readme_quality") or not ps.get("language_distribution"):
+            import os
+            try:
+                if not ps.get("language_distribution") and hasattr(project_repo, 'get_language_distribution'):
+                    ps["language_distribution"] = project_repo.get_language_distribution(project.id) or {}
+                
+                repo_path = getattr(project, 'local_saved_path', None)
+                if repo_path and os.path.exists(repo_path) and os.path.isdir(repo_path):
+                    if not ps.get("folder_structure"):
+                        top_dirs = []
+                        tot_files = 0
+                        tot_dirs = 0
+                        has_tests = False
+                        for root, dirs, files in os.walk(repo_path):
+                            dirs[:] = [d for d in dirs if not d.startswith('.') and d not in ('node_modules', '__pycache__', 'venv', 'env', 'build', 'dist')]
+                            tot_dirs += len(dirs)
+                            tot_files += len(files)
+                            if root == repo_path:
+                                top_dirs = list(dirs)
+                            for d in dirs:
+                                if d.lower() in ('test', 'tests', '__tests__', 'spec', 'specs'):
+                                    has_tests = True
+
+                        modularity = "Monolithic (Flat)"
+                        if len(top_dirs) >= 3 or has_tests:
+                            modularity = "High Modularity (Structured Directories)"
+                        elif len(top_dirs) >= 1:
+                            modularity = "Moderate Modularity"
+
+                        ps["folder_structure"] = {
+                            "top_level_directories": top_dirs[:8],
+                            "total_directories": tot_dirs,
+                            "total_files": tot_files,
+                            "has_tests_dir": has_tests,
+                            "modularity_score": modularity
+                        }
+
+                    if not ps.get("readme_quality"):
+                        readme_file = None
+                        for fname in os.listdir(repo_path):
+                            if fname.lower().startswith('readme'):
+                                readme_file = os.path.join(repo_path, fname)
+                                break
+                        if readme_file and os.path.isfile(readme_file):
+                            size_kb = round(os.path.getsize(readme_file) / 1024.0, 2)
+                            has_setup = False
+                            has_arch = False
+                            try:
+                                with open(readme_file, 'r', encoding='utf-8', errors='ignore') as f:
+                                    content = f.read().lower()
+                                    if any(k in content for k in ['install', 'setup', 'run', 'build', 'usage', 'getting started']):
+                                        has_setup = True
+                                    if any(k in content for k in ['architecture', 'design', 'structure', 'api', 'component', 'overview']):
+                                        has_arch = True
+                            except Exception:
+                                pass
+
+                            if size_kb > 2.0 and has_setup and has_arch:
+                                doc_score = "Comprehensive (9/10)"
+                            elif size_kb > 0.5 or has_setup:
+                                doc_score = "Basic (5/10)"
+                            else:
+                                doc_score = "Minimal (3/10)"
+
+                            ps["readme_quality"] = {
+                                "has_readme": True,
+                                "readme_size_kb": size_kb,
+                                "has_setup_guide": has_setup,
+                                "has_architecture_doc": has_arch,
+                                "documentation_score": doc_score
+                            }
+                        else:
+                            ps["readme_quality"] = {"documentation_score": "Missing (0/10)"}
+                qual_data["project_summary"] = ps
+            except Exception as enrich_err:
+                print(f"[CLOUD-REPORT-LOG] [ROUTER] On-the-fly cache enrichment warning: {enrich_err}")
+
+        # Ensure branches_summary, plagiarism_summary, ast_complexity_summary exist
+        if not ps.get("branches_summary") or not ps.get("plagiarism_summary") or not ps.get("ast_complexity_summary"):
+            try:
+                from src.use_cases.get_qualitative_analysis import extract_extended_quantitative_metrics
+                db_session = getattr(project_repo, 'db', db)
+                commits_list = commit_repo.get_by_project_id(project_id) if hasattr(commit_repo, 'get_by_project_id') else None
+                ext = extract_extended_quantitative_metrics(
+                    db=db_session,
+                    project_id=project.id,
+                    project=project,
+                    commits=commits_list
+                )
+                ps.update(ext)
+                qual_data["project_summary"] = ps
+            except Exception as ext_err:
+                print(f"[CLOUD-REPORT-LOG] [ROUTER] On-the-fly extended metrics warning: {ext_err}")
+    except Exception as e:
+        print(f"[CLOUD-REPORT-LOG] [ROUTER] ERROR: Failed to parse qualitative_report JSON: {e}")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Malformed qualitative report cache.")
+
+    # 1. Check if cached report is available
+    report_data = None
+    cached_report_json = getattr(project, 'cloud_report', None)
+    if cached_report_json:
+        try:
+            report_data = CloudReportData.model_validate_json(cached_report_json)
+            print(f"[CLOUD-REPORT-LOG] [ROUTER] Using cached cloud report JSON from DB.")
+        except Exception as parse_err:
+            print(f"[CLOUD-REPORT-LOG] [ROUTER] Cached report parse error: {parse_err}. Regenerating...")
+
+    # 2. If not cached, call generate_cloud_report (which calls LLM and caches result)
+    if not report_data:
+        # Fetch active API key
+        active_key_record = db.query(UserApiKeyModel).filter(
+            UserApiKeyModel.user_id == current_user.id,
+            UserApiKeyModel.is_active == True
+        ).first()
+
+        if not active_key_record:
+            course_obj = getattr(project, 'course', None)
+            legacy_key = getattr(course_obj, 'encrypted_api_key', None) if course_obj else None
+            if legacy_key:
+                plain = decrypt_api_key(legacy_key)
+                if plain:
+                    active_key_record = UserApiKeyModel(
+                        user_id=current_user.id,
+                        name=f"Migrated Key ({course_name or 'Course'})",
+                        provider="AgentRouter" if plain.startswith("sk-") else "Gemini",
+                        encrypted_api_key=legacy_key,
+                        masked_key=mask_api_key(plain),
+                        is_active=True
+                    )
+                    db.add(active_key_record)
+                    db.commit()
+                    db.refresh(active_key_record)
+
+        encrypted_key = active_key_record.encrypted_api_key if active_key_record else None
+        if not encrypted_key:
+            raise HTTPException(status_code=status.HTTP_402_PAYMENT_REQUIRED, detail="NO_API_KEY")
+
+        plain_key = decrypt_api_key(encrypted_key)
+        if not plain_key:
+            raise HTTPException(status_code=status.HTTP_402_PAYMENT_REQUIRED, detail="NO_API_KEY")
+
+        try:
+            report_data = generate_cloud_report(
+                qual_data=qual_data,
+                api_key=plain_key,
+                course_name=course_name,
+                tech_requirements=tech_req,
+                deadline=deadline_str
+            )
+            # Save cache in DB
+            project.cloud_report = report_data.model_dump_json()
+            db.commit()
+        except ValueError as ve:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(ve))
+        except RuntimeError as re:
+            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(re))
+        except Exception as ex:
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Unexpected server error: {str(ex)}")
+
+    # 3. Render PDF
+    try:
         from src.use_cases.get_cloud_report import render_pdf_report
         import datetime
         date_str = datetime.datetime.utcnow().strftime("%Y-%m-%d")
-        print(f"[CLOUD-REPORT-LOG] [ROUTER] Rendering PDF report using Jinja2 + xhtml2pdf...")
         lecturer = getattr(current_user, 'username', None) or getattr(current_user, 'email', None) or 'Course Lecturer'
         course_obj = getattr(project, 'course', None)
         course_dl = getattr(course_obj, 'deadline', None) if course_obj else getattr(project, 'deadline', None)
-        
+
         pdf_bytes = render_pdf_report(
             report_data=report_data, 
             course_name=course_name, 
@@ -1395,8 +1672,7 @@ def generate_cloud_ai_report(
             git_url=getattr(project, 'git_url', None),
             deadline=course_dl
         )
-        print(f"[CLOUD-REPORT-LOG] [ROUTER] PDF rendered successfully ({len(pdf_bytes)} bytes). Returning StreamingResponse.")
-        print(f"================================================================================\n")
+        print(f"[CLOUD-REPORT-LOG] [ROUTER] PDF rendered successfully ({len(pdf_bytes)} bytes).")
         
         import re
         safe_course = re.sub(r'[^\w\-_]', '_', course_name or "Course").strip('_')
@@ -1408,22 +1684,10 @@ def generate_cloud_ai_report(
             media_type="application/pdf", 
             headers={"Content-Disposition": f'attachment; filename="{download_filename}"'}
         )
-    except HTTPException:
-        raise
-    except ValueError as ve:
-        print(f"[CLOUD-REPORT-LOG] [ROUTER] Caught ValueError: {ve}")
-        print(f"================================================================================\n")
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(ve))
-    except RuntimeError as re:
-        print(f"[CLOUD-REPORT-LOG] [ROUTER] Caught RuntimeError: {re}")
-        print(f"================================================================================\n")
-        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(re))
     except Exception as ex:
         import traceback
-        print(f"[CLOUD-REPORT-LOG] [ROUTER] Caught unexpected Exception: {ex}")
         traceback.print_exc()
-        print(f"================================================================================\n")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Unexpected server error: {str(ex)}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"PDF generation failed: {str(ex)}")
 
 
 @router.get(

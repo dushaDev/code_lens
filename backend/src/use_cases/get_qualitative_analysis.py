@@ -7,6 +7,7 @@ from collections import defaultdict
 from src.use_cases.interfaces import IProjectRepository, IAuthorRepository, ICommitRepository
 from src.use_cases.commit_sampler import build_stratified_sample, compute_sampling_stats
 from src.infrastructure.services.local_ai_service import LocalAIService
+from src.domain.metrics import calculate_gini, get_gini_status
 
 # Global in-memory cache for local AI commit classifications to avoid redundant LLM invocations
 CLASSIFICATION_CACHE = {}
@@ -423,22 +424,8 @@ class GetQualitativeAnalysisUseCase:
         # Calculate Gini Coefficient first so we can use it to determine individual risk anomalies
         unique_canonical_ids = set(canonical_id_map.values())
         contrib_commit_counts = [len(commits_by_author.get(cid, [])) for cid in unique_canonical_ids]
-        gini_val = 0.0
-        if contrib_commit_counts and sum(contrib_commit_counts) > 0:
-            n = len(contrib_commit_counts)
-            s_counts = sorted(contrib_commit_counts)
-            tot = sum(s_counts)
-            if n > 1 and tot > 0:
-                idx_sum = sum((i + 1) * val for i, val in enumerate(s_counts))
-                gini_val = max(0.0, round((2 * idx_sum) / (n * tot) - (n + 1) / n, 3))
-            else:
-                gini_val = 0.0
-
-        gini_status = (
-            "Low Risk (Well Distributed)" if gini_val < 0.3
-            else "Medium Risk (Slightly Unequal)" if gini_val < 0.5
-            else "High Risk (Inequal / Free-rider Risk)"
-        )
+        gini_val = calculate_gini(contrib_commit_counts)
+        gini_status = get_gini_status(gini_val)
 
         # Pre-calculate total lines of code changed (LOC) across the project
         total_project_loc = 0
