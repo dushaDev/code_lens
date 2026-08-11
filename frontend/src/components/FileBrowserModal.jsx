@@ -106,7 +106,7 @@ export default function FileBrowserModal({ project, onClose }) {
         <div className="modal-header">
           <div className="modal-title-box">
             <Code2 size={20} className="blue-text" />
-            <h2>Web File Browser — {project.name || 'Project Files'}</h2>
+            <h2>Browse Project Files — {project.name || 'Project Files'}</h2>
           </div>
           <button className="close-btn" onClick={onClose}>
             <X size={18} />

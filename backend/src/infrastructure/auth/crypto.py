@@ -20,7 +20,7 @@ fernet = Fernet(FERNET_KEY)
 
 def encrypt_api_key(plain_key: str) -> str:
     """Encrypt plain text API key into Fernet token string."""
-    if not plain_key or not plain_key.trim() if hasattr(plain_key, 'trim') else not str(plain_key).strip():
+    if not plain_key or not str(plain_key).strip():
         return ""
     return fernet.encrypt(plain_key.strip().encode()).decode()
 

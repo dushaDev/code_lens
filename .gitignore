@@ -32,6 +32,7 @@ ENV/
 env/
 .env
 .env.example
+!backend/.env.example
 .env.local
 .env.*.local
 

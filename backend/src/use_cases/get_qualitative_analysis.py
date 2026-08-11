@@ -10,6 +10,10 @@ from src.infrastructure.services.local_ai_service import LocalAIService
 from src.domain.metrics import calculate_gini, get_gini_status
 
 # Global in-memory cache for local AI commit classifications to avoid redundant LLM invocations
+# WARNING: The following mutable globals (CLASSIFICATION_CACHE, CANCELLED_PROJECT_IDS,
+# and RUNNING_PROJECTS) are in-memory state and require a single-worker deployment
+# (e.g. uvicorn --workers 1) to function correctly. Do not run under multiple uvicorn
+# workers without migrating this state to Redis or the Database.
 CLASSIFICATION_CACHE = {}
 CANCELLED_PROJECT_IDS = set()
 
@@ -119,7 +123,9 @@ def extract_extended_quantitative_metrics(db, project_id: int, project=None, com
     pacing_summary = {
         "peak_commit_date": "N/A",
         "peak_commit_count": 0,
-        "avg_commits_per_active_day": 0.0
+        "avg_commits_per_active_day": 0.0,
+        "project_span_days": 0,
+        "active_days_count": 0
     }
     try:
         if commits:
@@ -132,10 +138,21 @@ def extract_extended_quantitative_metrics(db, project_id: int, project=None, com
                 peak_date = max(daily_counts, key=daily_counts.get)
                 peak_val = daily_counts[peak_date]
                 avg_val = round(sum(daily_counts.values()) / len(daily_counts), 1)
+                
+                # Calculate project span (start date to end date)
+                timestamps = [c.timestamp for c in commits if c.timestamp]
+                project_span_days = 0
+                if timestamps:
+                    start_date = min(timestamps)
+                    end_date = max(timestamps)
+                    project_span_days = (end_date.date() - start_date.date()).days + 1
+                
                 pacing_summary = {
                     "peak_commit_date": peak_date,
                     "peak_commit_count": peak_val,
-                    "avg_commits_per_active_day": avg_val
+                    "avg_commits_per_active_day": avg_val,
+                    "project_span_days": project_span_days,
+                    "active_days_count": len(daily_counts)
                 }
     except Exception as e:
         print(f"[EXTENDED-METRICS] Pacing summary error: {e}")
@@ -357,6 +374,12 @@ class GetQualitativeAnalysisUseCase:
                         "notes": "Timeout fallback",
                     }
                 CLASSIFICATION_CACHE[cache_key] = labels
+                # Bounded cache eviction (cap at 10,000 to prevent memory leaks)
+                if len(CLASSIFICATION_CACHE) > 10000:
+                    try:
+                        CLASSIFICATION_CACHE.pop(next(iter(CLASSIFICATION_CACHE)))
+                    except KeyError:
+                        pass
 
             if labels.get("parse_failure", False):
                 total_parse_failures += 1

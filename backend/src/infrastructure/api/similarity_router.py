@@ -16,6 +16,9 @@ from src.use_cases.detect_similarity import (
     get_course_similarity_reports,
     get_course_comparison_coverage,
 )
+from src.infrastructure.auth.dependencies import get_current_user
+from src.infrastructure.database.models import UserModel, CourseModel, SimilarityReportModel
+from src.infrastructure.database.repositories import CourseRepository
 
 similarity_router = APIRouter(prefix="/api/v1", tags=["Similarity Detection"])
 
@@ -37,12 +40,20 @@ def run_similarity_analysis(
     course_id: int,
     req: SimilarityAnalyzeRequest = SimilarityAnalyzeRequest(),
     db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_user),
 ):
     """
     Triggers AST-based Winnowing similarity analysis across all projects in a course.
     Computes AST structure tokens, hashes k-grams, applies Winnowing, and performs
     inverted index pairwise comparisons.
     """
+    course_repo = CourseRepository(db)
+    course = course_repo.get_by_id(course_id, user_id=current_user.id)
+    if not course:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Course with ID {course_id} not found."
+        )
     try:
         result = analyze_course_similarity(
             db=db,
@@ -67,12 +78,20 @@ def force_full_rescan(
     course_id: int,
     req: SimilarityAnalyzeRequest = SimilarityAnalyzeRequest(),
     db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_user),
 ):
     """
     Admin Force Full Rescan Action.
     Forces full-corpus re-comparison for all projects in a course, updates comparison coverage,
     and returns updated reports and multi-project clusters.
     """
+    course_repo = CourseRepository(db)
+    course = course_repo.get_by_id(course_id, user_id=current_user.id)
+    if not course:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Course with ID {course_id} not found."
+        )
     try:
         result = analyze_course_similarity(
             db=db,
@@ -95,8 +114,19 @@ def force_full_rescan(
 
 
 @similarity_router.get("/courses/{course_id}/similarity/coverage")
-def get_similarity_coverage(course_id: int, db: Session = Depends(get_db)):
+def get_similarity_coverage(
+    course_id: int,
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_user),
+):
     """Retrieves pairwise comparison coverage tracking metrics for administrative visibility."""
+    course_repo = CourseRepository(db)
+    course = course_repo.get_by_id(course_id, user_id=current_user.id)
+    if not course:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Course with ID {course_id} not found."
+        )
     try:
         return get_course_comparison_coverage(db=db, course_id=course_id)
     except Exception as e:
@@ -107,8 +137,19 @@ def get_similarity_coverage(course_id: int, db: Session = Depends(get_db)):
 
 
 @similarity_router.get("/courses/{course_id}/similarity/reports")
-def list_similarity_reports(course_id: int, db: Session = Depends(get_db)):
+def list_similarity_reports(
+    course_id: int,
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_user),
+):
     """Retrieves stored pairwise similarity reports for a course."""
+    course_repo = CourseRepository(db)
+    course = course_repo.get_by_id(course_id, user_id=current_user.id)
+    if not course:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Course with ID {course_id} not found."
+        )
     try:
         data = get_course_similarity_reports(db=db, course_id=course_id)
         if isinstance(data, dict):
@@ -130,10 +171,15 @@ def update_similarity_report_status(
     report_id: int,
     req: ReportStatusUpdateRequest,
     db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_user),
 ):
     """Updates the review status of a similarity report in the database."""
-    from src.infrastructure.database.models import SimilarityReportModel
-    report = db.query(SimilarityReportModel).filter(SimilarityReportModel.id == report_id).first()
+    report = (
+        db.query(SimilarityReportModel)
+        .join(CourseModel, SimilarityReportModel.course_id == CourseModel.id)
+        .filter(SimilarityReportModel.id == report_id, CourseModel.user_id == current_user.id)
+        .first()
+    )
     if not report:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Report not found")
 

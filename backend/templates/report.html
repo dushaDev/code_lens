@@ -316,6 +316,9 @@
         • <strong>Timeline Velocity:</strong> Peak Activity: {{ ps.pacing_summary.peak_commit_date }} ({{
         ps.pacing_summary.peak_commit_count }} commits) &nbsp;|&nbsp; Avg Velocity: {{
         ps.pacing_summary.avg_commits_per_active_day }} commits/active day
+        {% if ps.pacing_summary.project_span_days is defined %}
+        &nbsp;|&nbsp; Project Span: {{ ps.pacing_summary.project_span_days }} days &nbsp;|&nbsp; Active Days (at least 1 commit): {{ ps.pacing_summary.active_days_count }} days
+        {% endif %}
         <br>
         {% endif %}
         {% if ps.branches_summary and ps.branches_summary.top_branches %}
@@ -325,7 +328,8 @@
                 {% for b in ps.branches_summary.top_branches %}
                 <tr>
                     <td style="padding: 1px 4px; border-bottom: 1px dotted #e0e0e0; width: 75%;">
-                        <code>{{ b.name }}</code></td>
+                        <code>{{ b.name }}</code>
+                    </td>
                     <td
                         style="padding: 1px 4px; border-bottom: 1px dotted #e0e0e0; width: 25%; text-align: right; color: #555555; font-weight: bold;">
                         {{ b.commits }} commits</td>
@@ -495,10 +499,7 @@
 
     <!-- End of Document + Bottom Brand Logo -->
     <div style="text-align: center; margin-top: 32px; width: 100%; page-break-inside: avoid;">
-        <div
-            style="font-size: 7.5pt; font-weight: 400; color: #474747; letter-spacing: 1px; text-transform: uppercase; margin-bottom: 8px; text-align: center;">
-            -End of Report-
-        </div>
+
         {% if logo_uri %}
         <div style="text-align: center; font-size: 8.5pt; color: #555555; font-weight: regular; width: 100%;">
             <span style="vertical-align: middle; margin-right: 4px;">Report by</span>

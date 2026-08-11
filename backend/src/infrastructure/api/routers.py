@@ -626,7 +626,7 @@ def delete_course(
         )
 
     # 2. Verify password
-    if not verify_password(request.password, current_user.hashed_password):
+    if not verify_password(request.password, current_user.password):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect password verification."
@@ -2105,7 +2105,7 @@ def reset_course(
             detail=f"Course with ID {course_id} not found."
         )
 
-    if not verify_password(request.password, current_user.hashed_password):
+    if not verify_password(request.password, current_user.password):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect password verification."
