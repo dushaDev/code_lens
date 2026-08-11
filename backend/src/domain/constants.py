@@ -11,6 +11,13 @@ DEFAULT_SAMPLING_MODE = "sample"
 SAVED_REPOS_PATH_TEMPLATE = "./saved_repos/project_{}"
 TEMP_REPOS_PATH_TEMPLATE = "./temp_repos/project_{}"
 
+# Git clone limits (bound the synchronous clone in the request path)
+CLONE_TIMEOUT_SECONDS = 300          # hard wall-clock cap on a single clone
+MAX_REPO_SIZE_BYTES = 50 * 1024 * 1024  # 50 MB cap on the cloned working tree
+# Transport protocols permitted for git (HTTPS only — no git://, file://, ssh).
+# Passed per-subprocess via GIT_ALLOW_PROTOCOL, never mutated into os.environ.
+GIT_ALLOWED_PROTOCOLS = "https"
+
 # Security
 PBKDF2_ITERATIONS = 100000
 

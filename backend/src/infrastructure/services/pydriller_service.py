@@ -11,6 +11,11 @@ from sqlalchemy.orm import Session
 from pydriller import Repository
 
 from src.domain.entities import ProjectEntity
+from src.domain.constants import (
+    CLONE_TIMEOUT_SECONDS,
+    MAX_REPO_SIZE_BYTES,
+    GIT_ALLOWED_PROTOCOLS,
+)
 from src.use_cases.interfaces import IGitExtractorService
 from src.infrastructure.database.models import ProjectModel, AuthorModel, CommitModel, FileChangeModel, BranchModel
 from src.infrastructure.services.ast_parser import parse_source, get_language_for_file
@@ -70,7 +75,7 @@ def parse_mailmap(file_path: str) -> dict:
                         proper_name = name_match.group(1).strip()
                     mapping[commit_email] = {"email": proper_email, "name": proper_name}
     except OSError as e:
-        logger.warning(f"Error parsing .mailmap: {e}", exc_info=e)
+        logger.warning(f"Error parsing .mailmap: {e}", exc_info=True)
     return mapping
 
 
@@ -84,21 +89,161 @@ def _safe_rmtree(path: str, retries: int = 5, delay: float = 0.5) -> None:
         try:
             os.chmod(p, stat.S_IWRITE)
             func(p)
-        except Exception:
-            pass  # best-effort
+        except OSError:
+            logger.debug("chmod/retry failed for %s during rmtree", p, exc_info=True)
 
     for attempt in range(retries):
         try:
             shutil.rmtree(path, onerror=_on_error)
             return
-        except Exception:
+        except OSError:
             if attempt < retries - 1:
                 time.sleep(delay)
-    # Final silent attempt
+    # Final attempt — log if it still fails so a leaked directory is observable
     try:
         shutil.rmtree(path, onerror=_on_error)
-    except Exception:
+    except OSError:
+        logger.warning(
+            "Failed to remove directory %s after %d attempts; it may be leaked on disk",
+            path, retries + 1, exc_info=True,
+        )
+
+
+def _dir_size(path: str) -> int:
+    """Total size in bytes of all files under `path`. Missing files are skipped."""
+    total = 0
+    for root, _dirs, files in os.walk(path):
+        for name in files:
+            fp = os.path.join(root, name)
+            try:
+                total += os.path.getsize(fp)
+            except OSError:
+                # File may vanish mid-clone; ignore and keep tallying
+                continue
+    return total
+
+
+def _terminate_process(proc: "subprocess.Popen") -> None:
+    """Best-effort kill of a still-running subprocess and reap it."""
+    try:
+        proc.kill()
+        proc.communicate(timeout=10)
+    except (OSError, subprocess.SubprocessError):
+        logger.debug("Failed to terminate git clone subprocess", exc_info=True)
+
+
+def _run_git_clone_bounded(
+    git_url: str,
+    dest: str,
+    timeout: int,
+    max_bytes: int,
+    env: dict,
+) -> None:
+    """
+    Clone `git_url` into `dest` with a hard wall-clock timeout and a maximum
+    on-disk size. The process is killed the moment either limit is crossed, so a
+    huge or hanging repository cannot exhaust the worker or the disk.
+
+    Raises RuntimeError (mapped to HTTP 422 by the router) on any clone failure,
+    timeout, or size-cap breach — the message is safe to surface to the user.
+    """
+    cmd = ["git", "clone", "--", git_url, dest]
+    try:
+        proc = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            env=env,
+        )
+    except OSError as e:
+        raise RuntimeError(f"Failed to start git clone for '{git_url}': {e}") from e
+
+    limit_mb = max_bytes // (1024 * 1024)
+    start = time.time()
+    try:
+        while True:
+            retcode = proc.poll()
+            if retcode is not None:
+                break
+            if time.time() - start > timeout:
+                _terminate_process(proc)
+                raise RuntimeError(
+                    f"Git clone timed out after {timeout}s for '{git_url}'. "
+                    f"The repository may be too large or the remote unresponsive."
+                )
+            if _dir_size(dest) > max_bytes:
+                _terminate_process(proc)
+                raise RuntimeError(
+                    f"Repository '{git_url}' exceeds the {limit_mb} MB download limit; clone aborted."
+                )
+            time.sleep(1.0)
+
+        # Process finished on its own — drain remaining output and check status
+        _stdout, stderr = proc.communicate()
+        if retcode != 0:
+            detail = (stderr or "").strip() or "unknown git error"
+            raise RuntimeError(
+                f"Git clone failed for '{git_url}'. "
+                f"Possible causes: invalid URL, private repo without credentials, "
+                f"or a network/permission error. Details: {detail}"
+            )
+        # A clone that completed between polls could still be over the cap
+        if _dir_size(dest) > max_bytes:
+            raise RuntimeError(
+                f"Repository '{git_url}' exceeds the {limit_mb} MB download limit."
+            )
+    finally:
+        if proc.poll() is None:
+            _terminate_process(proc)
+
+
+def _acquire_project_lock(lock_path: str, stale_after: int) -> None:
+    """
+    Take an exclusive per-project extraction lock via an atomic O_EXCL create.
+    Prevents two concurrent extract/sync calls for the same project from
+    clobbering each other's working tree and DB rows.
+
+    A lock older than `stale_after` seconds is treated as orphaned (crashed run)
+    and reclaimed. Raises RuntimeError if a live extraction holds the lock.
+    """
+    def _create() -> int:
+        return os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+
+    try:
+        fd = _create()
+    except FileExistsError:
+        try:
+            age = time.time() - os.path.getmtime(lock_path)
+        except OSError:
+            age = None
+        if age is None or age <= stale_after:
+            raise RuntimeError("Extraction is already in progress for this project.")
+        logger.warning("Reclaiming stale extraction lock %s (age %.0fs)", lock_path, age)
+        try:
+            os.remove(lock_path)
+            fd = _create()
+        except OSError as e:
+            raise RuntimeError("Extraction is already in progress for this project.") from e
+    except OSError as e:
+        raise RuntimeError(f"Could not acquire extraction lock: {e}") from e
+
+    try:
+        os.write(fd, str(os.getpid()).encode())
+    except OSError:
+        logger.debug("Failed to write pid into lock %s", lock_path, exc_info=True)
+    finally:
+        os.close(fd)
+
+
+def _release_project_lock(lock_path: str) -> None:
+    """Release the per-project extraction lock. Never raises."""
+    try:
+        os.remove(lock_path)
+    except FileNotFoundError:
         pass
+    except OSError:
+        logger.debug("Failed to remove extraction lock %s", lock_path, exc_info=True)
 
 
 class PyDrillerService(IGitExtractorService):
@@ -107,67 +252,76 @@ class PyDrillerService(IGitExtractorService):
 
     def extract_and_save(self, project: ProjectEntity) -> dict:
         should_store_local = getattr(project, "store_local_copy", False)
-        if should_store_local:
-            target_dir = os.path.join("saved_repos", f"project_{project.id}")
-        else:
-            target_dir = os.path.join("temp_repos", f"project_{project.id}")
+        base_dir = "saved_repos" if should_store_local else "temp_repos"
+        os.makedirs(base_dir, exist_ok=True)
 
-        # --- Clean up any stale directory from a previous failed run ---
-        if os.path.exists(target_dir):
-            _safe_rmtree(target_dir)
+        # target_dir is the per-project container; the repo is cloned into a
+        # deterministic "repo" subfolder so its root is always known (no guessing).
+        target_dir = os.path.join(base_dir, f"project_{project.id}")
+        repo_path = os.path.join(target_dir, "repo")
+        lock_path = target_dir + ".lock"
 
-        os.makedirs(target_dir, exist_ok=True)
+        # Serialize extractions per project: a second concurrent extract/sync for
+        # the same project would otherwise delete this run's tree mid-clone.
+        _acquire_project_lock(lock_path, CLONE_TIMEOUT_SECONDS)
 
         total_commits = 0
         squash_warnings = 0
         new_authors_count = 0
+        succeeded = False
 
         try:
+            # --- Remove any stale directory from a previous failed run, and
+            #     refuse to proceed if it cannot be fully cleared ---
+            if os.path.exists(target_dir):
+                _safe_rmtree(target_dir)
+                if os.path.exists(target_dir):
+                    raise RuntimeError(
+                        f"Could not remove stale directory '{target_dir}'; "
+                        f"refusing to clone into a dirty path."
+                    )
+            os.makedirs(target_dir, exist_ok=True)
+
             # ----------------------------------------------------------------
-            # Step 1: Clone — wrap separately so Git errors are human-readable
+            # Step 1: Clone with a hard timeout + size cap. Doing the clone here
+            # (rather than lazily inside PyDriller's traverse_commits) means real
+            # clone failures raise a human-readable RuntimeError -> HTTP 422, and
+            # the protocol allowlist is scoped to this subprocess only.
             # ----------------------------------------------------------------
+            git_env = {**os.environ, "GIT_ALLOW_PROTOCOL": GIT_ALLOWED_PROTOCOLS}
+            _run_git_clone_bounded(
+                project.git_url,
+                repo_path,
+                CLONE_TIMEOUT_SECONDS,
+                MAX_REPO_SIZE_BYTES,
+                git_env,
+            )
+
+            # PyDriller now reads the already-cloned local repo (no re-clone).
             try:
-                # Constrain git transport protocols to prevent SSRF and local file access
-                os.environ["GIT_ALLOW_PROTOCOL"] = "https:git"
                 repo = Repository(
-                    project.git_url,
-                    clone_repo_to=target_dir,
+                    repo_path,
                     only_no_merge=True,
                     include_refs=True,
                 )
-            except Exception as clone_err:
-                err_str = str(clone_err).strip()
-                stderr = getattr(clone_err, "stderr", None) or ""
-                if stderr:
-                    err_str = stderr.strip()
+            except Exception as repo_err:
                 raise RuntimeError(
-                    f"Git clone failed for URL '{project.git_url}'. "
-                    f"Possible causes: invalid URL, private repo without credentials, "
-                    f"network timeout, or disk permission error. "
-                    f"Details: {err_str}"
-                ) from clone_err
+                    f"Failed to open the cloned repository for '{project.git_url}': {repo_err}"
+                ) from repo_err
 
+            # Load .mailmap once from the known repo root
             mailmap_data = {}
+            mailmap_file = os.path.join(repo_path, ".mailmap")
+            if os.path.isfile(mailmap_file):
+                mailmap_data = parse_mailmap(mailmap_file)
+
             branch_cache = {}  # key: (project_id, branch_name) -> BranchModel
-            mailmap_loaded = False
-            cloned_subfolder = None
 
             existing_commit_hashes = set(
                 h[0] for h in self.db.query(CommitModel.hash).filter(CommitModel.project_id == project.id).all()
             )
 
             for commit in repo.traverse_commits():
-                if not mailmap_loaded:
-                    mailmap_loaded = True
-                    for entry in os.listdir(target_dir):
-                        candidate = os.path.join(target_dir, entry)
-                        if os.path.isdir(candidate):
-                            cloned_subfolder = candidate
-                            mf = os.path.join(candidate, ".mailmap")
-                            if os.path.isfile(mf):
-                                mailmap_data = parse_mailmap(mf)
-                            break
-
                 # 1. Author Resolution
                 author_email = commit.author.email
                 author_name = commit.author.name
@@ -297,7 +451,8 @@ class PyDrillerService(IGitExtractorService):
                                 function_count = metrics.function_count
                                 ast_fingerprint = metrics.ast_fingerprint
                         except Exception:
-                            pass  # AST failure never aborts commit extraction
+                            # AST failure never aborts commit extraction (tree-sitter raises untyped errors)
+                            logger.debug("AST metrics skipped for %s", filename, exc_info=True)
 
                     file_change = FileChangeModel(
                         commit_hash=commit.hash,
@@ -315,7 +470,7 @@ class PyDrillerService(IGitExtractorService):
                     if mod.change_type.name != "DELETE" and mod.new_path:
                         try:
                             blame_res = subprocess.run(
-                                ['git', '-C', target_dir, 'blame', '-e', commit.hash, '--', mod.new_path],
+                                ['git', '-C', repo_path, 'blame', '-e', commit.hash, '--', mod.new_path],
                                 stdout=subprocess.PIPE,
                                 stderr=subprocess.PIPE,
                                 text=True,
@@ -334,8 +489,9 @@ class PyDrillerService(IGitExtractorService):
                                     
                             if blame_counts:
                                 file_change.blame_snapshot = json.dumps(blame_counts)
-                        except Exception:
-                            pass
+                        except (subprocess.SubprocessError, OSError):
+                            # Blame is best-effort enrichment; never abort commit extraction
+                            logger.debug("git blame skipped for %s @ %s", mod.new_path, commit.hash, exc_info=True)
 
                     self.db.add(file_change)
 
@@ -343,26 +499,26 @@ class PyDrillerService(IGitExtractorService):
 
             # Update project local_saved_path & is_local_copy_stored if enabled
             if should_store_local:
-                actual_path = cloned_subfolder or target_dir
                 proj_model = self.db.query(ProjectModel).filter(ProjectModel.id == project.id).first()
                 if proj_model:
-                    proj_model.local_saved_path = os.path.abspath(actual_path)
+                    proj_model.local_saved_path = os.path.abspath(repo_path)
                     proj_model.is_local_copy_stored = True
 
             self.db.commit()
+            succeeded = True
 
-        except Exception as e:
+        except Exception:
             logger.exception("Error during project extraction, rolling back transaction")
             self.db.rollback()
             raise
 
-
-
         finally:
-            # Delete directory ONLY if store_local_copy is False
-            if not should_store_local:
+            # Keep the working tree only for a stored project whose extraction
+            # succeeded; otherwise remove it so a partial clone never leaks.
+            if not should_store_local or not succeeded:
                 if os.path.exists(target_dir):
                     _safe_rmtree(target_dir)
+            _release_project_lock(lock_path)
 
         return {
             "status": "success",

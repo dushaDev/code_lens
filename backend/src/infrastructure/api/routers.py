@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 limiter = Limiter(key_func=get_remote_address)
 
 
-from src.domain.constants import EXTENSION_TO_LANGUAGE
+from src.domain.constants import EXTENSION_TO_LANGUAGE, SAVED_REPOS_PATH_TEMPLATE, TEMP_REPOS_PATH_TEMPLATE
 from src.infrastructure.database.session import get_db
 from src.infrastructure.database.repositories import ProjectRepository, AuthorRepository, CommitRepository, DatabaseService, CourseRepository
 from src.infrastructure.services.pydriller_service import PyDrillerService
@@ -784,8 +784,11 @@ def create_project(
         store_local_copy=request.store_local_copy or False
     )
 
-    # 2. Update project with unique local path using its ID
-    local_path = f"./saved_repos/project_{project.id}" if project.store_local_copy else f"./temp_repos/project_{project.id}"
+    # 2. Store a placeholder local path (overwritten with the real abspath on
+    #    extract). Built from the same template + "/repo" layout the extractor
+    #    uses so create and extract agree on where the working tree lives.
+    base_template = SAVED_REPOS_PATH_TEMPLATE if project.store_local_copy else TEMP_REPOS_PATH_TEMPLATE
+    local_path = os.path.abspath(os.path.join(base_template.format(project.id), "repo"))
     repo.update_local_path(project.id, local_path)
 
     return ProjectCreateResponse(

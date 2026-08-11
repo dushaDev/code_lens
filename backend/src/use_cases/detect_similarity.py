@@ -76,11 +76,7 @@ def analyze_course_similarity(
         project_fingerprints_map[project.id] = fingerprints
 
     # STEP 8: Store fingerprints in DB
-    # Clear existing fingerprints for these projects first
     project_ids = [p.id for p in projects]
-    db.query(ProjectFingerprintModel).filter(
-        ProjectFingerprintModel.project_id.in_(project_ids)
-    ).delete(synchronize_session=False)
 
     db_fingerprints = []
     for proj_id, fp_list in project_fingerprints_map.items():
@@ -94,9 +90,20 @@ def analyze_course_similarity(
                 )
             )
 
-    if db_fingerprints:
-        db.bulk_save_objects(db_fingerprints)
-    db.commit()
+    # Clear existing fingerprints for these projects, then persist fresh ones as a
+    # single transaction: roll back and re-raise on any failure so the session is
+    # never left dirty for the caller.
+    try:
+        db.query(ProjectFingerprintModel).filter(
+            ProjectFingerprintModel.project_id.in_(project_ids)
+        ).delete(synchronize_session=False)
+        if db_fingerprints:
+            db.bulk_save_objects(db_fingerprints)
+        db.commit()
+    except Exception:
+        db.rollback()
+        logger.exception("Failed to persist fingerprints for course %s", course_id)
+        raise
 
     # STEP 9 & STEP 10: Inverted index pairwise similarity comparison & reporting
     comparator = SimilarityComparator(file_match_threshold=similarity_threshold)
@@ -117,41 +124,54 @@ def analyze_course_similarity(
     # Map project IDs to names for clean response
     project_name_map = {p.id: p.name for p in projects}
 
-    for r in raw_reports:
-        matched_blocks_json = json.dumps(r["matched_blocks"])
-        pair_key = (r["project_a_id"], r["project_b_id"])
-        prev_status = status_map.get(pair_key, "Needs Review")
-
-        report_obj = SimilarityReportModel(
-            course_id=course_id,
-            project_a_id=r["project_a_id"],
-            project_b_id=r["project_b_id"],
-            similarity_score=r["similarity_score"],
-            matched_hashes_count=r["matched_hashes_count"],
-            matched_blocks_json=matched_blocks_json,
-            status=prev_status,
+    # Replace this course's similarity reports as a single transaction: clear the old
+    # rows, insert the freshly computed ones, and commit together. Roll back and
+    # re-raise on any failure so a partial rewrite is never left committed.
+    try:
+        # Clear existing similarity reports for this course
+        db.query(SimilarityReportModel).filter(SimilarityReportModel.course_id == course_id).delete(
+            synchronize_session=False
         )
-        db.add(report_obj)
-        db.flush() # Populates report_obj.id
 
-        response_reports.append({
-            "report_id": report_obj.id,
-            "project_a_id": r["project_a_id"],
-            "project_a_name": project_name_map.get(r["project_a_id"], "Unknown"),
-            "project_b_id": r["project_b_id"],
-            "project_b_name": project_name_map.get(r["project_b_id"], "Unknown"),
-            "similarity_score": r["similarity_score"],
-            "file_match_percentage": r.get("file_match_percentage", r["similarity_score"]),
-            "identifier_overlap_percentage": r.get("identifier_overlap_percentage", 100.0),
-            "matched_hashes_count": r["matched_hashes_count"],
-            "total_match_runs": r.get("total_match_runs", len(r["matched_blocks"])),
-            "max_contiguous_run_tokens": r.get("max_contiguous_run_tokens", 0),
-            "confidence_level": r["confidence_level"],
-            "matched_blocks": r["matched_blocks"],
-            "status": prev_status,
-        })
+        for r in raw_reports:
+            matched_blocks_json = json.dumps(r["matched_blocks"])
+            pair_key = (r["project_a_id"], r["project_b_id"])
+            prev_status = status_map.get(pair_key, "Needs Review")
 
-    db.commit()
+            report_obj = SimilarityReportModel(
+                course_id=course_id,
+                project_a_id=r["project_a_id"],
+                project_b_id=r["project_b_id"],
+                similarity_score=r["similarity_score"],
+                matched_hashes_count=r["matched_hashes_count"],
+                matched_blocks_json=matched_blocks_json,
+                status=prev_status,
+            )
+            db.add(report_obj)
+            db.flush() # Populates report_obj.id
+
+            response_reports.append({
+                "report_id": report_obj.id,
+                "project_a_id": r["project_a_id"],
+                "project_a_name": project_name_map.get(r["project_a_id"], "Unknown"),
+                "project_b_id": r["project_b_id"],
+                "project_b_name": project_name_map.get(r["project_b_id"], "Unknown"),
+                "similarity_score": r["similarity_score"],
+                "file_match_percentage": r.get("file_match_percentage", r["similarity_score"]),
+                "identifier_overlap_percentage": r.get("identifier_overlap_percentage", 100.0),
+                "matched_hashes_count": r["matched_hashes_count"],
+                "total_match_runs": r.get("total_match_runs", len(r["matched_blocks"])),
+                "max_contiguous_run_tokens": r.get("max_contiguous_run_tokens", 0),
+                "confidence_level": r["confidence_level"],
+                "matched_blocks": r["matched_blocks"],
+                "status": prev_status,
+            })
+
+        db.commit()
+    except Exception:
+        db.rollback()
+        logger.exception("Failed to persist similarity reports for course %s", course_id)
+        raise
 
     clusters, additional_reports = detect_similarity_clusters(
         response_reports, project_name_map, project_fingerprints_map, comparator
@@ -313,26 +333,33 @@ def sync_project_comparison_coverage(db: Session, course_id: int):
     for r in reports:
         completed_pairs.add((min(r.project_a_id, r.project_b_id), max(r.project_a_id, r.project_b_id)))
 
-    for p in projects:
-        comp_count = sum(1 for other in projects if other.id != p.id and (min(p.id, other.id), max(p.id, other.id)) in completed_pairs)
-        cov = db.query(ComparisonCoverageModel).filter(ComparisonCoverageModel.project_id == p.id).first()
-        status_str = "completed" if comp_count >= required_per_proj else ("in_progress" if comp_count > 0 else "pending")
+    # Upsert coverage rows for every project and commit as one unit; roll back and
+    # re-raise on failure so the coverage table is never left partially updated.
+    try:
+        for p in projects:
+            comp_count = sum(1 for other in projects if other.id != p.id and (min(p.id, other.id), max(p.id, other.id)) in completed_pairs)
+            cov = db.query(ComparisonCoverageModel).filter(ComparisonCoverageModel.project_id == p.id).first()
+            status_str = "completed" if comp_count >= required_per_proj else ("in_progress" if comp_count > 0 else "pending")
 
-        if not cov:
-            cov = ComparisonCoverageModel(
-                course_id=course_id,
-                project_id=p.id,
-                total_required_comparisons=required_per_proj,
-                completed_comparisons=comp_count,
-                status=status_str,
-            )
-            db.add(cov)
-        else:
-            cov.total_required_comparisons = required_per_proj
-            cov.completed_comparisons = comp_count
-            cov.status = status_str
+            if not cov:
+                cov = ComparisonCoverageModel(
+                    course_id=course_id,
+                    project_id=p.id,
+                    total_required_comparisons=required_per_proj,
+                    completed_comparisons=comp_count,
+                    status=status_str,
+                )
+                db.add(cov)
+            else:
+                cov.total_required_comparisons = required_per_proj
+                cov.completed_comparisons = comp_count
+                cov.status = status_str
 
-    db.commit()
+        db.commit()
+    except Exception:
+        db.rollback()
+        logger.exception("Failed to sync comparison coverage for course %s", course_id)
+        raise
 
 
 def get_course_comparison_coverage(db: Session, course_id: int) -> Dict:

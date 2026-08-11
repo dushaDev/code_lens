@@ -3,7 +3,8 @@ from pydantic import BaseModel, ConfigDict, EmailStr, field_validator
 from typing import List, Optional
 from datetime import datetime
 
-GIT_URL_REGEX = re.compile(r'^(https?|git)://[^\s<>"\'{}|\\^`]+$', re.IGNORECASE)
+# HTTPS only: git://, ssh, and file:// are rejected (unencrypted / SSRF / local-file risks).
+GIT_URL_REGEX = re.compile(r'^https://[^\s<>"\'{}|\\^`]+$', re.IGNORECASE)
 
 def validate_password_strength_logic(v: str) -> None:
     if not v or len(v) < 8:
@@ -156,7 +157,7 @@ class ProjectCreateRequest(BaseModel):
         if v_clean.startswith("-"):
             raise ValueError("Invalid git_url: URL cannot start with a hyphen.")
         if not GIT_URL_REGEX.match(v_clean):
-            raise ValueError("Invalid git_url: Only HTTP(S) and Git protocols (e.g. https://github.com/user/repo.git) are allowed.")
+            raise ValueError("Invalid git_url: Only HTTPS URLs are allowed (e.g. https://github.com/user/repo.git).")
         return v_clean
 
 class ProjectCreateResponse(BaseModel):

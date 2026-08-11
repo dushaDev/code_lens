@@ -2,6 +2,7 @@ import ollama
 import json
 import logging
 import httpx
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -159,7 +160,7 @@ class LocalAIService:
         lines_added: int = 0,
         lines_removed: int = 0,
         timing_flag: str = "normal",
-        hours_before_deadline: float = None,
+        hours_before_deadline: Optional[float] = None,
     ) -> dict:
         """
         Phase 1 Mechanical Labeling: Classify a single commit into structured labels.

@@ -79,7 +79,7 @@ class ProjectRepository(IProjectRepository):
         counter = Counter()
         for filename, lines_added in results:
             ext = os.path.splitext(filename)[1].lower()
-            if ext in extension_map:
+            if ext in EXTENSION_TO_LANGUAGE:
                 counter[EXTENSION_TO_LANGUAGE[ext]] += lines_added
                 
         if not counter:
@@ -199,6 +199,19 @@ class ProjectRepository(IProjectRepository):
                 shutil.rmtree(temp_path)
             except Exception as e:
                 logger.warning(f"Failed to delete temp directory at '{temp_path}': {e}")
+
+        # Remove any leftover per-project extraction lock files (normally released
+        # by the extractor, but may linger after a hard crash).
+        for lock_path in (
+            SAVED_REPOS_PATH_TEMPLATE.format(project_id) + ".lock",
+            TEMP_REPOS_PATH_TEMPLATE.format(project_id) + ".lock",
+        ):
+            try:
+                os.remove(lock_path)
+            except FileNotFoundError:
+                pass
+            except OSError as e:
+                logger.warning(f"Failed to delete extraction lock at '{lock_path}': {e}")
 
         # 2. Delete all related DB records explicitly
         self.db.query(ProjectFingerprintModel).filter(ProjectFingerprintModel.project_id == project_id).delete(synchronize_session=False)
@@ -338,6 +351,7 @@ class AuthorRepository(IAuthorRepository):
                     name=c.project.name,
                     git_url=c.project.git_url,
                     local_saved_path=c.project.local_saved_path,
+                    group_no=c.project.group_no or DEFAULT_GROUP,
                     description=c.project.description,
                     created_at=c.project.created_at
                 )
@@ -585,6 +599,13 @@ class DatabaseService(IDatabaseService):
                 temp_path = TEMP_REPOS_PATH_TEMPLATE.format(project.id)
                 if os.path.exists(temp_path):
                     shutil.rmtree(temp_path, ignore_errors=True)
+
+                # Remove any leftover per-project extraction lock files
+                for lock_path in (fallback_path + ".lock", temp_path + ".lock"):
+                    try:
+                        os.remove(lock_path)
+                    except OSError:
+                        pass
 
                 session.delete(project)
             session.commit()
