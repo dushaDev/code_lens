@@ -1,6 +1,9 @@
+import logging
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+
+logger = logging.getLogger(__name__)
 from dotenv import load_dotenv
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
@@ -42,10 +45,23 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Global exception handler — ensures all unhandled 500s return JSON, not plain text
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    logger.exception("Unhandled server error on %s %s", request.method, request.url.path)
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "Internal server error. Please try again later."},
+    )
+
 # Initialize database tables on startup
 @app.on_event("startup")
 def on_startup():
-    init_db()
+    try:
+        init_db()
+        logger.info("Database initialized successfully.")
+    except Exception as e:
+        logger.exception("CRITICAL: Database initialization failed on startup: %s", e)
 
 # Include the API routes
 app.include_router(router)

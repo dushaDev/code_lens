@@ -80,20 +80,20 @@ router = APIRouter(prefix="/api/v1")
     tags=["Auth"]
 )
 @limiter.limit("3/minute")
-def register(request: UserRegisterRequest, req: Request, db: Session = Depends(get_db)):
+def register(body: UserRegisterRequest, request: Request, db: Session = Depends(get_db)):
     """Register a new user account."""
     user_repo = UserRepository(db)
 
-    if user_repo.get_by_email(request.email) or user_repo.get_by_username(request.username):
+    if user_repo.get_by_email(body.email) or user_repo.get_by_username(body.username):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Registration failed: an account with these details already exists."
         )
 
     user = user_repo.create(
-        username=request.username,
-        email=request.email,
-        password=request.password
+        username=body.username,
+        email=body.email,
+        password=body.password
     )
     return UserResponse(
         id=user.id,
@@ -112,12 +112,12 @@ def register(request: UserRegisterRequest, req: Request, db: Session = Depends(g
     tags=["Auth"]
 )
 @limiter.limit("5/minute")
-def login(request: LoginRequest, req: Request, db: Session = Depends(get_db)):
+def login(body: LoginRequest, request: Request, db: Session = Depends(get_db)):
     """Login with email and password to receive a JWT access token."""
     user_repo = UserRepository(db)
-    user = user_repo.get_by_email(request.email)
+    user = user_repo.get_by_email(body.email)
 
-    if not user or not verify_password(request.password, user.password):
+    if not user or not verify_password(body.password, user.password):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect email or password.",

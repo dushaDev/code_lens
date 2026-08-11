@@ -147,7 +147,7 @@ export default function CourseSelect({ user, onSelectCourse, onLogout, onUserUpd
                     <input 
                       type="text" 
                       className="input-field" 
-                      placeholder="Advanced Software Engineering & Systems - CSE402"
+                      placeholder="Advanced Web Application Development - SE401"
                       value={newCourseName}
                       onChange={(e) => setNewCourseName(e.target.value)}
                       required
@@ -158,10 +158,10 @@ export default function CourseSelect({ user, onSelectCourse, onLogout, onUserUpd
                     <label className="form-label" style={{ display: 'block', fontSize: '0.85rem', fontWeight: '500', marginBottom: '6px', color: 'var(--text-main)' }}>Description (Optional)</label>
                     <textarea
                       className="input-field text-area"
-                      placeholder="Capstone team evaluations focusing on RESTful microservices, git contribution metrics, code quality, and architectural design."
+                      placeholder="This course introduces the fundamental concepts, architectures, and technologies required to design and build modern, dynamic web applications."
                       value={newCourseDesc}
                       onChange={(e) => setNewCourseDesc(e.target.value)}
-                      style={{ minHeight: '64px', resize: 'vertical' }}
+                      style={{ minHeight: '74px', resize: 'vertical' }}
                     />
                   </div>
 
@@ -172,7 +172,7 @@ export default function CourseSelect({ user, onSelectCourse, onLogout, onUserUpd
                     </div>
                     <textarea
                       className="input-field text-area"
-                      placeholder="Python 3.12 (FastAPI), React 18 (Vite), PostgreSQL 16, Docker, TailwindCSS"
+                      placeholder="JavaScript, React, Python, SQL"
                       value={newCourseTech}
                       onChange={(e) => setNewCourseTech(e.target.value)}
                       style={{ minHeight: '64px', resize: 'vertical' }}
