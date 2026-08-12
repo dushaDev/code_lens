@@ -213,6 +213,22 @@ p.subtitle {
   width: 100%;
 }
 
+.input-field[type="date"],
+.input-field[type="time"] {
+  color-scheme: light dark;
+}
+
+.input-field::-webkit-calendar-picker-indicator {
+  cursor: pointer;
+  filter: var(--picker-icon-filter, none);
+  opacity: 0.8;
+  transition: var(--transition);
+}
+
+.input-field::-webkit-calendar-picker-indicator:hover {
+  opacity: 1;
+}
+
 .input-field:focus {
   outline: none;
   border-color: var(--primary);
@@ -327,6 +343,8 @@ p.subtitle {
   --color-warning-bg: rgba(245, 158, 11, 0.12);
   --color-danger-bg: rgba(239, 68, 68, 0.12);
   --color-info-bg: rgba(59, 130, 246, 0.12);
+
+  --picker-icon-filter: invert(0.9);
 }
 
 /* Dynamic Logo Theme Switcher */

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { X, FolderGit2, Info, RefreshCw } from 'lucide-react';
 import './CreateProjectModal.css';
 
@@ -17,7 +17,141 @@ export default function CreateProjectModal({
   const [progressPct, setProgressPct] = useState(0);
   const [error, setError] = useState('');
 
+  const [groupStatus, setGroupStatus] = useState({ state: 'idle', msg: '' });
+  const [urlStatus, setUrlStatus] = useState({ state: 'idle', msg: '' });
+
+  const groupReqId = useRef(0);
+  const urlReqId = useRef(0);
+
   const normalizeGitUrl = (url) => (url || '').trim().replace(/\/+$/, '').replace(/\.git$/i, '').toLowerCase();
+
+  // Basic URL validator: must start with http(s):// or git:// or git@
+  const isValidGitUrl = (url) => {
+    const v = (url || '').trim();
+    return /^(https?:\/\/|git:\/\/|git@).+/i.test(v);
+  };
+
+  const isGroupTakenLocal = (v) => existingProjects.some(p =>
+    (p.group_no || p.groupNo || '').trim().toLowerCase() === v.trim().toLowerCase()
+  );
+
+  const isUrlTakenLocal = (v) => existingProjects.some(p =>
+    normalizeGitUrl(p.git_url || p.gitUrl) === normalizeGitUrl(v)
+  );
+
+  // Debounced server check for Group No
+  useEffect(() => {
+    const val = groupNo.trim();
+    if (!val) {
+      setGroupStatus({ state: 'idle', msg: '' });
+      return;
+    }
+
+    const takenLocal = isGroupTakenLocal(val);
+    if (takenLocal) {
+      setGroupStatus({ state: 'taken', msg: 'Already used in this course' });
+    } else {
+      setGroupStatus({ state: 'checking', msg: 'Checking…' });
+    }
+
+    const timer = setTimeout(async () => {
+      groupReqId.current += 1;
+      const reqId = groupReqId.current;
+      const token = localStorage.getItem('token');
+
+      try {
+        const res = await fetch(`/api/v1/courses/${course.id}/project-availability?field=group_no&value=${encodeURIComponent(val)}`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (reqId !== groupReqId.current) return; // stale response
+
+        if (res.ok) {
+          const data = await res.json();
+          if (data.available === false) {
+            setGroupStatus({ state: 'taken', msg: 'Already used in this course' });
+          } else {
+            setGroupStatus({ state: 'available', msg: 'Available' });
+          }
+        } else {
+          // Fall back to local check on server error
+          if (takenLocal) {
+            setGroupStatus({ state: 'taken', msg: 'Already used in this course' });
+          } else {
+            setGroupStatus({ state: 'available', msg: 'Available' });
+          }
+        }
+      } catch (err) {
+        if (reqId !== groupReqId.current) return;
+        if (takenLocal) {
+          setGroupStatus({ state: 'taken', msg: 'Already used in this course' });
+        } else {
+          setGroupStatus({ state: 'available', msg: 'Available' });
+        }
+      }
+    }, 250);
+
+    return () => clearTimeout(timer);
+  }, [groupNo, course?.id, existingProjects]);
+
+  // Debounced server check for Git URL
+  useEffect(() => {
+    const val = gitUrl.trim();
+    if (!val) {
+      setUrlStatus({ state: 'idle', msg: '' });
+      return;
+    }
+
+    // Guard: must be a valid URL before running any availability check
+    if (!isValidGitUrl(val)) {
+      setUrlStatus({ state: 'invalid', msg: 'Enter a valid Git URL (https://, git://, or git@)' });
+      return;
+    }
+
+    const takenLocal = isUrlTakenLocal(val);
+    if (takenLocal) {
+      setUrlStatus({ state: 'taken', msg: 'Already used in this course' });
+    } else {
+      setUrlStatus({ state: 'checking', msg: 'Checking…' });
+    }
+
+    const timer = setTimeout(async () => {
+      urlReqId.current += 1;
+      const reqId = urlReqId.current;
+      const token = localStorage.getItem('token');
+
+      try {
+        const res = await fetch(`/api/v1/courses/${course.id}/project-availability?field=git_url&value=${encodeURIComponent(val)}`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (reqId !== urlReqId.current) return; // stale response
+
+        if (res.ok) {
+          const data = await res.json();
+          if (data.available === false) {
+            setUrlStatus({ state: 'taken', msg: 'Already used in this course' });
+          } else {
+            setUrlStatus({ state: 'available', msg: 'Available' });
+          }
+        } else {
+          // Fall back to local check on server error
+          if (takenLocal) {
+            setUrlStatus({ state: 'taken', msg: 'Already used in this course' });
+          } else {
+            setUrlStatus({ state: 'available', msg: 'Available' });
+          }
+        }
+      } catch (err) {
+        if (reqId !== urlReqId.current) return;
+        if (takenLocal) {
+          setUrlStatus({ state: 'taken', msg: 'Already used in this course' });
+        } else {
+          setUrlStatus({ state: 'available', msg: 'Available' });
+        }
+      }
+    }, 250);
+
+    return () => clearTimeout(timer);
+  }, [gitUrl, course?.id, existingProjects]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -64,6 +198,9 @@ export default function CreateProjectModal({
 
     const token = localStorage.getItem('token');
 
+    let createdProjectId = null;
+    let progressInterval = null;
+
     try {
       // 1. Create project entry
       // TODO: migrate to apiFetch
@@ -88,12 +225,14 @@ export default function CreateProjectModal({
         throw new Error(createData.detail || 'Failed to create project record.');
       }
 
+      createdProjectId = createData.project_id;
+
       // Phase 2: Downloading
       setProgressPct(35);
       setProgressMsg('downloading...');
 
       // Phase 3 & 4 Progress Ticker
-      const progressInterval = setInterval(() => {
+      progressInterval = setInterval(() => {
         setProgressPct((prev) => {
           if (prev < 70) {
             setProgressMsg('extracting...');
@@ -108,7 +247,7 @@ export default function CreateProjectModal({
 
       // 2. Trigger git history extraction
       // TODO: migrate to apiFetch
-      const extractRes = await fetch(`/api/v1/extract/${createData.project_id}`, {
+      const extractRes = await fetch(`/api/v1/extract/${createdProjectId}`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`
@@ -127,7 +266,7 @@ export default function CreateProjectModal({
       setProgressMsg('completed!');
       
       const newProjectObj = {
-        id: createData.project_id,
+        id: createdProjectId,
         name,
         description,
         gitUrl,
@@ -143,6 +282,20 @@ export default function CreateProjectModal({
         onClose();
       }, 400);
     } catch (err) {
+      if (progressInterval) clearInterval(progressInterval);
+
+      // If project record was created but extraction failed or was aborted, purge project from DB & disk
+      if (createdProjectId) {
+        try {
+          await fetch(`/api/v1/projects/${createdProjectId}`, {
+            method: 'DELETE',
+            headers: { 'Authorization': `Bearer ${token}` }
+          });
+        } catch (cleanupErr) {
+          console.error("Failed to cleanup aborted project:", cleanupErr);
+        }
+      }
+
       setError(err.message || 'Server connection error.');
       setLoading(false);
     }
@@ -193,7 +346,9 @@ export default function CreateProjectModal({
           <form onSubmit={handleSubmit} className="modal-form">
             <div className="form-group-row" style={{ display: 'flex', gap: '16px' }}>
               <div className="form-group" style={{ flex: 2 }}>
-                <label className="form-label">Project / Repository Name</label>
+                <label className="form-label">
+                  Project / Repository Name<span style={{ color: 'var(--danger, #e5484d)' }}> *</span>
+                </label>
                 <input 
                   type="text" 
                   className="input-field" 
@@ -214,11 +369,20 @@ export default function CreateProjectModal({
                   onChange={(e) => setGroupNo(e.target.value)}
                   required
                 />
+                {groupStatus.state !== 'idle' && (
+                  <div style={{ fontSize: '0.75rem', marginTop: '4px' }}>
+                    {groupStatus.state === 'checking' && <span style={{ color: 'var(--text-muted)' }}>Checking…</span>}
+                    {groupStatus.state === 'available' && <span style={{ color: 'var(--success, #16a34a)', fontWeight: '500' }}>✓ Available</span>}
+                    {groupStatus.state === 'taken' && <span style={{ color: 'var(--danger, #e5484d)', fontWeight: '500' }}>⚠ {groupStatus.msg}</span>}
+                  </div>
+                )}
               </div>
             </div>
 
             <div className="form-group">
-              <label className="form-label">Repository Git URL</label>
+              <label className="form-label">
+                Repository Git URL<span style={{ color: 'var(--danger, #e5484d)' }}> *</span>
+              </label>
               <input 
                 type="url" 
                 className="input-field" 
@@ -227,6 +391,14 @@ export default function CreateProjectModal({
                 onChange={(e) => setGitUrl(e.target.value)}
                 required
               />
+              {urlStatus.state !== 'idle' && (
+                <div style={{ fontSize: '0.75rem', marginTop: '4px' }}>
+                  {urlStatus.state === 'invalid'   && <span style={{ color: 'var(--danger, #e5484d)', fontWeight: '500' }}>✗ {urlStatus.msg}</span>}
+                  {urlStatus.state === 'checking'  && <span style={{ color: 'var(--text-muted)' }}>Checking…</span>}
+                  {urlStatus.state === 'available' && <span style={{ color: 'var(--success, #16a34a)', fontWeight: '500' }}>✓ Available</span>}
+                  {urlStatus.state === 'taken'     && <span style={{ color: 'var(--danger, #e5484d)', fontWeight: '500' }}>⚠ {urlStatus.msg}</span>}
+                </div>
+              )}
             </div>
 
             <div className="form-group">
@@ -242,10 +414,18 @@ export default function CreateProjectModal({
 
 
             <div className="form-actions">
-              <button type="button" className="btn btn-secondary" onClick={onClose}>
+              <button type="button" className="btn btn-secondary" onClick={onClose} disabled={loading}>
                 Cancel
               </button>
-              <button type="submit" className="btn btn-primary">
+              <button 
+                type="submit" 
+                className="btn btn-primary"
+                disabled={
+                  loading || !name.trim() || !gitUrl.trim() || !groupNo.trim()
+                  || groupStatus.state === 'taken' || urlStatus.state === 'taken'
+                  || groupStatus.state === 'checking' || urlStatus.state === 'checking'
+                }
+              >
                 Create and Parse
               </button>
             </div>

@@ -6,22 +6,78 @@ import { buildDeadline, formatDeadline } from '../../utils/courseMeta';
 import './CourseSelect.css';
 import '../../components/Header.css';
 
+const TECH_SUGGESTIONS = [
+  'JavaScript','TypeScript','React','Vue','Angular','Node.js','Express','Next.js','Nuxt.js','Svelte',
+  'Python','Django','Flask','FastAPI','PyTorch','TensorFlow','Pandas','NumPy','SciPy',
+  'Java','Spring','Spring Boot','Kotlin','Android','Scala',
+  'C','C++','C#','.NET','ASP.NET','WPF',
+  'Go','Rust','Zig',
+  'Ruby','Rails','PHP','Laravel','Symfony',
+  'Swift','SwiftUI','Objective-C',
+  'SQL','PostgreSQL','MySQL','SQLite','MongoDB','Redis','Elasticsearch','GraphQL',
+  'HTML','CSS','Sass','Tailwind','Bootstrap',
+  'Docker','Kubernetes','Terraform','Ansible','AWS','Azure','GCP','Git','CI/CD'
+];
+
 const pad = (n) => String(n).padStart(2, '0');
 const todayISO = () => {
   const d = new Date();
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 };
 
+const minDeadlineISO = () => {
+  const d = new Date();
+  d.setMonth(d.getMonth() - 6);
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+};
+
+const addDaysISO = (n) => {
+  const d = new Date();
+  d.setDate(d.getDate() + n);
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+};
+
+const endOfMonthISO = () => {
+  const d = new Date();
+  const e = new Date(d.getFullYear(), d.getMonth() + 1, 0);
+  return `${e.getFullYear()}-${pad(e.getMonth() + 1)}-${pad(e.getDate())}`;
+};
+
+const normalizeTech = (raw) => {
+  const t = raw.trim();
+  if (!t) return '';
+  const hit = TECH_SUGGESTIONS.find(s => s.toLowerCase() === t.toLowerCase());
+  return hit || t;
+};
+
 export default function CourseSelect({ user, onSelectCourse, onLogout, onUserUpdate }) {
   const [courses, setCourses] = useState([]);
   const [newCourseName, setNewCourseName] = useState('');
   const [newCourseDesc, setNewCourseDesc] = useState('');
-  const [newCourseTech, setNewCourseTech] = useState('');
+  const [techTags, setTechTags] = useState([]);
+  const [techInput, setTechInput] = useState('');
+  const [techActiveIdx, setTechActiveIdx] = useState(-1);
   const [newDeadlineDate, setNewDeadlineDate] = useState(() => todayISO());
-  const [newDeadlineTime, setNewDeadlineTime] = useState('00:00');
+  const [newDeadlineTime, setNewDeadlineTime] = useState('23:59');
   const [showAddForm, setShowAddForm] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
+
+  const addTechTag = (raw) => {
+    const val = normalizeTech(raw);
+    if (!val) return;
+    setTechTags(prev => prev.some(x => x.toLowerCase() === val.toLowerCase()) ? prev : [...prev, val]);
+    setTechInput('');
+    setTechActiveIdx(-1);
+  };
+
+  const removeTechTag = (i) => setTechTags(prev => prev.filter((_, idx) => idx !== i));
+
+  const techMatches = techInput.trim()
+    ? TECH_SUGGESTIONS.filter(s => s.toLowerCase().includes(techInput.trim().toLowerCase())
+        && !techTags.some(t => t.toLowerCase() === s.toLowerCase())).slice(0, 6)
+    : [];
 
   const fetchCourses = async () => {
     setLoading(true);
@@ -52,8 +108,19 @@ export default function CourseSelect({ user, onSelectCourse, onLogout, onUserUpd
 
   const handleCreateCourse = async (e) => {
     e.preventDefault();
-    if (!newCourseName.trim()) return;
+    if (!newCourseName.trim() || submitting) return;
 
+    if (techInput.trim()) {
+      addTechTag(techInput);
+    }
+
+    const currentTags = techInput.trim()
+      ? (techTags.some(x => x.toLowerCase() === normalizeTech(techInput).toLowerCase())
+          ? techTags
+          : [...techTags, normalizeTech(techInput)])
+      : techTags;
+
+    setSubmitting(true);
     const token = localStorage.getItem('token');
 
     try {
@@ -67,8 +134,8 @@ export default function CourseSelect({ user, onSelectCourse, onLogout, onUserUpd
         body: JSON.stringify({
           name: newCourseName,
           description: newCourseDesc,
-          tech_requirements: newCourseTech.trim() || null,
-          deadline: buildDeadline(newDeadlineDate, newDeadlineTime || '00:00')
+          tech_requirements: currentTags.length ? currentTags.join(', ') : null,
+          deadline: buildDeadline(newDeadlineDate, newDeadlineTime || '23:59')
         })
       });
 
@@ -76,12 +143,15 @@ export default function CourseSelect({ user, onSelectCourse, onLogout, onUserUpd
       fetchCourses();
       setNewCourseName('');
       setNewCourseDesc('');
-      setNewCourseTech('');
+      setTechTags([]);
+      setTechInput('');
       setNewDeadlineDate(todayISO());
-      setNewDeadlineTime('00:00');
+      setNewDeadlineTime('23:59');
       setShowAddForm(false);
     } catch (err) {
       setError('Failed to create course: ' + err.message);
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -114,13 +184,15 @@ export default function CourseSelect({ user, onSelectCourse, onLogout, onUserUpd
         <div className="courses-grid-section">
           <div className="section-title-row">
             <h2>Select a Course</h2>
-            <button
-              className="btn btn-primary btn-sm"
-              onClick={() => setShowAddForm(true)}
-            >
-              <Plus size={16} />
-              <span>Add Course</span>
-            </button>
+            {courses.length > 0 && (
+              <button
+                className="btn btn-primary btn-sm"
+                onClick={() => setShowAddForm(true)}
+              >
+                <Plus size={16} />
+                <span>Add Course</span>
+              </button>
+            )}
           </div>
 
           {showAddForm && (
@@ -143,14 +215,17 @@ export default function CourseSelect({ user, onSelectCourse, onLogout, onUserUpd
 
                 <form onSubmit={handleCreateCourse} className="modal-form" style={{ display: 'flex', flexDirection: 'column', gap: '16px', textAlign: 'left' }}>
                   <div className="form-group">
-                    <label className="form-label" style={{ display: 'block', fontSize: '0.85rem', fontWeight: '500', marginBottom: '6px', color: 'var(--text-main)' }}>Course Name</label>
+                    <label className="form-label" style={{ display: 'block', fontSize: '0.85rem', fontWeight: '500', marginBottom: '6px', color: 'var(--text-main)' }}>
+                      Course Name<span style={{ color: 'var(--danger,#e5484d)' }}> *</span>
+                    </label>
                     <input 
                       type="text" 
                       className="input-field" 
-                      placeholder="Advanced Web Application Development - SE401"
+                      placeholder="e.g. Advanced Web Application Development - SE401"
                       value={newCourseName}
                       onChange={(e) => setNewCourseName(e.target.value)}
                       required
+                      autoFocus
                     />
                   </div>
 
@@ -158,11 +233,15 @@ export default function CourseSelect({ user, onSelectCourse, onLogout, onUserUpd
                     <label className="form-label" style={{ display: 'block', fontSize: '0.85rem', fontWeight: '500', marginBottom: '6px', color: 'var(--text-main)' }}>Description (Optional)</label>
                     <textarea
                       className="input-field text-area"
-                      placeholder="This course introduces the fundamental concepts, architectures, and technologies required to design and build modern, dynamic web applications."
+                      placeholder="e.g. Short summary of what this course covers."
                       value={newCourseDesc}
                       onChange={(e) => setNewCourseDesc(e.target.value)}
-                      style={{ minHeight: '74px', resize: 'vertical' }}
+                      maxLength={500}
+                      style={{ minHeight: '120px', resize: 'vertical' }}
                     />
+                    <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', textAlign: 'right', marginTop: '4px' }}>
+                      {newCourseDesc.length}/500
+                    </div>
                   </div>
 
                   <div className="form-group">
@@ -170,44 +249,167 @@ export default function CourseSelect({ user, onSelectCourse, onLogout, onUserUpd
                       <label className="form-label" style={{ fontSize: '0.85rem', fontWeight: '500', color: 'var(--text-main)', margin: 0 }}>Languages &amp; Frameworks (Optional)</label>
                       <Tooltip content="Expected tech stack for this course. Used as context in the final report." />
                     </div>
-                    <textarea
-                      className="input-field text-area"
-                      placeholder="JavaScript, React, Python, SQL"
-                      value={newCourseTech}
-                      onChange={(e) => setNewCourseTech(e.target.value)}
-                      style={{ minHeight: '64px', resize: 'vertical' }}
-                    />
+                    <div style={{ position: 'relative' }}>
+                      <div 
+                        className="input-field" 
+                        style={{ 
+                          padding: '4px 8px', 
+                          minHeight: '38px', 
+                          display: 'flex', 
+                          flexWrap: 'wrap', 
+                          gap: '6px', 
+                          alignItems: 'center', 
+                          height: 'auto' 
+                        }}
+                      >
+                        {techTags.map((tag, idx) => (
+                          <span 
+                            key={idx} 
+                            style={{ 
+                              background: 'var(--bg-hover)', 
+                              border: '1px solid var(--border-color)', 
+                              borderRadius: '4px', 
+                              padding: '2px 8px', 
+                              fontSize: '0.8rem', 
+                              display: 'inline-flex', 
+                              alignItems: 'center', 
+                              gap: '4px',
+                              color: 'var(--text-main)'
+                            }}
+                          >
+                            {tag}
+                            <button 
+                              type="button" 
+                              onClick={() => removeTechTag(idx)} 
+                              style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, color: 'var(--text-muted)', display: 'inline-flex', alignItems: 'center' }}
+                            >
+                              <X size={12} />
+                            </button>
+                          </span>
+                        ))}
+                        <input
+                          type="text"
+                          value={techInput}
+                          placeholder={techTags.length === 0 ? "Type to add… e.g. React" : ""}
+                          onChange={(e) => { setTechInput(e.target.value); setTechActiveIdx(-1); }}
+                          onBlur={() => { if (techInput.trim()) addTechTag(techInput); }}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' || e.key === ',') {
+                              e.preventDefault();
+                              if (techActiveIdx >= 0 && techMatches[techActiveIdx]) {
+                                addTechTag(techMatches[techActiveIdx]);
+                              } else {
+                                addTechTag(techInput);
+                              }
+                            } else if (e.key === 'ArrowDown') {
+                              e.preventDefault();
+                              setTechActiveIdx(i => Math.min(i + 1, techMatches.length - 1));
+                            } else if (e.key === 'ArrowUp') {
+                              e.preventDefault();
+                              setTechActiveIdx(i => Math.max(i - 1, 0));
+                            } else if (e.key === 'Backspace' && techInput === '' && techTags.length > 0) {
+                              removeTechTag(techTags.length - 1);
+                            } else if (e.key === 'Escape') {
+                              setTechInput('');
+                              setTechActiveIdx(-1);
+                            }
+                          }}
+                          style={{ flex: 1, border: 'none', outline: 'none', background: 'transparent', color: 'var(--text-main)', fontSize: '0.85rem', minWidth: '120px' }}
+                        />
+                      </div>
+                      {techMatches.length > 0 && (
+                        <div 
+                          style={{ 
+                            position: 'absolute', 
+                            top: '100%', 
+                            left: 0, 
+                            right: 0, 
+                            zIndex: 10, 
+                            background: 'var(--bg-card)', 
+                            border: '1px solid var(--border-color)', 
+                            borderRadius: '4px', 
+                            marginTop: '4px', 
+                            maxHeight: '160px', 
+                            overflowY: 'auto',
+                            boxShadow: 'var(--shadow-lg)'
+                          }}
+                        >
+                          {techMatches.map((match, index) => (
+                            <div
+                              key={match}
+                              onMouseDown={(e) => { e.preventDefault(); addTechTag(match); }}
+                              style={{
+                                padding: '6px 12px',
+                                cursor: 'pointer',
+                                fontSize: '0.85rem',
+                                background: index === techActiveIdx ? 'var(--bg-hover)' : 'transparent',
+                                color: 'var(--text-main)'
+                              }}
+                            >
+                              {match}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
                   </div>
 
                   <div className="form-group">
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '6px' }}>
-                      <label className="form-label" style={{ fontSize: '0.85rem', fontWeight: '500', color: 'var(--text-main)', margin: 0 }}>Submission Deadline</label>
-                      <Tooltip content="Commits pushed after this deadline will be flagged as late." />
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <label className="form-label" style={{ fontSize: '0.85rem', fontWeight: '500', color: 'var(--text-main)', margin: 0 }}>Submission Deadline</label>
+                        <Tooltip content="Commits pushed after this deadline will be flagged as late." />
+                      </div>
+                      <div style={{ display: 'flex', gap: '4px' }}>
+                        <button
+                          type="button"
+                          className="btn btn-secondary"
+                          onClick={() => setNewDeadlineDate(todayISO())}
+                          style={{ padding: '2px 8px', height: '28px', fontSize: '0.75rem' }}
+                        >
+                          Today
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-secondary"
+                          onClick={() => setNewDeadlineDate(addDaysISO(7))}
+                          style={{ padding: '2px 8px', height: '28px', fontSize: '0.75rem' }}
+                        >
+                          +1 week
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-secondary"
+                          onClick={() => setNewDeadlineDate(addDaysISO(14))}
+                          style={{ padding: '2px 8px', height: '28px', fontSize: '0.75rem' }}
+                        >
+                          +2 weeks
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-secondary"
+                          onClick={() => setNewDeadlineDate(endOfMonthISO())}
+                          style={{ padding: '2px 8px', height: '28px', fontSize: '0.75rem' }}
+                        >
+                          End of month
+                        </button>
+                      </div>
                     </div>
                     <div className="settings-deadline-inputs" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                       <input
                         type="date"
                         className="input-field"
                         value={newDeadlineDate}
+                        min={minDeadlineISO()}
                         onChange={(e) => setNewDeadlineDate(e.target.value)}
                         style={{ flex: 2 }}
                       />
-                      <button
-                        type="button"
-                        className="btn btn-secondary btn-today"
-                        onClick={() => setNewDeadlineDate(todayISO())}
-                        title="Set deadline date to Today"
-                        style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '0 12px', height: '38px', fontSize: '0.82rem', fontWeight: '600', whiteSpace: 'nowrap', flexShrink: 0 }}
-                      >
-                        <Calendar size={14} />
-                        <span>Today</span>
-                      </button>
                       <input
                         type="time"
                         className="input-field"
                         aria-label="Deadline time"
                         value={newDeadlineTime}
-                        onChange={(e) => setNewDeadlineTime(e.target.value || '00:00')}
+                        onChange={(e) => setNewDeadlineTime(e.target.value || '23:59')}
                         disabled={!newDeadlineDate}
                         style={{ flex: 1.2 }}
                       />
@@ -215,11 +417,11 @@ export default function CourseSelect({ user, onSelectCourse, onLogout, onUserUpd
                   </div>
 
                   <div className="modal-actions" style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px', marginTop: '12px' }}>
-                    <button type="button" className="btn btn-secondary" onClick={() => setShowAddForm(false)}>
+                    <button type="button" className="btn btn-secondary" onClick={() => setShowAddForm(false)} disabled={submitting}>
                       Cancel
                     </button>
-                    <button type="submit" className="btn btn-primary">
-                      Create Course
+                    <button type="submit" className="btn btn-primary" disabled={!newCourseName.trim() || submitting}>
+                      {submitting ? 'Creating…' : 'Create Course'}
                     </button>
                   </div>
                 </form>
@@ -281,3 +483,4 @@ export default function CourseSelect({ user, onSelectCourse, onLogout, onUserUpd
     </div>
   );
 }
+
