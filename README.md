@@ -77,9 +77,11 @@ code_lens/
 
 6. Start the FastAPI server:
    ```bash
-   uvicorn src.main:app --reload
+   uvicorn src.main:app --reload --reload-dir src
    ```
    *The backend will run on **`http://127.0.0.1:8000`**. Tables will be created automatically in your database upon first startup.*
+
+   > **Note:** `--reload-dir src` restricts the auto-reloader to the source folder. Without it, cloning a repository into `saved_repos/` (or `temp_repos/`) writes source files that the reloader detects, restarting the server mid-extraction.
 
 ---
 

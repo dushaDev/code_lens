@@ -123,6 +123,50 @@ def _dir_size(path: str) -> int:
     return total
 
 
+def _summarize_git_error(stderr: str) -> str:
+    """Return a compact, human-readable summary of git stderr, capped at 300 chars."""
+    if not stderr:
+        return "unknown git error"
+    noise = (
+        "updating files", "receiving objects", "resolving deltas",
+        "counting objects", "compressing objects", "remote: counting",
+        "remote: compressing", "remote: total", "remote: enumerating",
+    )
+    lines = []
+    for raw in stderr.replace("\r", "\n").splitlines():
+        line = raw.strip()
+        if not line or any(line.lower().startswith(n) for n in noise):
+            continue
+        lines.append(line)
+    msg = " ".join(lines[-3:]) if lines else "unknown git error"
+    return msg[:300]
+
+
+def _summarize_git_error(stderr: str) -> str:
+    """Condense git's stderr into a short, user-safe message.
+
+    Keeps the meaningful lines (e.g. 'error: unable to write file ...',
+    'checkout failed') and drops the noisy 'Updating files: NN%' / 'Receiving
+    objects' progress spam, capped at 300 chars so a multi-line clone dump can
+    never flood the UI.
+    """
+    if not stderr:
+        return "unknown git error"
+    noise = (
+        "updating files", "receiving objects", "resolving deltas",
+        "counting objects", "compressing objects", "remote: counting",
+        "remote: compressing", "remote: total", "remote: enumerating",
+    )
+    lines = []
+    for raw in stderr.replace("\r", "\n").splitlines():
+        line = raw.strip()
+        if not line or any(line.lower().startswith(n) for n in noise):
+            continue
+        lines.append(line)
+    msg = " ".join(lines[-3:]) if lines else "unknown git error"
+    return msg[:300]
+
+
 def _terminate_process(proc: "subprocess.Popen") -> None:
     """Best-effort kill of a still-running subprocess and reap it."""
     try:
@@ -147,7 +191,7 @@ def _run_git_clone_bounded(
     Raises RuntimeError (mapped to HTTP 422 by the router) on any clone failure,
     timeout, or size-cap breach — the message is safe to surface to the user.
     """
-    cmd = ["git", "clone", "--", git_url, dest]
+    cmd = ["git", "clone", "-c", "core.longpaths=true", "--", git_url, dest]
     try:
         proc = subprocess.Popen(
             cmd,
@@ -172,7 +216,7 @@ def _run_git_clone_bounded(
                     f"Git clone timed out after {timeout}s for '{git_url}'. "
                     f"The repository may be too large or the remote unresponsive."
                 )
-            if _dir_size(dest) > max_bytes:
+            if _dir_size(os.path.join(dest, ".git")) > max_bytes:
                 _terminate_process(proc)
                 raise RuntimeError(
                     f"Repository '{git_url}' exceeds the {limit_mb} MB download limit; clone aborted."
@@ -181,15 +225,53 @@ def _run_git_clone_bounded(
 
         # Process finished on its own — drain remaining output and check status
         _stdout, stderr = proc.communicate()
-        if retcode != 0:
-            detail = (stderr or "").strip() or "unknown git error"
+        git_dir = os.path.join(dest, ".git")
+
+        # "Clone succeeded, but checkout failed": all objects are in .git; only the
+        # working-tree write failed (a locked file — antivirus, etc.). Retry checkout
+        # a few times now that the clone process has exited and our poller has stopped.
+        checkout_failed = (
+            retcode != 0
+            and os.path.isdir(git_dir)
+            and "checkout failed" in (stderr or "").lower()
+        )
+        if checkout_failed:
+            logger.warning(
+                "git clone for '%s' downloaded all objects but checkout failed "
+                "(likely a locked file / antivirus on Windows). Retrying checkout; "
+                "history extraction proceeds regardless. Detail: %s",
+                git_url, _summarize_git_error(stderr),
+            )
+            recovered = False
+            for attempt in range(3):
+                try:
+                    r = subprocess.run(
+                        ["git", "-C", dest, "-c", "core.longpaths=true",
+                         "checkout", "-f", "HEAD"],
+                        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                        timeout=timeout, env=env, check=False,
+                    )
+                    if r.returncode == 0:
+                        recovered = True
+                        break
+                except (subprocess.SubprocessError, OSError):
+                    logger.debug("checkout retry %d failed for %s", attempt, git_url,
+                                 exc_info=True)
+                time.sleep(1.0)  # let a transient AV lock clear
+            if not recovered:
+                logger.warning(
+                    "Working-tree checkout for '%s' still incomplete after retries; "
+                    "history extraction will proceed from .git anyway.", git_url,
+                )
+            # Do NOT raise — .git is complete, extraction can continue.
+        elif retcode != 0:
             raise RuntimeError(
                 f"Git clone failed for '{git_url}'. "
                 f"Possible causes: invalid URL, private repo without credentials, "
-                f"or a network/permission error. Details: {detail}"
+                f"or a network error. Details: {_summarize_git_error(stderr)}"
             )
         # A clone that completed between polls could still be over the cap
-        if _dir_size(dest) > max_bytes:
+        if _dir_size(git_dir) > max_bytes:
             raise RuntimeError(
                 f"Repository '{git_url}' exceeds the {limit_mb} MB download limit."
             )
@@ -370,11 +452,12 @@ class PyDrillerService(IGitExtractorService):
 
                 # 2. Squash Heuristics
                 is_squash = False
+                msg = commit.msg or ""   # guard: PyDriller may return None for empty commit messages
                 if commit.insertions > 1000:
                     is_squash = True
-                elif "Co-authored-by:" in commit.msg:
+                elif "Co-authored-by:" in msg:
                     is_squash = True
-                elif re.search(r'\(#\d+\)$', commit.msg.split('\n')[0].strip()):
+                elif re.search(r'\(#\d+\)$', msg.split('\n')[0].strip()):
                     is_squash = True
 
                 if is_squash:
@@ -405,7 +488,7 @@ class PyDrillerService(IGitExtractorService):
                     project_id=project.id,
                     author_id=author.id,
                     timestamp=dt,
-                    message=commit.msg,
+                    message=msg,
                     insertions=kept_insertions,
                     deletions=kept_deletions,
                     is_squash_suspected=is_squash,
@@ -474,10 +557,11 @@ class PyDrillerService(IGitExtractorService):
                                 stdout=subprocess.PIPE,
                                 stderr=subprocess.PIPE,
                                 text=True,
+                                timeout=60,
                                 check=True
                             )
                             blame_counts = {}
-                            for line in blame_res.stdout.split('\n'):
+                            for line in (blame_res.stdout or "").split('\n'):
                                 if not line:
                                     continue
                                 match = re.search(r'<([^>]+)>', line)
@@ -486,10 +570,10 @@ class PyDrillerService(IGitExtractorService):
                                     if email in mailmap_data:
                                         email = mailmap_data[email]["email"]
                                     blame_counts[email] = blame_counts.get(email, 0) + 1
-                                    
+
                             if blame_counts:
                                 file_change.blame_snapshot = json.dumps(blame_counts)
-                        except (subprocess.SubprocessError, OSError):
+                        except (subprocess.SubprocessError, OSError, ValueError):
                             # Blame is best-effort enrichment; never abort commit extraction
                             logger.debug("git blame skipped for %s @ %s", mod.new_path, commit.hash, exc_info=True)
 
