@@ -230,35 +230,50 @@ class GetQualitativeAnalysisUseCase:
             sample_pct:     Fraction of each contributor's remaining commits to include (0-1).
             force_refresh:  Bypass DB cache and re-analyze.
         """
+        logger.info("[QUAL] ===== execute_stream START  project_id=%s  mode=%s  force_refresh=%s =====", project_id, mode, force_refresh)
+
         if project_id in CANCELLED_PROJECT_IDS:
             CANCELLED_PROJECT_IDS.discard(project_id)
 
         # Mark as running
         update_running_project(project_id, new_state={"status": "running", "progress": 0, "message": "Starting analysis..."})
 
+        logger.info("[QUAL] Fetching project %s from DB...", project_id)
         project = self.project_repo.get_by_id(project_id)
         if not project:
+            logger.error("[QUAL] Project %s NOT FOUND in DB — aborting.", project_id)
             RUNNING_PROJECTS.pop(project_id, None)
             yield {"type": "error", "message": f"Project with ID {project_id} not found."}
             return
+        logger.info("[QUAL] Project found: id=%s name=%r", project.id, getattr(project, 'name', '?'))
 
-        # Resolve course deadline from relationship
+        # Resolve course deadline. NOTE: project is a ProjectEntity (from
+        # get_by_id), which exposes only `course_id` — it has no `course`
+        # relationship. Load the course row via the repo's DB session instead.
         deadline: Optional[object] = None
         try:
-            if project.course and project.course.deadline:
-                deadline = project.course.deadline
-        except SQLAlchemyError as deadline_err:
+            db_session = getattr(self.project_repo, 'db', None)
+            course_id = getattr(project, 'course_id', None)
+            if db_session is not None and course_id is not None:
+                from src.infrastructure.database.models import CourseModel
+                course = db_session.query(CourseModel).filter(CourseModel.id == course_id).first()
+                if course and course.deadline:
+                    deadline = course.deadline
+        except (SQLAlchemyError, AttributeError) as deadline_err:
             logger.warning(f"Course deadline resolution failed: {deadline_err}")
 
         # Check DB cache first unless force_refresh is True
         if not force_refresh and getattr(project, 'qualitative_report', None):
+            logger.info("[QUAL] DB cache hit for project %s — returning cached report.", project_id)
             try:
                 cached_data = json.loads(project.qualitative_report)
                 update_running_project(project_id, new_state={"status": "complete", "progress": 100, "message": "Loaded from database cache."})
                 yield {"type": "complete", "progress": 100, "message": "Loaded cached analysis from database.", "data": cached_data}
                 return
             except (json.JSONDecodeError, SQLAlchemyError) as cache_err:
-                logger.warning(f"Error reading DB qualitative_report cache: {cache_err}")
+                logger.warning("[QUAL] Error reading DB qualitative_report cache: %s", cache_err)
+        else:
+            logger.info("[QUAL] No DB cache (force_refresh=%s) — running fresh analysis.", force_refresh)
 
         if force_refresh:
             update_running_project(project_id, new_state={"status": "running", "progress": 2, "message": "Re-analyzing project..."})
@@ -267,8 +282,10 @@ class GetQualitativeAnalysisUseCase:
         yield {"type": "progress", "progress": 3, "message": "Fetching authors and commits..."}
         authors = self.author_repo.get_by_project_id(project_id)
         commits = self.commit_repo.get_by_project_id(project_id)
+        logger.info("[QUAL] Fetched %d authors, %d commits for project %s.", len(authors) if authors else 0, len(commits) if commits else 0, project_id)
 
         if not commits:
+            logger.warning("[QUAL] No commits found for project %s — yielding empty complete.", project_id)
             yield {"type": "complete", "progress": 100, "message": "No commits found.", "data": {
                 "project_summary": {},
                 "contributors": {}
@@ -304,6 +321,7 @@ class GetQualitativeAnalysisUseCase:
         update_running_project(project_id, message=f"Building {mode} sample...")
         yield {"type": "progress", "progress": 5, "message": f"Building {mode} sample..."}
 
+        logger.info("[QUAL] Building stratified sample — mode=%s sample_pct=%s total_commits=%d", mode, sample_pct, len(commits))
         commits_to_process = build_stratified_sample(
             commits=commits,
             commits_by_author=dict(commits_by_author),
@@ -321,6 +339,7 @@ class GetQualitativeAnalysisUseCase:
         )
 
         total_process = len(commits_to_process)
+        logger.info("[QUAL] Sample ready: %d commits selected from %d total.", total_process, len(commits))
         yield {
             "type": "progress",
             "progress": 7,
@@ -341,10 +360,20 @@ class GetQualitativeAnalysisUseCase:
                 return
 
             pct = 8 + int(82 * ((idx + 1) / total_process))
-            msg_snippet = c.message[:35].replace('\n', ' ') + ("..." if len(c.message) > 35 else "")
+            msg = c.message or ""  # guard: existing DB rows may have NULL message
+            msg_snippet = msg[:35].replace('\n', ' ') + ("..." if len(msg) > 35 else "")
             canonical_aid = canonical_id_map.get(c.author_id, c.author_id)
             author_name = author_map[canonical_aid].name if canonical_aid in author_map else "Unknown"
             update_running_project(project_id, progress=pct, message=f"[{idx+1}/{total_process}] Labeling commit by {author_name}")
+
+            # Emit heartbeat BEFORE waiting on the LLM so the SSE stream stays alive
+            # (the model cold-start can take 30-60s on first call; without this the
+            # frontend shows 0% forever until the executor returns)
+            yield {
+                "type": "progress",
+                "progress": pct,
+                "message": f"Labeling [{author_name}] commit ({idx+1}/{total_process}): '{msg_snippet}'"
+            }
 
             combined_diff = ""
             if hasattr(c, 'file_changes') and c.file_changes:
@@ -375,11 +404,19 @@ class GetQualitativeAnalysisUseCase:
                 labels = CLASSIFICATION_CACHE[cache_key]
             else:
                 # Truncate message to first 250 words for analyze process
-                commit_msg_to_analyze = c.message or ""
+                commit_msg_to_analyze = msg  # already coerced above
                 words = commit_msg_to_analyze.split()
                 if len(words) > 250:
                     commit_msg_to_analyze = " ".join(words[:250])
 
+                # First commit triggers a cold model load in Ollama (30-60s on
+                # CPU) — give it a long timeout. Warm calls measured ~15-20s for a
+                # single attempt, and classify_commit may make a second (retry)
+                # attempt on invalid JSON, so allow ~45s before falling back.
+                call_timeout = 120.0 if idx == 0 else 45.0
+
+                logger.info("[QUAL] Submitting commit %s (idx=%d) to Ollama  timeout=%.0fs  msg=%r",
+                            c.hash[:8], idx, call_timeout, msg_snippet)
                 try:
                     future = _LOCAL_AI_EXECUTOR.submit(
                         self.local_ai.classify_commit,
@@ -390,9 +427,11 @@ class GetQualitativeAnalysisUseCase:
                         timing_flag=timing_flag,
                         hours_before_deadline=hours_before_deadline,
                     )
-                    labels = future.result(timeout=15.0)
+                    labels = future.result(timeout=call_timeout)
+                    logger.debug("[QUAL] Ollama returned for commit %s: type=%r substance=%r analysis_available=%s",
+                                 c.hash[:8], labels.get('type'), labels.get('substance'), labels.get('analysis_available'))
                 except concurrent.futures.TimeoutError as te:
-                    logger.warning(f"Local AI classification timed out for commit {c.hash}: {te}")
+                    logger.warning("[QUAL] TIMEOUT (%.0fs) for commit %s: %s", call_timeout, c.hash[:8], te)
                     labels = {
                         "type": "other",
                         "substance": "moderate",
@@ -446,12 +485,6 @@ class GetQualitativeAnalysisUseCase:
             labels["is_after_deadline"] = is_after_deadline
             if hours_before_deadline is not None:
                 labels["hours_before_deadline"] = hours_before_deadline
-
-            yield {
-                "type": "progress",
-                "progress": pct,
-                "message": f"Labeling [{author_name}] commit ({idx+1}/{total_process}): '{msg_snippet}'"
-            }
 
             commit_data = {
                 "hash": c.hash[:8],

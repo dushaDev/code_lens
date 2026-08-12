@@ -20,6 +20,10 @@ logger = logging.getLogger(__name__)
 limiter = Limiter(key_func=get_remote_address)
 
 
+def _normalize_git_url(url: str) -> str:
+    return (url or "").strip().rstrip("/").removesuffix(".git").lower()
+
+
 from src.domain.constants import EXTENSION_TO_LANGUAGE, SAVED_REPOS_PATH_TEMPLATE, TEMP_REPOS_PATH_TEMPLATE
 from src.infrastructure.database.session import get_db
 from src.infrastructure.database.repositories import ProjectRepository, AuthorRepository, CommitRepository, DatabaseService, CourseRepository
@@ -753,10 +757,10 @@ def create_project(
 
     # Check duplicate Git URL in the same course
     if request.git_url and request.git_url.strip():
-        clean_url = request.git_url.strip().rstrip("/").removesuffix(".git").lower()
+        clean_url = _normalize_git_url(request.git_url)
         course_projects = repo.db.query(ProjectModel).filter(ProjectModel.course_id == request.course_id).all()
         for p in course_projects:
-            if p.git_url and p.git_url.strip().rstrip("/").removesuffix(".git").lower() == clean_url:
+            if p.git_url and _normalize_git_url(p.git_url) == clean_url:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail=f"Repository URL '{request.git_url.strip()}' is already imported in this course."
@@ -801,6 +805,56 @@ def create_project(
         is_local_copy_stored=project.is_local_copy_stored,
         sampling_mode=getattr(project, 'sampling_mode', 'sample') or 'sample'
     )
+
+
+@router.get(
+    "/courses/{course_id}/project-availability",
+    tags=["Projects"],
+    responses={401: {"model": ErrorResponse}, 404: {"model": ErrorResponse}, 422: {"model": ErrorResponse}, 500: {"model": ErrorResponse}}
+)
+def check_project_availability(
+    course_id: int,
+    field: str,
+    value: str = "",
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_user),
+):
+    """Check availability of group_no or git_url in a course (pre-submit UX check)."""
+    course_repo = CourseRepository(db)
+    course = course_repo.get_by_id(course_id, user_id=current_user.id)
+    if not course:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Course {course_id} not found."
+        )
+
+    if field not in ("group_no", "git_url"):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Invalid field parameter. Must be 'group_no' or 'git_url'."
+        )
+
+    val_trimmed = (value or "").strip()
+    if not val_trimmed:
+        return {"available": True, "field": field}
+
+    if field == "group_no":
+        existing = db.query(ProjectModel).filter(
+            ProjectModel.course_id == course_id,
+            func.lower(ProjectModel.group_no) == val_trimmed.lower()
+        ).first()
+        return {"available": existing is None, "field": field}
+
+    elif field == "git_url":
+        target_clean = _normalize_git_url(val_trimmed)
+        if not target_clean:
+            return {"available": True, "field": field}
+        course_projects = db.query(ProjectModel).filter(ProjectModel.course_id == course_id).all()
+        for p in course_projects:
+            if p.git_url and _normalize_git_url(p.git_url) == target_clean:
+                return {"available": False, "field": field}
+        return {"available": True, "field": field}
+
 
 
 @router.post(
@@ -1380,7 +1434,10 @@ def _get_and_enrich_qualitative_data(project: ProjectModel, db: Session) -> dict
         raise
     except Exception as e:
         logger.error(f"Failed to parse qualitative_report JSON: {e}")
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Malformed qualitative report cache.")@router.post(
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Malformed qualitative report cache.")
+
+
+@router.post(
     "/projects/{project_id}/cloud-report/generate",
     response_model=CloudReportData,
     tags=["Projects"]
