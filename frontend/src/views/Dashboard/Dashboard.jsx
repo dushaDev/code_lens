@@ -1,5 +1,6 @@
 import React from 'react';
 import { useNotification } from '../../contexts/NotificationContext';
+import { useNavigation } from '../../contexts/NavigationContext';
 import { 
   Folder, 
   Users, 
@@ -13,15 +14,15 @@ import { getTechDetails } from '../../utils/techIcons';
 import Tag from '../../components/Tag';
 import './Dashboard.css';
 
-export default function Dashboard({ 
+export default function Dashboard({
   user,
-  projects, 
-  studentsCount, 
-  plagiarismCount, 
-  onViewAnalytics, 
-  onCreateProjectClick 
+  projects,
+  studentsCount,
+  plagiarismCount,
+  onCreateProjectClick
 }) {
   const { addNotification } = useNotification();
+  const { navigate } = useNavigation();
 
   // Function to map tech stack names to beautiful background colors and icons
   const renderTechBadges = (techStack) => {
@@ -194,7 +195,7 @@ export default function Dashboard({
                     <td>
                       <button 
                         className="btn btn-primary btn-sm view-analytics-btn"
-                        onClick={() => onViewAnalytics(project)}
+                        onClick={() => navigate({ project })}
                       >
                         <span>View Analytics</span>
                         <ArrowUpRight size={14} />

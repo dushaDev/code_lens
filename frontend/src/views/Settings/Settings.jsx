@@ -1,11 +1,31 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNotification } from '../../contexts/NotificationContext';
+import { useNavigation } from '../../contexts/NavigationContext';
 import { Database, AlertTriangle, ShieldCheck, Save, Trash2, RotateCcw, Settings as SettingsIcon, BookOpen, Calendar, Key, Lock, CheckCircle2, Plus, Check } from 'lucide-react';
 import { buildDeadline, splitDeadline } from '../../utils/courseMeta';
 import './Settings.css';
 
 export default function Settings({ course, onCourseReset, onCourseDeleted, onCourseUpdated }) {
   const { addNotification } = useNotification();
+  const { pendingSection, consumeSection } = useNavigation();
+  const apiKeysRef = useRef(null);
+  const [highlightApiKeys, setHighlightApiKeys] = useState(false);
+
+  // Deep-link support: when navigated here via navigate({ section: 'api-keys' })
+  // (e.g. the "Go to Settings" button on the Cloud AI report), scroll the
+  // API-keys card into view and briefly highlight it, then clear the section
+  // so it only fires once.
+  useEffect(() => {
+    if (pendingSection !== 'api-keys') return;
+    const el = apiKeysRef.current;
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      setHighlightApiKeys(true);
+      window.setTimeout(() => setHighlightApiKeys(false), 2200);
+    }
+    consumeSection();
+  }, [pendingSection, consumeSection]);
+
   const [loading, setLoading] = useState(false);
   const [deleteLoading, setDeleteLoading] = useState(false);
   const [message, setMessage] = useState('');
@@ -410,7 +430,16 @@ export default function Settings({ course, onCourseReset, onCourseDeleted, onCou
         </div>
 
         {/* User API Keys Management Card */}
-        <div className="settings-card card">
+        <div
+          ref={apiKeysRef}
+          id="settings-api-keys"
+          className="settings-card card"
+          style={{
+            scrollMarginTop: '80px',
+            boxShadow: highlightApiKeys ? '0 0 0 2px #f59e0b' : 'none',
+            transition: 'box-shadow 0.3s ease',
+          }}
+        >
           <div className="card-title-row">
             <Key size={18} className="blue-text" />
             <h2>Cloud AI API Keys (User Account)</h2>

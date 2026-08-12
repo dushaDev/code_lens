@@ -1,7 +1,8 @@
 import { apiFetch, UNAUTHORIZED_EVENT } from './api/client';
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { RefreshCw } from 'lucide-react';
 import { useNotification } from './contexts/NotificationContext';
+import { NavigationProvider } from './contexts/NavigationContext';
 import Sidebar from './components/Sidebar';
 import Header from './components/Header';
 import Login from './views/Login/Login';
@@ -37,14 +38,6 @@ export default function App() {
   const [searchTerm, setSearchTerm] = useState('');
   const [studentSearchQuery, setStudentSearchQuery] = useState('');
 
-  const handleNavigateTab = (tab, query = '') => {
-    setSelectedProject(null);
-    setCurrentTab(tab);
-    if (tab === 'students') {
-      setStudentSearchQuery(query);
-    }
-  };
-  
   // App state lists
   const [projects, setProjects] = useState([]);
   const [students, setStudents] = useState([]);
@@ -71,10 +64,55 @@ export default function App() {
     data: null,
   });
   const [pillDismissed, setPillDismissed] = useState(false);
+  // Deep-link target within a view (e.g. 'api-keys' inside Settings). Set by
+  // navigate({ section }); the target view scrolls to it, then consumeSection()s.
+  const [pendingSection, setPendingSection] = useState(null);
   const qualAbortRef = useRef(null);  // AbortController for the streaming fetch
   // ──────────────────────────────────────────────────────────────────────────
 
 
+
+  // ── Universal navigation funnel ────────────────────────────────────────────
+  // Single entry point for every cross-view redirect. Consumed app-wide via
+  // useNavigation(). target: { course?, tab?, project?, projectId?, section?, query? }
+  const navigate = useCallback((target = {}) => {
+    if (!target || typeof target !== 'object') return;
+    const { course, tab, project, projectId, section, query } = target;
+
+    if (course !== undefined) setCurrentCourse(course);
+
+    if (project !== undefined) {
+      // Open a project's analytics with the full object already in hand.
+      setSelectedProject(project);
+    } else if (projectId !== undefined) {
+      // Open a project by id (looked up in the loaded list; null if absent).
+      setSelectedProject(projects.find((p) => p.id === projectId) ?? null);
+    } else if (tab !== undefined) {
+      // Switching to a top-level tab always leaves any open project overlay.
+      setSelectedProject(null);
+      setCurrentTab(tab);
+    }
+
+    // Preset the Students search only when landing on that tab (matches the
+    // previous handleNavigateTab behaviour).
+    if (query !== undefined && tab === 'students') setStudentSearchQuery(query);
+
+    // Deep-link target within the destination view (consumed once on arrival).
+    if (section !== undefined) setPendingSection(section);
+  }, [projects]);
+
+  // Back-compat shim: existing callers pass (tab, query) positionally.
+  const handleNavigateTab = useCallback((tab, query = '') => {
+    navigate({ tab, query });
+  }, [navigate]);
+
+  // Cleared by a view once it has acted on a pending deep-link section.
+  const consumeSection = useCallback(() => setPendingSection(null), []);
+
+  const navValue = useMemo(
+    () => ({ navigate, pendingSection, consumeSection }),
+    [navigate, pendingSection, consumeSection]
+  );
 
   // ── Global Qualitative Stream Logic ──────────────────────────────────────
   const triggerQualitativeAnalysis = async (projectId, forceRefresh = false, mode = 'sample') => {
@@ -148,6 +186,19 @@ export default function App() {
                 status: 'cancelled',
                 progress: 0,
                 message: 'Analysis stopped by user.',
+              }));
+            } else if (event.type === 'error') {
+              // Surface the real backend error instead of leaving the UI stuck
+              // at 0% (which the view otherwise reports as "Ollama may not be
+              // running", masking the actual failure).
+              console.error('Qualitative analysis backend error:', event.message);
+              setQualAnalysisState(prev => ({
+                ...prev,
+                status: 'cancelled',
+                progress: 0,
+                message: event.message
+                  ? `Analysis failed: ${event.message}`
+                  : 'Analysis failed on the server.',
               }));
             }
           } catch (jsonErr) {
@@ -615,8 +666,9 @@ export default function App() {
 
   // Route 3: Course Workspace
   return (
+    <NavigationProvider value={navValue}>
     <div className="app-container">
-      <Sidebar 
+      <Sidebar
         currentCourse={currentCourse}
         currentTab={currentTab}
         setCurrentTab={(tab) => {
@@ -656,31 +708,28 @@ export default function App() {
           ) : (
             <>
               {currentTab === 'dashboard' && (
-                <Dashboard 
+                <Dashboard
                   user={user}
                   projects={projects}
                   studentsCount={students.length}
                   plagiarismCount={plagiarismAlerts.filter(a => a.status === 'Needs Review').length}
-                  onViewAnalytics={setSelectedProject}
                   onCreateProjectClick={() => setShowCreateModal(true)}
                 />
               )}
 
               {currentTab === 'projects' && (
-                <Projects 
+                <Projects
                   projects={projects}
-                  onViewAnalytics={setSelectedProject}
                   onDeleteProject={handleDeleteProject}
                   onSyncProject={handleSyncProject}
                 />
               )}
 
               {currentTab === 'students' && (
-                <Students 
+                <Students
                   students={students}
                   projects={projects}
                   onMergeAuthors={handleMergeAuthors}
-                  onSelectProject={setSelectedProject}
                   initialSearch={studentSearchQuery}
                 />
               )}
@@ -744,5 +793,6 @@ export default function App() {
         />
       )}
     </div>
+    </NavigationProvider>
   );
 }

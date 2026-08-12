@@ -28,9 +28,11 @@ import CommitActivityChart from '../../components/CommitActivityChart';
 import CommitCodeViewModal from '../../components/CommitCodeViewModal';
 import FileBrowserModal from '../../components/FileBrowserModal';
 import { formatDeadline } from '../../utils/courseMeta';
+import { useNavigation } from '../../contexts/NavigationContext';
 import './Analytics.css';
 
 export default function Analytics({ project, course, onBack, qualAnalysisState, onStartQualitative, onStopQualitative }) {
+  const { navigate } = useNavigation();
   const [analytics, setAnalytics] = useState(null);
   const courseDeadline = course?.deadline || project?.course?.deadline || project?.deadline;
   const [commits, setCommits] = useState([]);
@@ -81,6 +83,9 @@ export default function Analytics({ project, course, onBack, qualAnalysisState, 
   const etaSec = (startTime && qualProgress > 3 && qualProgress < 100)
     ? Math.max(0, Math.round(((100 - qualProgress) / qualProgress) * elapsedSec))
     : null;
+
+  // Stuck-init detector: running for >30s but still at 0% means Ollama / model isn't responding
+  const isStuckInitializing = isRunning && qualProgress === 0 && elapsedSec > 30;
 
   const formatSeconds = (sec) => {
     if (sec === null || isNaN(sec) || sec < 0) return null;
@@ -140,7 +145,7 @@ export default function Analytics({ project, course, onBack, qualAnalysisState, 
           setCloudReport(null);
         }
       } catch (err) {
-        setError('Something went wrong, please try again.');
+        setError(err.message || 'Failed to load project analytics. Please check backend connection.');
       } finally {
         setLoading(false);
       }
@@ -170,9 +175,16 @@ export default function Analytics({ project, course, onBack, qualAnalysisState, 
         });
         if (!res.ok) throw new Error('Status check failed');
         const statusData = await res.json();
+
+        // By the time the fetch resolved, App.jsx may have already changed the state
+        // (e.g. a prior render already kicked off the stream). Re-check before acting.
+        const currentStatus = qualAnalysisState?.status || 'idle';
+        if (currentStatus === 'running' || currentStatus === 'cancelling' || currentStatus === 'complete') {
+          return; // someone else started it — don't double-fire
+        }
+
         if (statusData.status === 'running') {
           // Backend is running but this session lost the stream — just show status
-          // The global state in App.jsx will reflect this via RUNNING_PROJECTS on next full start
           return;
         }
         if (statusData.status === 'complete' || statusData.has_db_cache) {
@@ -184,7 +196,10 @@ export default function Analytics({ project, course, onBack, qualAnalysisState, 
         onStartQualitative(false, samplingMode);
       } catch (err) {
         console.error('Status check failed, auto-starting:', err);
-        onStartQualitative(false, samplingMode);
+        const currentStatus = qualAnalysisState?.status || 'idle';
+        if (currentStatus === 'idle' || currentStatus === 'cancelled') {
+          onStartQualitative(false, samplingMode);
+        }
       }
     };
     checkAndStart();
@@ -197,14 +212,10 @@ export default function Analytics({ project, course, onBack, qualAnalysisState, 
     }
   }, [project]);
 
-  if (loading) {
-    return (
-      <div className="loader-box">
-        <div className="spinner"></div>
-        <p>Analyzing repository commit history logs...</p>
-      </div>
-    );
-  }
+  // NOTE: early returns for loading/error/empty states live just before the
+  // main `return` below — they MUST come after every hook (incl. the cloud-report
+  // useEffect) so the number of hooks is identical on every render. Placing them
+  // here would skip later hooks once data loads, crashing the whole view (blank page).
 
   const getGiniStatusClass = (gini) => {
     if (gini > 0.7) return 'badge-danger';
@@ -379,6 +390,73 @@ export default function Analytics({ project, course, onBack, qualAnalysisState, 
       setIsPdfDownloading(false);
     }
   };
+
+  // ── Conditional render states (placed AFTER all hooks — see note above) ──
+  if (loading) {
+    return (
+      <div className="loader-box">
+        <div className="spinner" />
+        <p>Analyzing repository commit history logs...</p>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="analytics-view">
+        <div style={{ display: 'flex', alignItems: 'center', marginBottom: '10px' }}>
+          <button
+            type="button"
+            className="btn btn-secondary back-btn"
+            onClick={onBack}
+            style={{ display: 'flex', alignItems: 'center', gap: '8px' }}
+          >
+            <ArrowLeft size={16} />
+            <span>Back</span>
+          </button>
+        </div>
+        <div className="card" style={{ padding: '32px', textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '16px' }}>
+          <AlertCircle size={48} style={{ color: 'var(--color-danger, #ef4444)' }} />
+          <h2 style={{ fontSize: '1.2rem', fontWeight: '600', color: 'var(--text-main)', margin: 0 }}>Failed to Load Analytics</h2>
+          <p style={{ color: 'var(--text-muted)', margin: 0, maxWidth: '400px' }}>{error}</p>
+          <button
+            type="button"
+            className="btn btn-primary"
+            onClick={() => { setError(''); setLoading(true); window.location.reload(); }}
+            style={{ marginTop: '8px' }}
+          >
+            Retry Loading
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // If analytics data is not available (null or undefined), show a friendly placeholder
+  if (!analytics) {
+    return (
+      <div className="analytics-view">
+        {/* Back button */}
+        <div style={{ display: 'flex', alignItems: 'center', marginBottom: '10px' }}>
+          <button
+            type="button"
+            className="btn btn-secondary back-btn"
+            onClick={onBack}
+            style={{ display: 'flex', alignItems: 'center', gap: '8px' }}
+          >
+            <ArrowLeft size={16} />
+            <span>Back</span>
+          </button>
+        </div>
+        <div className="card" style={{ padding: '32px', textAlign: 'center' }}>
+          <h2 style={{ fontSize: '1.2rem', fontWeight: '600', margin: 0 }}>No Analytics Data</h2>
+          <p style={{ marginTop: '8px', color: 'var(--text-muted)' }}>
+            Analytics information is not yet available for this project. Please ensure the repository has been processed.
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="analytics-view">
@@ -1172,6 +1250,18 @@ export default function Analytics({ project, course, onBack, qualAnalysisState, 
                     </div>
                     <span style={{ fontSize: '0.9rem', fontWeight: '700', color: 'var(--primary)', minWidth: '42px', textAlign: 'right' }}>{qualProgress}%</span>
                   </div>
+                  {/* Stuck-initializing warning */}
+                  {isStuckInitializing && (
+                    <div style={{ marginTop: '10px', padding: '10px 14px', borderRadius: '8px', backgroundColor: 'rgba(245,158,11,0.1)', border: '1px solid rgba(245,158,11,0.3)', display: 'flex', alignItems: 'flex-start', gap: '10px' }}>
+                      <AlertCircle size={16} style={{ color: '#f59e0b', flexShrink: 0, marginTop: '1px' }} />
+                      <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', lineHeight: '1.5' }}>
+                        <strong style={{ color: '#f59e0b' }}>Taking longer than expected.</strong>{' '}
+                        The local AI model (Ollama) may not be running, or the model is still loading.
+                        Make sure Ollama is started and the model is pulled.{' '}
+                        You can <button type="button" onClick={onStopQualitative} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#ef4444', fontWeight: '600', padding: 0, fontSize: '0.8rem' }}>stop the analysis</button> and retry once Ollama is ready.
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -1367,11 +1457,11 @@ export default function Analytics({ project, course, onBack, qualAnalysisState, 
                         <AlertCircle size={18} />
                         <span><strong>API Key Not Enabled:</strong> You must configure a Cloud AI API key in Settings to generate the final report.</span>
                       </div>
-                      <button 
-                        onClick={onBack}
+                      <button
+                        onClick={() => navigate({ tab: 'settings', section: 'api-keys' })}
                         style={{ padding: '6px 12px', backgroundColor: '#f59e0b', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: '600', fontSize: '0.85rem' }}
                       >
-                        Close & Go to Settings
+                        Go to Settings
                       </button>
                     </div>
                   ) : cloudError ? (

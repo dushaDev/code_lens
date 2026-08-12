@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useNavigation } from '../../contexts/NavigationContext';
 import { 
   FolderGit2, 
   Search, 
@@ -13,12 +14,12 @@ import { getTechDetails } from '../../utils/techIcons';
 import Tag from '../../components/Tag';
 import './Projects.css';
 
-export default function Projects({ 
-  projects, 
-  onViewAnalytics, 
+export default function Projects({
+  projects,
   onDeleteProject,
   onSyncProject
 }) {
+  const { navigate } = useNavigation();
   const [filter, setFilter] = useState('all'); // all, good, high-risk
   const [sortBy, setSortBy] = useState('added'); // 'added' (default), 'risk'
   const [search, setSearch] = useState('');
@@ -197,7 +198,7 @@ export default function Projects({
                         <Tag text={project.group_no || project.groupNo || 'G-00'} variant="muted" style={{ fontSize: '0.75rem', padding: '2px 6px' }} />
                         <span 
                           className="project-title" 
-                          onClick={() => onViewAnalytics(project)}
+                          onClick={() => navigate({ project })}
                           style={{ cursor: 'pointer' }}
                           title="Click to open project analytics"
                         >
@@ -253,7 +254,7 @@ export default function Projects({
                         </button>
                         <button 
                           className="btn btn-primary btn-sm"
-                          onClick={() => onViewAnalytics(project)}
+                          onClick={() => navigate({ project })}
                         >
                           <span>Analytics</span>
                           <ArrowUpRight size={14} />

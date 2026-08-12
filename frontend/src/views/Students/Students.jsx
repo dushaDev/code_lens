@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNotification } from '../../contexts/NotificationContext';
+import { useNavigation } from '../../contexts/NavigationContext';
 import { 
   Users, 
   GraduationCap, 
@@ -16,14 +17,14 @@ import {
 import Tag from '../../components/Tag';
 import './Students.css';
 
-export default function Students({ 
-  students, 
-  projects = [], 
+export default function Students({
+  students,
+  projects = [],
   onMergeAuthors,
-  onSelectProject,
   initialSearch = ''
 }) {
   const { addNotification } = useNotification();
+  const { navigate } = useNavigation();
   const [search, setSearch] = useState(initialSearch);
 
   useEffect(() => {
@@ -282,7 +283,7 @@ export default function Students({
                           <button
                             key={proj.id}
                             className="btn btn-outline btn-sm"
-                            onClick={() => onSelectProject && onSelectProject(proj)}
+                            onClick={() => navigate({ project: proj })}
                             title={`Click to view analytics for ${proj.name}`}
                             style={{ 
                               padding: '3px 8px', 
@@ -487,7 +488,7 @@ export default function Students({
                   className="card"
                   onClick={() => {
                     setProjectsModalStudent(null);
-                    if (onSelectProject) onSelectProject(proj);
+                    navigate({ project: proj });
                   }}
                   style={{
                     padding: '14px 18px',
