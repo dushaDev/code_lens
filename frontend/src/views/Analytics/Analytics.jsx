@@ -20,7 +20,17 @@ import {
   CheckCircle2,
   Clock,
   ChevronDown,
-  ChevronUp
+  ChevronUp,
+  FolderTree,
+  FileText,
+  ShieldAlert,
+  Layers,
+  Activity,
+  GitBranch,
+  Zap,
+  Sparkles,
+  ChevronRight,
+  Check
 } from 'lucide-react';
 import Tag from '../../components/Tag';
 import Tooltip from '../../components/Tooltip';
@@ -45,6 +55,7 @@ export default function Analytics({ project, course, onBack, qualAnalysisState, 
   const [selectedAuthor, setSelectedAuthor] = useState(null);
   const [selectedCommitHash, setSelectedCommitHash] = useState(null);
   const [samplingMode, setSamplingMode] = useState('sample'); // 'sample' | 'full' | 'random'
+  const [expandedQualContributor, setExpandedQualContributor] = useState(null);
 
   const [cloudReport, setCloudReport] = useState(null);
   const [isCloudGenerating, setIsCloudGenerating] = useState(false);
@@ -275,6 +286,43 @@ export default function Analytics({ project, course, onBack, qualAnalysisState, 
       return { backgroundColor: 'rgba(245,158,11,0.15)', color: '#f59e0b', border: '1px solid rgba(245,158,11,0.3)', padding: '4px 10px', borderRadius: '12px', fontWeight: '700', fontSize: '0.85rem' };
     }
     return { backgroundColor: 'rgba(16,185,129,0.15)', color: '#10b981', border: '1px solid rgba(16,185,129,0.3)', padding: '4px 10px', borderRadius: '12px', fontWeight: '700', fontSize: '0.85rem' };
+  };
+
+  const getComplexityBadge = (avgScore) => {
+    const cx = parseFloat(avgScore) || 0;
+    if (cx <= 5) return { label: 'Low — straightforward & maintainable', color: '#10b981', bg: 'rgba(16,185,129,0.12)', border: 'rgba(16,185,129,0.25)' };
+    if (cx <= 10) return { label: 'Moderate — acceptable complexity', color: '#f59e0b', bg: 'rgba(245,158,11,0.12)', border: 'rgba(245,158,11,0.25)' };
+    if (cx <= 20) return { label: 'High — heavily branched code', color: '#ef4444', bg: 'rgba(239,68,68,0.12)', border: 'rgba(239,68,68,0.25)' };
+    return { label: 'Very High — deeply nested logic', color: '#dc2626', bg: 'rgba(220,38,38,0.15)', border: 'rgba(220,38,38,0.3)' };
+  };
+
+  const getModularityBadge = (scoreStr) => {
+    const s = (scoreStr || '').toLowerCase();
+    if (s.includes('high')) return { label: scoreStr, color: '#10b981', bg: 'rgba(16,185,129,0.12)' };
+    if (s.includes('mod')) return { label: scoreStr, color: '#f59e0b', bg: 'rgba(245,158,11,0.12)' };
+    return { label: scoreStr || 'Monolithic', color: '#6b7280', bg: 'rgba(107,114,128,0.12)' };
+  };
+
+  const getDocScoreBadge = (docStr) => {
+    const d = (docStr || '').toLowerCase();
+    if (d.includes('comp') || d.includes('9/') || d.includes('8/')) return { color: '#10b981', bg: 'rgba(16,185,129,0.12)' };
+    if (d.includes('basic') || d.includes('5/')) return { color: '#f59e0b', bg: 'rgba(245,158,11,0.12)' };
+    return { color: '#ef4444', bg: 'rgba(239,68,68,0.12)' };
+  };
+
+  const smellDescriptions = {
+    magic_numbers: 'Magic Numbers — raw numeric literals used in logic instead of named constants, making intent unclear',
+    deep_nesting: 'Deep Nesting — code branches nested 3+ levels deep, significantly reducing readability and testability',
+    long_method: 'Long Method — function or method is too large, handling multiple concerns that should be separated',
+    dead_code: 'Dead Code — unreachable or unused code left in the codebase, increasing maintenance burden',
+    complex_conditional: 'Complex Conditional — overly complicated if/else or switch conditions that are hard to reason about'
+  };
+
+  const archDescriptions = {
+    tight_coupling: 'Tight Coupling — components are too interdependent; changes in one part will break others',
+    poor_separation_of_concerns: 'Poor Separation of Concerns — business logic, UI, and data handling are mixed together rather than cleanly separated',
+    missing_abstraction: 'Missing Abstraction — repeated patterns or logic that should be extracted into a reusable module or class',
+    business_logic_in_ui: 'Business Logic in UI — processing rules or calculations placed directly inside view/controller layers instead of the appropriate service or domain layer'
   };
 
   const handleSamplingModeChange = async (mode) => {
@@ -606,7 +654,47 @@ export default function Analytics({ project, course, onBack, qualAnalysisState, 
                 <p className="stat-subtext">Lines of parsed source code</p>
               </div>
             </div>
-          </div>
+            <div className="stat-card card" style={{ position: 'relative' }}>
+              <div className="stat-card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                  <div className="stat-icon-wrapper purple-icon">
+                    <User size={22} />
+                  </div>
+                  <span className="stat-label">Contributors</span>
+                </div>
+                <Tooltip
+                  title="Contributors Count"
+                  content="Number of distinct human contributors and automated bot accounts detected in Git commit logs."
+                />
+              </div>
+              <div className="stat-card-body">
+                {(() => {
+                  const contribs = analytics.contributions || [];
+                  const isBot = (name) => /\[bot\]|dependabot|github-actions|renovate|actions-user/i.test(name || '');
+                  const botCount = contribs.filter(c => isBot(c.name)).length;
+                  const humanCount = contribs.length - botCount;
+
+                  return (
+                    <div>
+                      <h2 className="stat-value" style={{ marginBottom: '2px' }}>
+                        {humanCount} <span style={{ fontSize: '0.85rem', fontWeight: '500', color: 'var(--text-muted)' }}>Humans</span>
+                        {botCount > 0 && (
+                          <span style={{ fontSize: '0.85rem', fontWeight: '500', color: 'var(--primary)', marginLeft: '8px' }}>
+                            + {botCount} {botCount === 1 ? 'Bot' : 'Bots'}
+                          </span>
+                        )}
+                      </h2>
+                      <p className="stat-subtext" style={{ margin: 0 }}>
+                        {botCount > 0 
+                          ? `${humanCount} real ${humanCount === 1 ? 'person' : 'people'} & ${botCount} automated ${botCount === 1 ? 'bot' : 'bots'}`
+                          : `${humanCount} distinct ${humanCount === 1 ? 'person' : 'people'}`}
+                      </p>
+                    </div>
+                  );
+                })()}
+              </div>
+            </div>
+</div>
 
           {/* Visualizations Section */}
           <div className="analytics-visualization-grid" style={{ display: 'flex', flexWrap: 'wrap', gap: '24px', alignItems: 'flex-start' }}>
@@ -1307,32 +1395,451 @@ export default function Analytics({ project, course, onBack, qualAnalysisState, 
               </div>
             )}
 
-            {/* ── Row 3: Individual Student Qualitative Contributions Table ── */}
+            {/* ── Row 3: Plagiarism / Winnowing Similarity Scan Banner ─────── */}
+            {qualData?.project_summary?.plagiarism_summary?.has_scan && (() => {
+              const plag = qualData.project_summary.plagiarism_summary;
+              const isHigh = plag.max_similarity_score > 50;
+              const isMed = plag.max_similarity_score > 25;
+              const alertColor = isHigh ? '#ef4444' : isMed ? '#f59e0b' : '#10b981';
+              const alertBg = isHigh ? 'rgba(239,68,68,0.08)' : isMed ? 'rgba(245,158,11,0.08)' : 'rgba(16,185,129,0.08)';
+              const alertBorder = isHigh ? 'rgba(239,68,68,0.25)' : isMed ? 'rgba(245,158,11,0.25)' : 'rgba(16,185,129,0.25)';
+
+              return (
+                <div style={{
+                  backgroundColor: alertBg,
+                  border: `1px solid ${alertBorder}`,
+                  borderRadius: '8px',
+                  padding: '14px 18px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  flexWrap: 'wrap',
+                  gap: '12px'
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <ShieldAlert size={20} style={{ color: alertColor, flexShrink: 0 }} />
+                    <div>
+                      <div style={{ fontWeight: '700', color: alertColor, fontSize: '0.92rem' }}>
+                        AST Winnowing Code Similarity Scan: {plag.max_similarity_score}% Similarity
+                      </div>
+                      <div style={{ fontSize: '0.82rem', color: 'var(--text-muted)', marginTop: '2px' }}>
+                        Matched with <strong>{plag.matched_project_name || 'Another Project'}</strong> ({plag.matched_blocks_count || 0} shared AST token blocks)
+                      </div>
+                    </div>
+                  </div>
+                  <span style={{
+                    padding: '3px 10px',
+                    borderRadius: '12px',
+                    fontSize: '0.78rem',
+                    fontWeight: '700',
+                    backgroundColor: alertColor,
+                    color: '#fff'
+                  }}>
+                    {plag.status || (isHigh ? 'High Similarity' : isMed ? 'Needs Review' : 'Clean')}
+                  </span>
+                </div>
+              );
+            })()}
+
+            {/* ── Row 4: Repository Architecture, Quality & AST Metrics Grid ─── */}
+            {qualData?.project_summary && (() => {
+              const ps = qualData.project_summary;
+              const ast = ps.ast_complexity_summary || {};
+              const fs = ps.folder_structure || {};
+              const readme = ps.readme_quality || {};
+              const pacing = ps.pacing_summary || {};
+              const cxBadge = getComplexityBadge(ast.avg_complexity_score);
+              const modBadge = getModularityBadge(fs.modularity_score);
+              const docBadge = getDocScoreBadge(readme.documentation_score);
+
+              return (
+                <div style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fit, minmax(310px, 1fr))',
+                  gap: '20px'
+                }}>
+                  {/* Card 1: AST Complexity & Functions */}
+                  <div className="card" style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <div className="stat-icon-wrapper blue-icon" style={{ width: '32px', height: '32px' }}>
+                          <Code size={18} />
+                        </div>
+                        <span style={{ fontWeight: '700', fontSize: '0.92rem', color: 'var(--text-main)' }}>AST Code Complexity</span>
+                      </div>
+                      <Tooltip 
+                        title="AST Cyclomatic Complexity"
+                        content="Evaluates code branching (if, for, while, switch) parsed via language AST. Low (1-5), Moderate (6-10), High (11-20), Very High (>20)."
+                      />
+                    </div>
+                    <div>
+                      <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px' }}>
+                        <span style={{ fontSize: '1.75rem', fontWeight: '800', color: 'var(--text-main)' }}>
+                          {ast.avg_complexity_score ?? 0}
+                        </span>
+                        <span style={{
+                          fontSize: '0.75rem',
+                          fontWeight: '700',
+                          padding: '2px 8px',
+                          borderRadius: '4px',
+                          backgroundColor: cxBadge.bg,
+                          color: cxBadge.color,
+                          border: `1px solid ${cxBadge.border}`
+                        }}>
+                          {cxBadge.label.split('—')[0].trim()}
+                        </span>
+                      </div>
+                      <p style={{ margin: '4px 0 0 0', fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+                        {cxBadge.label}
+                      </p>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px solid var(--border-color)', paddingTop: '10px', fontSize: '0.8rem' }}>
+                      <div>
+                        <span style={{ color: 'var(--text-muted)' }}>Parsed Functions: </span>
+                        <strong>{ast.total_functions ?? 0}</strong>
+                      </div>
+                      <div>
+                        <span style={{ color: 'var(--text-muted)' }}>Squash Commits: </span>
+                        <strong style={{ color: (ast.squash_suspected_commits > 0) ? '#ef4444' : '#10b981' }}>
+                          {ast.squash_suspected_commits ?? 0}
+                        </strong>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Card 2: Repository Modularity & Structure */}
+                  <div className="card" style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <div className="stat-icon-wrapper purple-icon" style={{ width: '32px', height: '32px' }}>
+                          <FolderTree size={18} />
+                        </div>
+                        <span style={{ fontWeight: '700', fontSize: '0.92rem', color: 'var(--text-main)' }}>Repository Structure</span>
+                      </div>
+                      <Tooltip 
+                        title="Repository Modularity"
+                        content="Analyzes project file layout, directories, modular separation, and presence of automated test suites."
+                      />
+                    </div>
+                    <div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                        <span style={{
+                          fontSize: '0.82rem',
+                          fontWeight: '700',
+                          padding: '3px 8px',
+                          borderRadius: '4px',
+                          backgroundColor: modBadge.bg,
+                          color: modBadge.color
+                        }}>
+                          {modBadge.label}
+                        </span>
+                        <span style={{
+                          fontSize: '0.75rem',
+                          fontWeight: '600',
+                          padding: '2px 7px',
+                          borderRadius: '4px',
+                          backgroundColor: fs.has_tests_dir ? 'rgba(16,185,129,0.12)' : 'var(--bg-app)',
+                          color: fs.has_tests_dir ? '#10b981' : 'var(--text-muted)',
+                          border: '1px solid var(--border-color)'
+                        }}>
+                          {fs.has_tests_dir ? '✓ Tests Directory Present' : 'No Tests Directory'}
+                        </span>
+                      </div>
+                      <p style={{ margin: '6px 0 0 0', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                        <strong>{fs.total_files ?? 0}</strong> files across <strong>{fs.total_directories ?? 0}</strong> directories
+                      </p>
+                    </div>
+                    {/* Folders Overview Tags */}
+                    {(fs.filtered_ai_folders || fs.top_level_directories) && (
+                      <div style={{ borderTop: '1px solid var(--border-color)', paddingTop: '10px' }}>
+                        <span style={{ fontSize: '0.74rem', fontWeight: '700', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                          Key Architectural Folders:
+                        </span>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '5px', marginTop: '6px' }}>
+                          {(fs.filtered_ai_folders || fs.top_level_directories).slice(0, 8).map((f, i) => (
+                            <span key={i} style={{
+                              fontSize: '0.72rem',
+                              fontFamily: 'monospace',
+                              fontWeight: '600',
+                              backgroundColor: 'var(--bg-app)',
+                              border: '1px solid var(--border-color)',
+                              padding: '1px 6px',
+                              borderRadius: '4px',
+                              color: 'var(--primary)'
+                            }}>
+                              📁 {f}/
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Card 3: Documentation & Velocity */}
+                  <div className="card" style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <div className="stat-icon-wrapper red-icon" style={{ width: '32px', height: '32px' }}>
+                          <FileText size={18} />
+                        </div>
+                        <span style={{ fontWeight: '700', fontSize: '0.92rem', color: 'var(--text-main)' }}>Docs & Velocity</span>
+                      </div>
+                      <Tooltip 
+                        title="Documentation & Velocity"
+                        content="Measures documentation presence and commit velocity trends across active days."
+                      />
+                    </div>
+                    <div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <span style={{
+                          fontSize: '0.82rem',
+                          fontWeight: '700',
+                          padding: '3px 8px',
+                          borderRadius: '4px',
+                          backgroundColor: docBadge.bg,
+                          color: docBadge.color
+                        }}>
+                          Doc: {readme.documentation_score || 'Not Found'}
+                        </span>
+                        {readme.has_setup_guide && (
+                          <span style={{ fontSize: '0.72rem', fontWeight: '600', color: '#10b981', backgroundColor: 'rgba(16,185,129,0.1)', padding: '2px 6px', borderRadius: '4px' }}>
+                            Setup Guide ✓
+                          </span>
+                        )}
+                      </div>
+                      {readme.has_readme && (
+                        <p style={{ margin: '4px 0 0 0', fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+                          README Size: <strong>{readme.readme_size_kb || 0} KB</strong>
+                        </p>
+                      )}
+                    </div>
+                    <div style={{ borderTop: '1px solid var(--border-color)', paddingTop: '10px', fontSize: '0.8rem', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                        <span style={{ color: 'var(--text-muted)' }}>Peak Activity:</span>
+                        <strong>{pacing.peak_commit_date || 'N/A'} ({pacing.peak_commit_count || 0} commits)</strong>
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                        <span style={{ color: 'var(--text-muted)' }}>Avg Velocity:</span>
+                        <strong>{pacing.avg_commits_per_active_day || 0} commits / active day</strong>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* ── Row 5: Code Smells & Architecture Patterns Panel ─────────── */}
+            {qualData?.project_summary && (() => {
+              const ps = qualData.project_summary;
+              const smells = ps.code_smell_distribution || {};
+              const archs = ps.architecture_issue_distribution || {};
+              const substance = ps.substance_distribution || {};
+              const hasSmells = Object.keys(smells).length > 0;
+              const hasArchs = Object.keys(archs).length > 0;
+
+              return (
+                <div className="card" style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '20px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border-color)', paddingBottom: '14px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                      <Layers size={20} style={{ color: 'var(--primary)' }} />
+                      <h2 style={{ fontSize: '1.1rem', fontWeight: '700', color: 'var(--text-main)', margin: 0 }}>
+                        Code Quality, Smells & Architecture Analysis
+                      </h2>
+                    </div>
+                    {/* Security & Resurrection Badges */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                      <span style={{
+                        fontSize: '0.78rem',
+                        fontWeight: '700',
+                        padding: '3px 9px',
+                        borderRadius: '4px',
+                        backgroundColor: (ps.security_risk_commits > 0) ? 'rgba(239,68,68,0.12)' : 'rgba(16,185,129,0.12)',
+                        color: (ps.security_risk_commits > 0) ? '#ef4444' : '#10b981',
+                        border: `1px solid ${(ps.security_risk_commits > 0) ? 'rgba(239,68,68,0.3)' : 'rgba(16,185,129,0.3)'}`
+                      }}>
+                        <ShieldAlert size={12} style={{ display: 'inline', marginRight: '4px', verticalAlign: 'middle' }} />
+                        {ps.security_risk_commits > 0 ? `${ps.security_risk_commits} Security Risk Commits` : '0 Security Risks Detected'}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* 2-Column Grid: Smells vs Architecture */}
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '20px' }}>
+                    {/* Left: Code Smells */}
+                    <div style={{ backgroundColor: 'var(--bg-app)', padding: '16px', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '8px' }}>
+                        <AlertCircle size={16} style={{ color: '#f59e0b' }} />
+                        <h3 style={{ fontSize: '0.9rem', fontWeight: '700', color: 'var(--text-main)', margin: 0 }}>
+                          Detected Code Smells
+                        </h3>
+                      </div>
+                      <p style={{ margin: '0 0 12px 0', fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+                        Patterns indicating quality issues or maintenance friction across commits:
+                      </p>
+
+                      {hasSmells ? (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                          {Object.entries(smells).map(([smell, count]) => (
+                            <div key={smell} style={{
+                              display: 'flex',
+                              alignItems: 'flex-start',
+                              gap: '10px',
+                              padding: '8px 10px',
+                              backgroundColor: 'var(--bg-card)',
+                              borderRadius: '6px',
+                              border: '1px solid var(--border-color)'
+                            }}>
+                              <span style={{
+                                backgroundColor: 'rgba(245,158,11,0.15)',
+                                color: '#f59e0b',
+                                fontWeight: '700',
+                                fontSize: '0.75rem',
+                                padding: '2px 6px',
+                                borderRadius: '4px',
+                                flexShrink: 0
+                              }}>
+                                {count}×
+                              </span>
+                              <div style={{ fontSize: '0.8rem', lineHeight: '1.4' }}>
+                                <strong style={{ color: '#f59e0b', textTransform: 'capitalize' }}>
+                                  {smell.replace(/_/g, ' ')}
+                                </strong>
+                                <div style={{ color: 'var(--text-muted)', fontSize: '0.75rem', marginTop: '2px' }}>
+                                  {smellDescriptions[smell] || 'Identified recurring code pattern that may reduce maintainability.'}
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div style={{ padding: '12px', textAlign: 'center', color: '#10b981', fontSize: '0.82rem', fontWeight: '600' }}>
+                          ✓ Clean code quality — no significant code smells detected.
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Right: Architecture Issues */}
+                    <div style={{ backgroundColor: 'var(--bg-app)', padding: '16px', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '8px' }}>
+                        <Layers size={16} style={{ color: '#ef4444' }} />
+                        <h3 style={{ fontSize: '0.9rem', fontWeight: '700', color: 'var(--text-main)', margin: 0 }}>
+                          Detected Architecture Issues
+                        </h3>
+                      </div>
+                      <p style={{ margin: '0 0 12px 0', fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+                        Structural design concerns identified across repository modules:
+                      </p>
+
+                      {hasArchs ? (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                          {Object.entries(archs).map(([issue, count]) => (
+                            <div key={issue} style={{
+                              display: 'flex',
+                              alignItems: 'flex-start',
+                              gap: '10px',
+                              padding: '8px 10px',
+                              backgroundColor: 'var(--bg-card)',
+                              borderRadius: '6px',
+                              border: '1px solid var(--border-color)'
+                            }}>
+                              <span style={{
+                                backgroundColor: 'rgba(239,68,68,0.15)',
+                                color: '#ef4444',
+                                fontWeight: '700',
+                                fontSize: '0.75rem',
+                                padding: '2px 6px',
+                                borderRadius: '4px',
+                                flexShrink: 0
+                              }}>
+                                {count}×
+                              </span>
+                              <div style={{ fontSize: '0.8rem', lineHeight: '1.4' }}>
+                                <strong style={{ color: '#ef4444', textTransform: 'capitalize' }}>
+                                  {issue.replace(/_/g, ' ')}
+                                </strong>
+                                <div style={{ color: 'var(--text-muted)', fontSize: '0.75rem', marginTop: '2px' }}>
+                                  {archDescriptions[issue] || 'Structural modularity concern identified across components.'}
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div style={{ padding: '12px', textAlign: 'center', color: '#10b981', fontSize: '0.82rem', fontWeight: '600' }}>
+                          ✓ Clean architectural boundaries — no major modularity issues detected.
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Substance Breakdown & Resurrection Alerts Strip */}
+                  <div style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    flexWrap: 'wrap',
+                    gap: '12px',
+                    borderTop: '1px solid var(--border-color)',
+                    paddingTop: '14px',
+                    fontSize: '0.82rem'
+                  }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                      <span style={{ fontWeight: '600', color: 'var(--text-muted)' }}>Commit Substance Breakdown:</span>
+                      <span style={{ backgroundColor: 'rgba(16,185,129,0.12)', color: '#10b981', padding: '2px 8px', borderRadius: '4px', fontWeight: '600' }}>
+                        Substantial: {substance.substantial ?? 0}
+                      </span>
+                      <span style={{ backgroundColor: 'rgba(245,158,11,0.12)', color: '#f59e0b', padding: '2px 8px', borderRadius: '4px', fontWeight: '600' }}>
+                        Moderate: {substance.moderate ?? 0}
+                      </span>
+                      <span style={{ backgroundColor: 'rgba(107,114,128,0.12)', color: 'var(--text-muted)', padding: '2px 8px', borderRadius: '4px', fontWeight: '600' }}>
+                        Trivial: {substance.trivial ?? 0}
+                      </span>
+                    </div>
+
+                    {ps.code_resurrection_flags && ps.code_resurrection_flags.length > 0 && (
+                      <div style={{ color: '#f59e0b', fontWeight: '600', fontSize: '0.78rem', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                        <AlertCircle size={14} />
+                        <span>{ps.code_resurrection_flags.length} Code Resurrection Flag(s)</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* ── Row 6: Individual Student Qualitative Contributions Table & Drawer ── */}
             {qualData && qualData.contributors && (
               <div className="card" style={{ padding: '24px' }}>
-                <h2 style={{ fontSize: '1.1rem', fontWeight: '600', color: 'var(--text-main)', margin: '0 0 16px 0', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <User size={20} style={{ color: 'var(--primary)' }} />
-                  <span>Individual Student Qualitative Contributions</span>
-                </h2>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '8px' }}>
+                  <h2 style={{ fontSize: '1.1rem', fontWeight: '700', color: 'var(--text-main)', margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <User size={20} style={{ color: 'var(--primary)' }} />
+                    <span>Individual Student Qualitative Contributions</span>
+                  </h2>
+                  <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+                    Click any student row to view substantial commit diffs & timing patterns
+                  </span>
+                </div>
                 <div className="table-container">
                   <table className="custom-table" style={{ tableLayout: 'fixed', width: '100%' }}>
                     <thead>
                       <tr>
                         <th style={{ width: '22%' }}>Student Name</th>
-                        <th style={{ width: '15%' }}>Commit Share</th>
-                        <th style={{ width: '15%' }}>LOC Share</th>
-                        <th style={{ width: '15%' }}>Vague Msg %</th>
-                        <th style={{ width: '15%' }}>Msg Mismatch %</th>
+                        <th style={{ width: '13%' }}>Commit Share</th>
+                        <th style={{ width: '13%' }}>LOC Share</th>
+                        <th style={{ width: '14%' }}>Vague Msg %</th>
+                        <th style={{ width: '14%' }}>Msg Mismatch %</th>
                         <th style={{ width: '10%' }}>Risk Score</th>
-                        <th style={{ width: '23%' }}>Status / Red Flags</th>
+                        <th style={{ width: '14%' }}>Status</th>
                       </tr>
                     </thead>
                     <tbody>
                       {Object.entries(qualData.contributors).map(([name, info]) => {
                         const stats = info.stats || {};
+                        const examples = info.examples || {};
                         const riskScore = stats.ai_risk_score ?? 0;
                         const isFreeRider = stats.free_rider_suspected ?? false;
                         const flags = stats.detected_red_flags || [];
+                        const isExpanded = expandedQualContributor === name;
 
                         // Risk Badge style helper
                         const getRiskBadge = (score) => {
@@ -1354,30 +1861,124 @@ export default function Analytics({ project, course, onBack, qualAnalysisState, 
                         };
 
                         return (
-                          <tr key={name}>
-                            <td className="student-info-cell" style={{ fontWeight: '600' }}>{name}</td>
-                            <td>{stats.commit_share_percentage ?? 0}%</td>
-                            <td>{stats.loc_share_percentage ?? 0}%</td>
-                            <td style={{ color: stats.vague_message_percentage > 30 ? '#ef4444' : 'inherit' }}>
-                              {stats.vague_message_percentage ?? 0}%
-                            </td>
-                            <td style={{ color: stats.message_mismatch_percentage > 20 ? '#ef4444' : 'inherit' }}>
-                              {stats.message_mismatch_percentage ?? 0}%
-                            </td>
-                            <td>{getRiskBadge(riskScore)}</td>
-                            <td>
-                              {isFreeRider ? (
-                                <Tag 
-                                  text="Free-rider Risk" 
-                                  variant="danger" 
-                                  style={{ fontSize: '10px', padding: '3px 6px', fontWeight: '700' }}
-                                  title={flags.join(', ')}
-                                />
-                              ) : (
-                                <span style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>Good Standing</span>
-                              )}
-                            </td>
-                          </tr>
+                          <React.Fragment key={name}>
+                            <tr 
+                              onClick={() => setExpandedQualContributor(isExpanded ? null : name)}
+                              style={{ cursor: 'pointer', backgroundColor: isExpanded ? 'var(--bg-hover)' : 'inherit' }}
+                              title="Click to view detailed commit examples and timing"
+                            >
+                              <td className="student-info-cell" style={{ fontWeight: '600' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                  {isExpanded ? <ChevronDown size={14} style={{ color: 'var(--primary)' }} /> : <ChevronRight size={14} style={{ color: 'var(--text-muted)' }} />}
+                                  <span>{name}</span>
+                                </div>
+                              </td>
+                              <td>{stats.commit_share_percentage ?? 0}%</td>
+                              <td>{stats.loc_share_percentage ?? 0}%</td>
+                              <td style={{ color: stats.vague_message_percentage > 30 ? '#ef4444' : 'inherit' }}>
+                                {stats.vague_message_percentage ?? 0}%
+                              </td>
+                              <td style={{ color: stats.message_mismatch_percentage > 20 ? '#ef4444' : 'inherit' }}>
+                                {stats.message_mismatch_percentage ?? 0}%
+                              </td>
+                              <td>{getRiskBadge(riskScore)}</td>
+                              <td>
+                                {isFreeRider ? (
+                                  <Tag 
+                                    text="Free-rider Risk" 
+                                    variant="danger" 
+                                    style={{ fontSize: '10px', padding: '3px 6px', fontWeight: '700' }}
+                                    title={flags.join(', ')}
+                                  />
+                                ) : (
+                                  <span style={{ color: 'var(--text-muted)', fontSize: '0.82rem' }}>Good Standing</span>
+                                )}
+                              </td>
+                            </tr>
+
+                            {/* In-Depth Contributor Details Accordion */}
+                            {isExpanded && (
+                              <tr>
+                                <td colSpan={7} style={{ padding: '0', backgroundColor: 'var(--bg-app)', borderBottom: '2px solid var(--border-color)' }}>
+                                  <div style={{ padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                                    
+                                    {/* Top meta tags */}
+                                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px' }}>
+                                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                                        <strong style={{ fontSize: '0.9rem', color: 'var(--text-main)' }}>{name}'s Work Breakdown:</strong>
+                                        <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+                                          {stats.total_project_commits ?? 0} total commits ({stats.sampled_commits ?? 0} sampled by AI)
+                                        </span>
+                                      </div>
+                                      <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)', fontStyle: 'italic' }}>
+                                        Timing: <strong>{stats.timing_pattern || 'Normal distribution'}</strong>
+                                      </span>
+                                    </div>
+
+                                    {/* Substantial Commits Examples */}
+                                    {examples.substantial_commits && examples.substantial_commits.length > 0 && (
+                                      <div>
+                                        <span style={{ fontSize: '0.78rem', fontWeight: '700', color: '#10b981', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                                          Key Substantial Commits:
+                                        </span>
+                                        <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginTop: '6px' }}>
+                                          {examples.substantial_commits.map((c, ci) => (
+                                            <div key={ci} style={{
+                                              display: 'flex',
+                                              alignItems: 'center',
+                                              justifyContent: 'space-between',
+                                              backgroundColor: 'var(--bg-card)',
+                                              padding: '6px 10px',
+                                              borderRadius: '6px',
+                                              border: '1px solid var(--border-color)',
+                                              fontSize: '0.8rem'
+                                            }}>
+                                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', overflow: 'hidden' }}>
+                                                <code style={{ fontSize: '0.75rem', color: 'var(--primary)' }}>
+                                                  {c.hash?.substring(0, 8)}
+                                                </code>
+                                                <span style={{ color: 'var(--text-main)', textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }}>
+                                                  {c.message}
+                                                </span>
+                                              </div>
+                                              <button
+                                                type="button"
+                                                className="btn btn-secondary btn-sm"
+                                                onClick={(e) => { e.stopPropagation(); setSelectedCommitHash(c.hash); }}
+                                                style={{ padding: '3px 8px', fontSize: '0.72rem', display: 'flex', alignItems: 'center', gap: '4px' }}
+                                              >
+                                                <Code size={12} /><span>Diff</span>
+                                              </button>
+                                            </div>
+                                          ))}
+                                        </div>
+                                      </div>
+                                    )}
+
+                                    {/* Detected Red Flags list if any */}
+                                    {flags && flags.length > 0 && flags[0] !== 'None' && (
+                                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                                        <span style={{ fontSize: '0.78rem', fontWeight: '700', color: '#ef4444' }}>Flagged Concerns:</span>
+                                        {flags.map((flag, fi) => (
+                                          <span key={fi} style={{
+                                            fontSize: '0.74rem',
+                                            padding: '2px 7px',
+                                            borderRadius: '4px',
+                                            backgroundColor: 'rgba(239,68,68,0.1)',
+                                            color: '#ef4444',
+                                            border: '1px solid rgba(239,68,68,0.2)'
+                                          }}>
+                                            {flag}
+                                          </span>
+                                        ))}
+                                      </div>
+                                    )}
+
+                                  </div>
+                                </td>
+                              </tr>
+                            )}
+                          </React.Fragment>
                         );
                       })}
                     </tbody>

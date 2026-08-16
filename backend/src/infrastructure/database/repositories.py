@@ -173,6 +173,15 @@ class ProjectRepository(IProjectRepository):
             project_model.qualitative_report = report_json
             self.db.commit()
 
+    def get_qualitative_report(self, project_id: int) -> Optional[str]:
+        """Read the cached local-AI qualitative report JSON straight from the DB.
+
+        ProjectEntity intentionally omits this column, so callers holding only
+        an entity must go through the repository to reach it.
+        """
+        project_model = self.db.query(ProjectModel).filter(ProjectModel.id == project_id).first()
+        return project_model.qualitative_report if project_model else None
+
     def delete(self, project_id: int) -> bool:
         project_model = self.db.query(ProjectModel).filter(ProjectModel.id == project_id).first()
         if not project_model:

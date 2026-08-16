@@ -154,7 +154,7 @@ def _build_charts(qual_data: Optional[dict], deadline: Optional[str] = None) -> 
                 counts_t = [t["count"] for t in timeline]
 
                 fig3, ax3 = plt.subplots(figsize=(7.2, 3.0), dpi=200)
-                ax3.plot(dates, counts_t, color="#1f4268", marker="o", markersize=5.5, linewidth=3.2, label="Daily Commits")
+                ax3.plot(dates, counts_t, color="#1f4268", marker="o", markersize=3.5, linewidth=1.5, label="Daily Commits")
                 ax3.fill_between(dates, counts_t, color="#1f4268", alpha=0.12)
                 ax3.set_xlabel("Date", fontsize=8.5, fontweight="bold")
                 ax3.set_ylabel("Commits / Day", fontsize=8.5, fontweight="bold")
@@ -664,13 +664,13 @@ def render_pdf_report(
             return "background-color: #fce8e6; color: #c5221f; font-weight: bold;"
         return "background-color: #f8f9fa; color: #3c4043;"
         
-    colors = ['#2b5c8f', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#374151']
+    colors = ['#0284c7', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#374151']
     def lang_color_filter(idx):
         try:
             return colors[int(idx) % len(colors)]
         except (ValueError, TypeError, IndexError) as e:
             logger.warning(f"Error resolving language color index '{idx}': {e}")
-            return '#2b5c8f'
+            return '#0284c7'
 
     env.filters["md"] = md_filter
     env.filters["verdict_style"] = verdict_style

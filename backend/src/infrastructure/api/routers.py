@@ -1291,9 +1291,10 @@ def get_qualitative_analysis_status_route(
     status_data = get_project_analysis_status(project_id)
     # If idle in memory, also check DB for cached report
     if status_data["status"] == "idle":
+        # ProjectEntity omits the qualitative_report column, so read it back
+        # through the repository rather than off the entity.
         project_repo = ProjectRepository(db)
-        project = project_repo.get_by_id(project_id)
-        if project and getattr(project, 'qualitative_report', None):
+        if project_repo.get_qualitative_report(project_id):
             return {"status": "complete", "progress": 100, "message": "Loaded from database cache.", "has_db_cache": True}
         return {"status": "idle", "progress": 0, "message": "", "has_db_cache": False}
     return status_data
@@ -1628,9 +1629,9 @@ def generate_cloud_ai_report(
         except ValueError as ve:
             logger.warning(f"Caught ValueError: {ve}")
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(ve))
-        except RuntimeError as re:
-            logger.warning(f"Caught RuntimeError: {re}")
-            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(re))
+        except RuntimeError as rte:
+            logger.warning(f"Caught RuntimeError: {rte}")
+            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(rte))
         except Exception as ex:
             logger.exception(f"Caught unexpected Exception: {ex}")
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Internal server error")
@@ -1641,6 +1642,69 @@ def generate_cloud_ai_report(
         lecturer = getattr(current_user, 'username', None) or getattr(current_user, 'email', None) or 'Course Lecturer'
         course_obj = getattr(project, 'course', None)
         course_dl = getattr(course_obj, 'deadline', None) if course_obj else getattr(project, 'deadline', None)
+
+        # Guarantee fresh folder structure & tree from cloned local repo path
+        if qual_data and getattr(project, 'local_saved_path', None) and os.path.exists(project.local_saved_path):
+            try:
+                ps = qual_data.setdefault("project_summary", {})
+                fs = ps.setdefault("folder_structure", {})
+                repo_path = project.local_saved_path
+                top_dirs = []
+                tot_files = 0
+                tot_dirs = 0
+                has_tests = False
+                tree_structure = {}
+                ignore_dirs = {'node_modules', '__pycache__', 'venv', 'env', 'build', 'dist', 'target', '.git', '.idea', '.vscode', '.gradle'}
+
+                for root, dirs, files in os.walk(repo_path):
+                    dirs[:] = [d for d in dirs if not d.startswith('.') and d not in ignore_dirs]
+                    tot_dirs += len(dirs)
+                    tot_files += len(files)
+                    rel_root = os.path.relpath(root, repo_path)
+                    if rel_root == ".":
+                        top_dirs = list(dirs)
+                        for d in dirs[:8]:
+                            tree_structure[d] = {"dirs": {}, "files": []}
+                    else:
+                        parts = rel_root.split(os.sep)
+                        if len(parts) == 1 and parts[0] in tree_structure:
+                            for d in dirs[:4]:
+                                tree_structure[parts[0]]["dirs"][d] = []
+                            tree_structure[parts[0]]["files"] = [f for f in files if not f.startswith('.')][:3]
+                        elif len(parts) == 2 and parts[0] in tree_structure and parts[1] in tree_structure[parts[0]]["dirs"]:
+                            tree_structure[parts[0]]["dirs"][parts[1]] = [f for f in files if not f.startswith('.')][:3]
+                    for d in dirs:
+                        if d.lower() in ('test', 'tests', '__tests__', 'spec', 'specs'):
+                            has_tests = True
+
+                modularity = "Monolithic (Flat)"
+                if len(top_dirs) >= 3 or has_tests:
+                    modularity = "High Modularity (Structured Directories)"
+                elif len(top_dirs) >= 1:
+                    modularity = "Moderate Modularity"
+
+                all_rel_dirs = []
+                for root, dirs, files in os.walk(repo_path):
+                    dirs[:] = [d for d in dirs if not d.startswith('.') and d not in ignore_dirs]
+                    rel = os.path.relpath(root, repo_path)
+                    if rel != ".":
+                        all_rel_dirs.append(rel.replace("\\", "/"))
+
+                try:
+                    local_ai = LocalAIService()
+                    fs["filtered_ai_folders"] = local_ai.filter_important_folders(all_rel_dirs or top_dirs)[:10]
+                except Exception as ai_err:
+                    logger.warning(f"Local AI folder filtering fallback: {ai_err}")
+                    fs["filtered_ai_folders"] = (top_dirs)[:10]
+
+                fs["top_level_directories"] = top_dirs[:8]
+                fs["total_directories"] = tot_dirs
+                fs["total_files"] = tot_files
+                fs["has_tests_dir"] = has_tests
+                fs["modularity_score"] = modularity
+                fs["tree_structure"] = tree_structure
+            except Exception as fs_err:
+                logger.warning(f"Error enriching real-time folder structure: {fs_err}")
 
         pdf_bytes = render_pdf_report(
             report_data=report_data, 

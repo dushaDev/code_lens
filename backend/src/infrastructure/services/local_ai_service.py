@@ -10,6 +10,50 @@ class LocalAIService:
     def __init__(self, model_name: str = "qwen2.5-coder:3b"):
         self.model_name = model_name
 
+    def filter_important_folders(self, raw_folder_list: list) -> list:
+        """
+        Filters raw project directory list down to max 10 most relevant architectural folders using local AI.
+        """
+        if not raw_folder_list:
+            return []
+            
+        safe_list = raw_folder_list[:50]
+        prompt = f"""
+        You are a senior software architect evaluating project directory structures.
+        Below is the full raw list of project directories:
+        {json.dumps(safe_list)}
+        
+        Select up to 10 of the MOST IMPORTANT core architectural and source directories (e.g. source, api, components, domain, services, views, utils, tests, controllers, models, config).
+        Exclude build artifacts, cache, or minor setup folders.
+        
+        Respond ONLY with a JSON object containing a "key_folders" array of string directory names:
+        {{
+            "key_folders": ["src", "components", "api", ...]
+        }}
+        """
+        try:
+            response = ollama.chat(
+                model=self.model_name,
+                messages=[{'role': 'user', 'content': prompt}],
+                format="json",
+                options={'num_predict': 150, 'temperature': 0.1}
+            )
+            result = json.loads(response['message']['content'])
+            folders = result.get("key_folders", [])
+            if isinstance(folders, list):
+                # Ensure clean non-empty string entries max 10
+                filtered = [str(f).strip() for f in folders if f and isinstance(f, str)][:10]
+                if filtered:
+                    return filtered
+        except Exception as e:
+            logger.warning(f"Error filtering folders with local AI: {e}")
+            
+        # Heuristic fallback if LLM is unavailable or fails
+        priority_keywords = ('src', 'source', 'lib', 'app', 'frontend', 'backend', 'domain', 'api', 'components', 'views', 'controllers', 'models', 'services', 'utils', 'tests')
+        important = [d for d in raw_folder_list if any(kw in d.lower() for kw in priority_keywords)]
+        remainder = [d for d in raw_folder_list if d not in important]
+        return (important + remainder)[:10]
+
     def verify_commit_message(self, commit_message: str, code_diff: str) -> dict:
         """
         Micro-Task: Check if a single commit message matches its diff.

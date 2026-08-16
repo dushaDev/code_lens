@@ -23,7 +23,7 @@
             font-family: Helvetica, Arial, sans-serif;
             color: #333333;
             line-height: 1.35;
-            font-size: 8.5pt;
+            font-size: 9.5pt;
         }
 
         h1,
@@ -266,8 +266,9 @@
                         </tr>
                     </table>
                     {% for lang, pct in qual_data.project_summary.language_distribution.items() %}
-                    <span class="tag-pill" style="border-left: 3px solid {{ loop.index0 | lang_color }};">{{ lang }}: {{
-                        pct }}%</span>
+                    <span class="tag-pill"
+                        style="border-left: 3px solid {{ loop.index0 | lang_color }}; color: {{ loop.index0 | lang_color }}; font-weight: bold;">{{
+                        lang }}: {{ pct }}%</span>
                     {% endfor %}
                     {% endif %}
                 </td>
@@ -291,48 +292,90 @@
 
     {% if qual_data and qual_data.project_summary %}
     {% set ps = qual_data.project_summary %}
-    <div class="health-box" style="background-color: #f8fafe; border: 1px solid #d2e3fc; border-left: 4px solid #1a73e8; padding: 10px 14px; border-radius: 6px; margin-top: 10px; margin-bottom: 12px;">
-        <div style="font-size: 9.5pt; font-weight: bold; color: #1a73e8; margin-bottom: 8px; border-bottom: 1px solid #d2e3fc; padding-bottom: 4px; text-transform: uppercase; letter-spacing: 0.5px;">
+    <div class="health-box"
+        style="background-color: #f8fafe; border: 1px solid #d2e3fc; padding: 10px 14px; border-radius: 6px; margin-top: 10px; margin-bottom: 12px;">
+        <div
+            style="font-size: 9.5pt; font-weight: bold; color: #1a73e8; margin-bottom: 8px; border-bottom: 1px solid #d2e3fc; padding-bottom: 4px; text-transform: uppercase; letter-spacing: 0.5px;">
             Repository Architecture, Branches & AST Complexity
         </div>
-        
+
         <div style="line-height: 1.6; font-size: 8.5pt; color: #202124;">
             {% if ps.readme_quality %}
             <div style="margin-bottom: 4px;">
-                • <strong>Documentation Score:</strong> 
-                <span style="background-color: #e8f0fe; color: #1967d2; padding: 1px 6px; border-radius: 4px; font-weight: bold;">{{ ps.readme_quality.documentation_score }}</span>
+                • <strong>Documentation Score:</strong>
+                <span
+                    style="background-color: #e8f0fe; color: #1967d2; padding: 1px 6px; border-radius: 4px; font-weight: bold;">{{
+                    ps.readme_quality.documentation_score }}</span>
                 {% if ps.readme_quality.has_readme %}
-                <span style="color: #5f6368; font-size: 8pt;">(README size: <strong>{{ ps.readme_quality.readme_size_kb }} KB</strong>, Setup Guide: <strong>{{ "Yes" if ps.readme_quality.has_setup_guide else "No" }}</strong>)</span>
+                <span style="color: #5f6368; font-size: 8pt;">(README size: <strong>{{ ps.readme_quality.readme_size_kb
+                        }} KB</strong>, Setup Guide: <strong>{{ "Yes" if ps.readme_quality.has_setup_guide else "No"
+                        }}</strong>)</span>
                 {% endif %}
             </div>
             {% endif %}
 
             {% if ps.folder_structure %}
-            <div style="margin-bottom: 4px;">
-                • <strong>Repository Modularity:</strong> 
-                <span style="background-color: #e8f0fe; color: #1967d2; padding: 1px 6px; border-radius: 4px; font-weight: bold;">{{ ps.folder_structure.modularity_score }}</span>
-                <span style="color: #5f6368; font-size: 8pt;">(<strong>{{ ps.folder_structure.total_files }}</strong> files in <strong>{{ ps.folder_structure.total_directories }}</strong> directories, Tests Dir: <strong>{{ "Present" if ps.folder_structure.has_tests_dir else "None" }}</strong>)</span>
+            <div style="margin-bottom: 6px;">
+                • <strong>Repository Modularity & Structure:</strong>
+                <span
+                    style="background-color: #e8f0fe; color: #1967d2; padding: 1px 6px; border-radius: 4px; font-weight: bold;">{{
+                    ps.folder_structure.modularity_score }}</span>
+                <span style="color: #5f6368; font-size: 8pt;">(<strong>{{ ps.folder_structure.total_files }}</strong>
+                    files across <strong>{{ ps.folder_structure.total_directories }}</strong> directories, Tests Dir:
+                    <strong>{{ "Present" if ps.folder_structure.has_tests_dir else "None" }}</strong>)</span>
+                
+                {% if ps.folder_structure.filtered_ai_folders or ps.folder_structure.top_level_directories %}
+                {% set ai_folders = ps.folder_structure.filtered_ai_folders or ps.folder_structure.top_level_directories[:10] %}
+                <div style="margin-top: 4px; margin-left: 4px; background-color: #fafafa; border: 1px solid #e5e7eb; padding: 4px 8px; border-radius: 4px; font-family: 'Courier New', Courier, monospace; font-size: 7.5pt; color: #374151; line-height: 1.2; page-break-inside: avoid;">
+                    <div style="font-weight: bold; color: #4b5563; margin-bottom: 2px; text-transform: uppercase; font-size: 7pt; letter-spacing: 0.5px;">Folder Structure Overview:</div>
+                    {% for folder in ai_folders[:10] %}
+                    <div style="margin-bottom: 0px; padding: 0px;">
+                        <span style="color: #9ca3af;">{{ '└── ' if loop.last else '├── ' }}</span><span style="color: #4b5563;">[DIR]</span> <strong style="color: #1f2937;">{{ folder }}/</strong>
+                    </div>
+                    {% endfor %}
+                </div>
+                {% endif %}
             </div>
             {% endif %}
 
             {% if ps.ast_complexity_summary %}
             <div style="margin-bottom: 4px;">
-                • <strong>AST Code Metrics:</strong> 
-                Avg Complexity: <span style="background-color: #e8f0fe; color: #1967d2; padding: 1px 6px; border-radius: 4px; font-weight: bold;">{{ ps.ast_complexity_summary.avg_complexity_score }}</span>
-                &nbsp;|&nbsp; Total Parsed Functions: <strong>{{ ps.ast_complexity_summary.total_functions }}</strong>
-                &nbsp;|&nbsp; Squash-Suspected Commits: 
-                <span style="background-color: {% if ps.ast_complexity_summary.squash_suspected_commits > 0 %}#fce8e6; color: #c5221f{% else %}#e6f4ea; color: #137333{% endif %}; padding: 1px 6px; border-radius: 4px; font-weight: bold;">{{ ps.ast_complexity_summary.squash_suspected_commits }}</span>
+                • <strong>AST Code Metrics:</strong>
+                Avg Complexity: <span
+                    style="background-color: #e8f0fe; color: #1967d2; padding: 1px 6px; border-radius: 4px; font-weight: bold;">{{
+                    ps.ast_complexity_summary.avg_complexity_score }}</span>
+                {% set cx = ps.ast_complexity_summary.avg_complexity_score | float %}
+                {% if cx <= 5 %}<span style="color: #137333; font-size: 8.5pt;">(Low — code is straightforward and easy
+                    to follow)</span>
+                    {% elif cx <= 10 %}<span style="color: #e37400; font-size: 8.5pt;">(Moderate — some conditional
+                        logic, within acceptable range)</span>
+                        {% elif cx <= 20 %}<span style="color: #c5221f; font-size: 8.5pt;">(High — heavily branched
+                            code, warrants closer review)</span>
+                            {% else %}<span style="color: #c5221f; font-size: 8.5pt; font-weight: bold;">(Very High —
+                                deeply nested logic, significant review required)</span>
+                            {% endif %}
+                            &nbsp;|&nbsp; Total Parsed Functions: <strong>{{ ps.ast_complexity_summary.total_functions
+                                }}</strong>
+                            &nbsp;|&nbsp; Squash-Suspected Commits:
+                            <span
+                                style="background-color: {% if ps.ast_complexity_summary.squash_suspected_commits > 0 %}#fce8e6; color: #c5221f{% else %}#e6f4ea; color: #137333{% endif %}; padding: 1px 6px; border-radius: 4px; font-weight: bold;">{{
+                                ps.ast_complexity_summary.squash_suspected_commits }}</span>
             </div>
             {% endif %}
 
             {% if ps.pacing_summary and ps.pacing_summary.peak_commit_date != 'N/A' %}
             <div style="margin-bottom: 4px;">
-                • <strong>Timeline Velocity:</strong> 
-                Peak Activity: <strong>{{ ps.pacing_summary.peak_commit_date }}</strong> (<span style="background-color: #e8f0fe; color: #1967d2; padding: 1px 5px; border-radius: 3px; font-weight: bold;">{{ ps.pacing_summary.peak_commit_count }} commits</span>)
-                &nbsp;|&nbsp; Avg Velocity: <strong>{{ ps.pacing_summary.avg_commits_per_active_day }}</strong> commits/active day
+                • <strong>Timeline Velocity:</strong>
+                Peak Activity: <strong>{{ ps.pacing_summary.peak_commit_date }}</strong> (<span
+                    style="background-color: #e8f0fe; color: #1967d2; padding: 1px 5px; border-radius: 3px; font-weight: bold;">{{
+                    ps.pacing_summary.peak_commit_count }} commits</span>)
+                &nbsp;|&nbsp; Avg Velocity: <strong>{{ ps.pacing_summary.avg_commits_per_active_day }}</strong>
+                commits/active day
                 {% if ps.pacing_summary.project_span_days is defined %}
                 &nbsp;|&nbsp; Project Span: <strong>{{ ps.pacing_summary.project_span_days }}</strong> days
-                &nbsp;|&nbsp; Active Days: <span style="background-color: #e8f0fe; color: #1967d2; padding: 1px 5px; border-radius: 3px; font-weight: bold;">{{ ps.pacing_summary.active_days_count }} days</span>
+                &nbsp;|&nbsp; Active Days: <span
+                    style="background-color: #e8f0fe; color: #1967d2; padding: 1px 5px; border-radius: 3px; font-weight: bold;">{{
+                    ps.pacing_summary.active_days_count }} days</span>
                 {% endif %}
             </div>
             {% endif %}
@@ -344,9 +387,11 @@
                     {% for b in ps.branches_summary.top_branches %}
                     <tr>
                         <td style="padding: 2px 4px; border-bottom: 1px dotted #d2e3fc; width: 75%;">
-                            <code style="background-color: #edf2fa; padding: 1px 4px; border-radius: 3px; color: #1a73e8; font-weight: bold;">{{ b.name }}</code>
+                            <code
+                                style="background-color: #edf2fa; padding: 1px 4px; border-radius: 3px; color: #1a73e8; font-weight: bold;">{{ b.name }}</code>
                         </td>
-                        <td style="padding: 2px 4px; border-bottom: 1px dotted #d2e3fc; width: 25%; text-align: right; color: #3c4043; font-weight: bold;">
+                        <td
+                            style="padding: 2px 4px; border-bottom: 1px dotted #d2e3fc; width: 25%; text-align: right; color: #3c4043; font-weight: bold;">
                             {{ b.commits }} commits
                         </td>
                     </tr>
@@ -379,8 +424,8 @@
         {% endif %}
 
         {% if charts.commit_timeline %}
-        <div style="text-align: center; margin-bottom: 14px; page-break-inside: avoid;">
-            <img src="{{ charts.commit_timeline }}" style="width: 17cm; height: auto;" />
+        <div style="text-align: center; margin-bottom: 14px; page-break-inside: avoid; border: none; outline: none;">
+            <img src="{{ charts.commit_timeline }}" style="width: 16.5cm; height: auto; border: none; outline: none;" />
         </div>
         {% endif %}
     </div>
@@ -464,19 +509,65 @@
     {% if qual_data and qual_data.project_summary %}
     {% set ps = qual_data.project_summary %}
     {% if ps.code_smell_distribution or ps.architecture_issue_distribution %}
+    {% set smell_descriptions = {
+    'magic_numbers': 'Magic Numbers — raw numeric literals used in logic instead of named constants, making the intent
+    unclear',
+    'deep_nesting': 'Deep Nesting — code branches nested 3+ levels deep, significantly reducing readability and
+    testability',
+    'long_method': 'Long Method — a function or method is too large, handling multiple concerns that should be
+    separated',
+    'dead_code': 'Dead Code — unreachable or unused code left in the codebase, increasing maintenance burden',
+    'complex_conditional': 'Complex Conditional — overly complicated if/else or switch conditions that are hard to
+    reason about'
+    } %}
+    {% set arch_descriptions = {
+    'tight_coupling': 'Tight Coupling — components are too interdependent; changes in one part will likely break
+    others',
+    'poor_separation_of_concerns': 'Poor Separation of Concerns — business logic, UI, and data handling are mixed
+    together rather than cleanly separated',
+    'missing_abstraction': 'Missing Abstraction — repeated patterns or logic that should be extracted into a reusable
+    function or class',
+    'business_logic_in_ui': 'Business Logic in UI — processing rules or calculations placed directly inside
+    view/controller layers instead of the appropriate service or domain layer'
+    } %}
     <div style="margin-top: 10px; margin-bottom: 10px;">
         {% if ps.code_smell_distribution %}
-        <strong>Detected Code Smells:</strong><br>
-        {% for smell, count in ps.code_smell_distribution.items() %}
-        <span class="smell-badge">{{ smell }}: {{ count }}</span>
-        {% endfor %}
-        <br>
+        <strong>Detected Code Smells</strong>
+        <span style="color: #5f6368; font-size: 8.5pt;"> — patterns in the codebase that indicate poor quality or
+            potential bugs, detected by the AI across sampled commits:</span><br>
+        <table style="width: 100%; border-collapse: collapse; margin-top: 6px; font-size: 8.5pt;">
+            {% for smell, count in ps.code_smell_distribution.items() %}
+            <tr style="border-bottom: 1px solid #f0f0f0;">
+                <td style="padding: 4px 6px; width: 5%; vertical-align: top;">
+                    <span class="smell-badge" style="white-space: nowrap;">{{ count }}×</span>
+                </td>
+                <td style="padding: 4px 6px; vertical-align: top; color: #b06000;">
+                    <strong>{{ smell | replace('_', ' ') | title }}</strong> —
+                    <span style="color: #3c4043;">{{ smell_descriptions.get(smell, 'Recurring pattern that may indicate
+                        a design issue.') }}</span>
+                </td>
+            </tr>
+            {% endfor %}
+        </table>
         {% endif %}
         {% if ps.architecture_issue_distribution %}
-        <strong style="margin-top: 6px; display: inline-block;">Detected Architecture Issues:</strong><br>
-        {% for issue, count in ps.architecture_issue_distribution.items() %}
-        <span class="arch-badge">{{ issue }}: {{ count }}</span>
-        {% endfor %}
+        <strong style="margin-top: 10px; display: inline-block;">Detected Architecture Issues</strong>
+        <span style="color: #5f6368; font-size: 8.5pt;"> — structural design problems identified across the codebase
+            that affect long-term maintainability:</span><br>
+        <table style="width: 100%; border-collapse: collapse; margin-top: 6px; font-size: 8.5pt;">
+            {% for issue, count in ps.architecture_issue_distribution.items() %}
+            <tr style="border-bottom: 1px solid #f0f0f0;">
+                <td style="padding: 4px 6px; width: 5%; vertical-align: top;">
+                    <span class="arch-badge" style="white-space: nowrap;">{{ count }}×</span>
+                </td>
+                <td style="padding: 4px 6px; vertical-align: top; color: #c5221f;">
+                    <strong>{{ issue | replace('_', ' ') | title }}</strong> —
+                    <span style="color: #3c4043;">{{ arch_descriptions.get(issue, 'Structural design concern identified
+                        in the project.') }}</span>
+                </td>
+            </tr>
+            {% endfor %}
+        </table>
         {% endif %}
     </div>
     {% endif %}
@@ -494,7 +585,7 @@
 
     <div
         style="background-color: #f8f9fa; border: 1px solid #e0e0e0; border-left: 4px solid #0037B0; padding: 8px 12px; margin-top: 14px; margin-bottom: 10px; border-radius: 4px; font-size: 7.8pt; page-break-inside: avoid;">
-        <strong style="color: #ff0008; font-size: 8.5pt;">Notice:</strong><br>
+        <strong style="color: #ff0008; font-size: 8.5pt;">Notice</strong><br>
         • <strong>Report Purpose &amp; Accuracy:</strong> This report is generated by CodeLens as an automated
         decision-support tool to assist course lecturers in evaluating Contributions, commit timing patterns, and
         codebase integrity. All findings serve as quantitative investigative signals for academic review.<br>
@@ -510,7 +601,7 @@
         ({{ ((ps.sampled_commits / ps.total_commits) * 100.0) | round(1) if ps.total_commits and ps.sampled_commits is
         defined else 100.0 }}% coverage)<br>
         {% endif %}
-        • <strong>Evaluator / Course Lecturer:</strong> <strong>{{ lecturer_name | default('Course Lecturer')
+        • <strong>Evaluated by </strong> <strong>{{ lecturer_name | default('Course Lecturer')
             }}</strong>
     </div>
 

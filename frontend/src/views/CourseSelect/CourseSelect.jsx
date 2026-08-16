@@ -1,18 +1,19 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, GraduationCap, X, CalendarClock, Calendar } from 'lucide-react';
+import { Plus, GraduationCap, X, CalendarClock, Calendar, Settings as SettingsIcon } from 'lucide-react';
 import ProfileDropdown from '../../components/ProfileDropdown';
 import Tooltip from '../../components/Tooltip';
+import ApiKeysCard from '../../components/ApiKeysCard';
 import { buildDeadline, formatDeadline } from '../../utils/courseMeta';
 import './CourseSelect.css';
 import '../../components/Header.css';
 
 const TECH_SUGGESTIONS = [
-  'JavaScript','TypeScript','React','Vue','Angular','Node.js','Express','Next.js','Nuxt.js','Svelte',
+  'JavaScript','TypeScript','React','React Native','Vue','Angular','Node.js','Express','Next.js','Nuxt.js','Svelte',
   'Python','Django','Flask','FastAPI','PyTorch','TensorFlow','Pandas','NumPy','SciPy',
-  'Java','Spring','Spring Boot','Kotlin','Android','Scala',
+  'Java','Spring','Spring Boot','Kotlin','Android','Flutter','Dart','Scala',
   'C','C++','C#','.NET','ASP.NET','WPF',
   'Go','Rust','Zig',
-  'Ruby','Rails','PHP','Laravel','Symfony',
+  'Ruby','Rails','PHP','Laravel','Symfony','JSP','Servlet',
   'Swift','SwiftUI','Objective-C',
   'SQL','PostgreSQL','MySQL','SQLite','MongoDB','Redis','Elasticsearch','GraphQL',
   'HTML','CSS','Sass','Tailwind','Bootstrap',
@@ -60,6 +61,7 @@ export default function CourseSelect({ user, onSelectCourse, onLogout, onUserUpd
   const [newDeadlineDate, setNewDeadlineDate] = useState(() => todayISO());
   const [newDeadlineTime, setNewDeadlineTime] = useState('23:59');
   const [showAddForm, setShowAddForm] = useState(false);
+  const [showApiKeys, setShowApiKeys] = useState(false);
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
@@ -176,6 +178,9 @@ export default function CourseSelect({ user, onSelectCourse, onLogout, onUserUpd
               onLogout={onLogout} 
               onUserUpdate={onUserUpdate} 
             />
+            <button className="icon-btn" onClick={() => setShowApiKeys(true)} title="API Keys" style={{ background: 'transparent', border: 'none', cursor: 'pointer', marginLeft: '8px' }}>
+              <SettingsIcon size={20} className="blue-text" />
+            </button>
           </div>
         </header>
 
@@ -477,9 +482,22 @@ export default function CourseSelect({ user, onSelectCourse, onLogout, onUserUpd
             </div>
           )}
         </div>
-      </div>
 
-      
+        
+      </div>
+{showApiKeys && (
+  <div className="modal-overlay" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
+    <div className="modal-card card" style={{ maxWidth: '540px', width: '90%', padding: '24px', position: 'relative' }}>
+      <div className="modal-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', borderBottom: `1px solid var(--border-color)`, paddingBottom: '12px' }}>
+        <h2 style={{ fontSize: '1.2rem', fontWeight: '600', color: 'var(--text-main)', margin: 0 }}>Cloud Model API Keys</h2>
+        <button className="close-btn" type="button" onClick={() => setShowApiKeys(false)} style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: '4px' }}>
+          <X size={20} />
+        </button>
+      </div>
+      <ApiKeysCard />
+    </div>
+  </div>
+)}
     </div>
   );
 }

@@ -262,16 +262,25 @@ class GetQualitativeAnalysisUseCase:
         except (SQLAlchemyError, AttributeError) as deadline_err:
             logger.warning(f"Course deadline resolution failed: {deadline_err}")
 
-        # Check DB cache first unless force_refresh is True
-        if not force_refresh and getattr(project, 'qualitative_report', None):
-            logger.info("[QUAL] DB cache hit for project %s — returning cached report.", project_id)
+        # Check the DB cache first (unless force_refresh). `project` is a
+        # ProjectEntity, which does NOT carry the qualitative_report column —
+        # read it back through the repository instead of off the entity.
+        cached_report_json = None
+        if not force_refresh and hasattr(self.project_repo, 'get_qualitative_report'):
             try:
-                cached_data = json.loads(project.qualitative_report)
+                cached_report_json = self.project_repo.get_qualitative_report(project_id)
+            except SQLAlchemyError as cache_read_err:
+                logger.warning("[QUAL] Error reading DB qualitative_report cache: %s", cache_read_err)
+
+        if cached_report_json:
+            logger.info("[QUAL] DB cache hit for project %s — skipping local AI analysis.", project_id)
+            try:
+                cached_data = json.loads(cached_report_json)
                 update_running_project(project_id, new_state={"status": "complete", "progress": 100, "message": "Loaded from database cache."})
                 yield {"type": "complete", "progress": 100, "message": "Loaded cached analysis from database.", "data": cached_data}
                 return
-            except (json.JSONDecodeError, SQLAlchemyError) as cache_err:
-                logger.warning("[QUAL] Error reading DB qualitative_report cache: %s", cache_err)
+            except json.JSONDecodeError as cache_err:
+                logger.warning("[QUAL] Corrupt DB qualitative_report cache — re-analyzing: %s", cache_err)
         else:
             logger.info("[QUAL] No DB cache (force_refresh=%s) — running fresh analysis.", force_refresh)
 
@@ -724,7 +733,7 @@ class GetQualitativeAnalysisUseCase:
                     "late_commits": late_commits_count if deadline else None,
                     "commits_near_deadline": deadline_close_count if deadline else None,
                     "timing_pattern": timing_pattern if deadline else "Not Tracked (No deadline configured)",
-                    "ai_risk_score": final_individual_risk if total_sampled_ai > 0 else 0,
+                    "ai_risk_score": final_individual_risk if (total_sampled_ai > 0 or is_free_rider_suspected) else 0,
                     "free_rider_suspected": is_free_rider_suspected,
                     "detected_red_flags": red_flags_list if red_flags_list else ["None"]
                 },
@@ -892,17 +901,44 @@ class GetQualitativeAnalysisUseCase:
                 tot_dirs = 0
                 has_tests = False
                 
+                # Build a clean 3-level tree representation for visual layout
+                tree_structure = {}
+                ignore_dirs = {'node_modules', '__pycache__', 'venv', 'env', 'build', 'dist', 'target', '.git', '.idea', '.vscode', '.gradle', 'ios', 'android'}
+                
                 for root, dirs, files in os.walk(repo_path):
-                    dirs[:] = [d for d in dirs if not d.startswith('.') and d not in ('node_modules', '__pycache__', 'venv', 'env', 'build', 'dist')]
+                    dirs[:] = [d for d in dirs if not d.startswith('.') and d not in ignore_dirs]
                     tot_dirs += len(dirs)
                     tot_files += len(files)
                     
-                    if root == repo_path:
+                    rel_root = os.path.relpath(root, repo_path)
+                    if rel_root == ".":
                         top_dirs = list(dirs)
-                        
+                        for d in dirs[:8]:
+                            tree_structure[d] = {"dirs": {}, "files": []}
+                    else:
+                        parts = rel_root.split(os.sep)
+                        if len(parts) == 1 and parts[0] in tree_structure:
+                            # Level 2 directory
+                            for d in dirs[:4]:
+                                tree_structure[parts[0]]["dirs"][d] = []
+                            tree_structure[parts[0]]["files"] = [f for f in files if not f.startswith('.')][:3]
+                        elif len(parts) == 2 and parts[0] in tree_structure and parts[1] in tree_structure[parts[0]]["dirs"]:
+                            # Level 3 directory/files
+                            tree_structure[parts[0]]["dirs"][parts[1]] = [f for f in files if not f.startswith('.')][:3]
+
                     for d in dirs:
                         if d.lower() in ('test', 'tests', '__tests__', 'spec', 'specs'):
                             has_tests = True
+
+                # Filter directories using Local AI service to select max 10 architectural folders
+                all_rel_dirs = []
+                for root, dirs, files in os.walk(repo_path):
+                    dirs[:] = [d for d in dirs if not d.startswith('.') and d not in ignore_dirs]
+                    rel = os.path.relpath(root, repo_path)
+                    if rel != ".":
+                        all_rel_dirs.append(rel.replace("\\", "/"))
+
+                filtered_ai_folders = self.local_ai.filter_important_folders(all_rel_dirs or top_dirs)
 
                 modularity = "Monolithic (Flat)"
                 if len(top_dirs) >= 3 or has_tests:
@@ -915,7 +951,9 @@ class GetQualitativeAnalysisUseCase:
                     "total_directories": tot_dirs,
                     "total_files": tot_files,
                     "has_tests_dir": has_tests,
-                    "modularity_score": modularity
+                    "modularity_score": modularity,
+                    "tree_structure": tree_structure,
+                    "filtered_ai_folders": filtered_ai_folders[:10]
                 }
 
                 readme_file = None
