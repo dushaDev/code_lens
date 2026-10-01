@@ -752,6 +752,14 @@ export default function Analytics({ project, course, onBack, qualAnalysisState, 
                           ? `${humanCount} real ${humanCount === 1 ? 'person' : 'people'} & ${botCount} automated ${botCount === 1 ? 'bot' : 'bots'}`
                           : `${humanCount} distinct ${humanCount === 1 ? 'person' : 'people'}`}
                       </p>
+                      {analytics.co_authors_only_count > 0 && (
+                        <div style={{ marginTop: '8px', padding: '6px 10px', backgroundColor: 'rgba(245,158,11,0.1)', border: '1px solid rgba(245,158,11,0.2)', borderRadius: '6px', display: 'flex', alignItems: 'flex-start', gap: '6px' }}>
+                          <AlertCircle size={14} color="#f59e0b" style={{ flexShrink: 0, marginTop: '2px' }} />
+                          <span style={{ fontSize: '0.75rem', color: '#d97706', fontWeight: '600', lineHeight: '1.4' }}>
+                            {analytics.co_authors_only_count} additional member(s) identified as co-authors but have not made direct commits.
+                          </span>
+                        </div>
+                      )}
                     </div>
                   );
                 })()}
