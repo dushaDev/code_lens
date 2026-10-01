@@ -753,10 +753,22 @@ export default function Analytics({ project, course, onBack, qualAnalysisState, 
                           : `${humanCount} distinct ${humanCount === 1 ? 'person' : 'people'}`}
                       </p>
                       {analytics.co_authors_only_count > 0 && (
-                        <div style={{ marginTop: '8px', padding: '6px 10px', backgroundColor: 'rgba(245,158,11,0.1)', border: '1px solid rgba(245,158,11,0.2)', borderRadius: '6px', display: 'flex', alignItems: 'flex-start', gap: '6px' }}>
-                          <AlertCircle size={14} color="#f59e0b" style={{ flexShrink: 0, marginTop: '2px' }} />
-                          <span style={{ fontSize: '0.75rem', color: '#d97706', fontWeight: '600', lineHeight: '1.4' }}>
-                            {analytics.co_authors_only_count} additional member(s) identified as co-authors but have not made direct commits.
+                        <div 
+                          style={{ 
+                            marginTop: '10px', 
+                            padding: '6px 8px', 
+                            backgroundColor: 'rgba(245, 158, 11, 0.1)', 
+                            border: '1px solid rgba(245, 158, 11, 0.25)', 
+                            borderRadius: '6px', 
+                            display: 'flex', 
+                            alignItems: 'center', 
+                            gap: '6px' 
+                          }}
+                          title={`${analytics.co_authors_only_count} team member(s) tagged via Co-authored-by in commits, but have no direct commits.`}
+                        >
+                          <AlertCircle size={14} color="#f59e0b" style={{ flexShrink: 0 }} />
+                          <span style={{ fontSize: '0.74rem', color: '#f59e0b', fontWeight: '600', lineHeight: '1.3' }}>
+                            +{analytics.co_authors_only_count} co-author{analytics.co_authors_only_count > 1 ? 's' : ''} (no direct commits)
                           </span>
                         </div>
                       )}

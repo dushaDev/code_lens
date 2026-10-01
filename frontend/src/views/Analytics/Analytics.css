@@ -125,7 +125,15 @@
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
   gap: 24px;
-  align-items: start;
+  align-items: stretch;
+}
+
+.analytics-summary-cards .stat-card {
+  height: auto;
+  min-height: 140px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
 }
 
 /* Card Tooltip hover hint styling */
