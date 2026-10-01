@@ -1,4 +1,5 @@
-from typing import List, Dict, Any
+import re
+from typing import List, Dict, Any, Set
 from src.use_cases.interfaces import IProjectRepository, IAuthorRepository, ICommitRepository
 from src.use_cases.author_utils import build_canonical_map
 from src.domain.identity_signals import is_bot_identity
@@ -46,6 +47,12 @@ class GetProjectAnalyticsUseCase:
             for a in authors
         }
 
+        direct_commit_emails: Set[str] = set()
+        co_author_emails: Set[str] = set()
+        
+        # Regex to match Co-authored-by: Name <email>
+        co_author_pattern = re.compile(r"Co-authored-by:\s*(.*?)\s*<(.*?)>", re.IGNORECASE)
+
         # 2. Aggregate commits and lines added per author (resolved to canonical)
         for c in commits:
             canonical_author_id = canonical_id_map.get(c.author_id, c.author_id)
@@ -53,6 +60,18 @@ class GetProjectAnalyticsUseCase:
                 contributions_map[canonical_author_id]["commit_count"] += 1
                 contributions_map[canonical_author_id]["lines_added"] += c.insertions
                 contributions_map[canonical_author_id]["lines_removed"] += c.deletions or 0
+                
+                # Track direct committers
+                direct_commit_emails.add(contributions_map[canonical_author_id]["email"].lower())
+            
+            # Extract co-authors from commit message
+            if c.message:
+                matches = co_author_pattern.findall(c.message)
+                for name, email in matches:
+                    if not is_bot_identity(name, email):
+                        co_author_emails.add(email.lower().strip())
+
+        co_authors_only_count = len(co_author_emails - direct_commit_emails)
 
         # 3. Calculate percentages
         contributions_list = list(contributions_map.values())
@@ -81,5 +100,6 @@ class GetProjectAnalyticsUseCase:
             "total_insertions": total_insertions,
             "distribution_status": status,
             "contributions": contributions_list,
+            "co_authors_only_count": co_authors_only_count,
             "language_distribution": self.project_repo.get_language_distribution(project_id)
         }
