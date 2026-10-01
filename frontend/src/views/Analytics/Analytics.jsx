@@ -911,6 +911,14 @@ export default function Analytics({ project, course, onBack, qualAnalysisState, 
                 </div>
               )}
             </div>
+            {analytics.co_authors_only_count > 0 && (
+              <div style={{ margin: '0 24px 16px 24px', padding: '10px 14px', backgroundColor: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.25)', borderRadius: '8px', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <AlertCircle size={18} color="#f59e0b" style={{ flexShrink: 0 }} />
+                <span style={{ fontSize: '0.85rem', color: '#d97706', fontWeight: '500' }}>
+                  <strong>Co-author Notice:</strong> Detected <strong>{analytics.co_authors_only_count}</strong> additional team member(s) tagged via <code>Co-authored-by</code> in commit messages who have not authored any direct commits.
+                </span>
+              </div>
+            )}
             <div className="table-container">
               <table className="custom-table" style={{ tableLayout: 'fixed', width: '100%' }}>
                 <colgroup>
