@@ -688,15 +688,12 @@ def generate_cloud_report(qual_data: dict, api_key: str, course_name: str, tech_
 
         genai.configure(api_key=clean_key)
         model_candidates = [
-            "gemini-2.0-flash",
-            "gemini-2.0-flash-lite",
-            "gemini-1.5-flash-latest",
-            "gemini-1.5-pro-latest",
-            "gemma-4-26b-a4b-it",
+            "gemini-flash-lite-latest",
+            "gemini-flash-latest",
+            "gemini-3.5-flash-lite",
+            "gemini-3.8-flash",
+            "gemini-3.7-flash",
             GEMINI_MODEL,
-            "gemini-2.5-pro",
-            "gemini-1.5-flash",
-            "gemini-1.5-pro"
         ]
 
         last_error = None

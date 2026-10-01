@@ -28,7 +28,7 @@ def normalize_git_url(url: str) -> str:
 PBKDF2_ITERATIONS = 100000
 
 # Cloud AI Model
-GEMINI_MODEL = "gemini-2.5-flash"
+GEMINI_MODEL = "gemini-flash-latest"
 
 # File Extension to Language Mapping
 EXTENSION_TO_LANGUAGE = {
