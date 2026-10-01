@@ -410,6 +410,7 @@ class CloudReportData(BaseModel):
     suspected_identity_issues: Optional[List[IdentityIssueSchema]] = None
     is_solo_project: Optional[bool] = None
     overall_project_risk_score: Optional[str] = "5/10 (Moderate)"
+    overall_project_quality_score: Optional[str] = "5/10 (Moderate)"
     actionable_recommendations: Optional[List[str]] = []
     # Provenance of the cloud synthesis pass. Set post-generation (not by the LLM);
     # optional so older cached reports without these keys still validate.

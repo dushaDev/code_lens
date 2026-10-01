@@ -388,7 +388,8 @@
     {% if qual_data and qual_data.project_summary %}
     {% set ps = qual_data.project_summary %}
     {% set dq = qual_data.data_quality if qual_data.data_quality is defined and qual_data.data_quality else {} %}
-    {% set rm = report.overall_project_quality_score | quality_meta %}
+    {% set raw_quality = report.overall_project_quality_score or report.overall_project_risk_score %}
+    {% set rm = raw_quality | quality_meta %}
     {% set gm = ps.gini_coefficient | gini_meta %}
     {% set gini_band = 'Balanced' if gm.sev == 'ok' else ('Uneven' if gm.sev == 'warn' else 'Skewed') %}
     {% set flag_count = (ps.red_flags | length) if ps.red_flags is defined and ps.red_flags else 0 %}
@@ -952,9 +953,10 @@
 
     <h2 class="section">6. Final Quality Score & Recommendations</h2>
     
-    {% set rm = report.overall_project_quality_score | quality_meta %}
+    {% set raw_quality = report.overall_project_quality_score or report.overall_project_risk_score %}
+    {% set rm = raw_quality | quality_meta %}
     <div class="risk-score" style="{{ rm.sev | sev }} border-left: 4px solid {{ rm.fg }};">Overall Project Quality Score: 
-        {{ report.overall_project_quality_score }}</div>
+        {{ raw_quality }}</div>
 
     <h3>Actionable Recommendations for Course Lecturer:</h3>
     <ul>

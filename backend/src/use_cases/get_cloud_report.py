@@ -1032,7 +1032,7 @@ def render_pdf_report(
         """Parse a '8/10 (High Quality) ...' quality string into a small dict for the
         scorecard and the final quality box (score, band label, severity + colors)."""
         m = re.search(r"\d+", str(text or ""))
-        score = int(m.group(0)) if m else 10
+        score = int(m.group(0)) if m else 5
         if score >= 8:
             band, key = "High", "ok"
         elif score >= 5:

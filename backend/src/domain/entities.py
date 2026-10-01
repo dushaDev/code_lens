@@ -112,6 +112,7 @@ class CloudReportEntity:
     suspected_identity_issues: Optional[List[IdentityIssueEntity]] = None
     is_solo_project: Optional[bool] = None
     overall_project_risk_score: Optional[str] = "5/10 (Moderate)"
+    overall_project_quality_score: Optional[str] = "5/10 (Moderate)"
     actionable_recommendations: Optional[List[str]] = field(default_factory=list)
     generation_provider: Optional[str] = None
     generation_model: Optional[str] = None
@@ -174,7 +175,8 @@ class CloudReportEntity:
             contributor_authenticity=data.get("contributor_authenticity"),
             suspected_identity_issues=identity_issues,
             is_solo_project=data.get("is_solo_project"),
-            overall_project_risk_score=data.get("overall_project_risk_score", "5/10 (Moderate)"),
+            overall_project_risk_score=data.get("overall_project_quality_score") or data.get("overall_project_risk_score", "5/10 (Moderate)"),
+            overall_project_quality_score=data.get("overall_project_quality_score") or data.get("overall_project_risk_score", "5/10 (Moderate)"),
             actionable_recommendations=data.get("actionable_recommendations") or [],
             generation_provider=data.get("generation_provider"),
             generation_model=data.get("generation_model")
