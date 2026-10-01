@@ -41,6 +41,7 @@ import CommitActivityChart from '../../components/CommitActivityChart';
 import CommitCodeViewModal from '../../components/CommitCodeViewModal';
 import FileBrowserModal from '../../components/FileBrowserModal';
 import { formatDeadline } from '../../utils/courseMeta';
+import { isBotIdentity } from '../../utils/botDetector';
 import { useNavigation } from '../../contexts/NavigationContext';
 import './Analytics.css';
 
@@ -145,12 +146,7 @@ export default function Analytics({ project, course, onBack, qualAnalysisState, 
 
 
 
-  const isBot = (name, email) => {
-    const nameLower = name.toLowerCase();
-    const emailLower = email.toLowerCase();
-    const botKeywords = ['bot', 'actions', 'workflow', 'ci', 'support', 'helper', 'automated', 'npm-owner', 'greenkeeper', 'snyk'];
-    return botKeywords.some(keyword => nameLower.includes(keyword) || emailLower.includes(keyword));
-  };
+  const isBot = (name, email) => isBotIdentity(name, email);
   useEffect(() => {
     const fetchAnalytics = async () => {
       setLoading(true);
@@ -817,8 +813,7 @@ export default function Analytics({ project, course, onBack, qualAnalysisState, 
               <div className="stat-card-body">
                 {(() => {
                   const contribs = analytics.contributions || [];
-                  const isBot = (name) => /\[bot\]|dependabot|github-actions|renovate|actions-user/i.test(name || '');
-                  const botCount = contribs.filter(c => isBot(c.name)).length;
+                  const botCount = contribs.filter(c => isBotIdentity(c.name, c.email)).length;
                   const humanCount = contribs.length - botCount;
 
                   return (

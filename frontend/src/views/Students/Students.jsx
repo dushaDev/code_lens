@@ -15,6 +15,7 @@ import {
   ArrowUpRight
 } from 'lucide-react';
 import Tag from '../../components/Tag';
+import { isBotIdentity } from '../../utils/botDetector';
 import './Students.css';
 
 export default function Students({
@@ -44,13 +45,7 @@ export default function Students({
   const [projectsModalStudent, setProjectsModalStudent] = useState(null);
 
   // 1. Identify bots helper
-  const isBot = (student) => {
-    const nameLower = student.name.toLowerCase();
-    const emailLower = student.email.toLowerCase();
-    const botKeywords = ['bot', 'actions', 'workflow', 'ci', 'support', 'helper', 'automated', 'npm-owner', 'greenkeeper', 'snyk'];
-    
-    return botKeywords.some(keyword => nameLower.includes(keyword) || emailLower.includes(keyword));
-  };
+  const isBot = (student) => isBotIdentity(student?.name, student?.email);
 
   // 2. Filter students
   const filteredStudents = students.filter((student) => {
