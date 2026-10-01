@@ -345,9 +345,12 @@
                     <span style="font-size: 8.5pt; color: #555555;">Report Date:</span> <strong
                         style="font-size: 9pt; color: #333333;">{{ date }}</strong>
                     {% set ia = qual_data.project_summary.identity_analysis if qual_data and qual_data.project_summary and qual_data.project_summary.identity_analysis is defined else {} %}
-                    {% set is_solo = (report.is_solo_project if report.is_solo_project is defined and report.is_solo_project is not none else (qual_data.project_summary.is_solo_project if qual_data and qual_data.project_summary and qual_data.project_summary.is_solo_project is defined else false)) %}
+                    {% set has_proxy = (ia.is_proxy_solo_committer or (ia.co_authors_only_count and ia.co_authors_only_count > 0) or (qual_data and qual_data.project_summary and qual_data.project_summary.has_proxy_committers)) if ia else false %}
+                    {% set is_solo = false if has_proxy else (report.is_solo_project if report.is_solo_project is defined and report.is_solo_project is not none else (qual_data.project_summary.is_solo_project if qual_data and qual_data.project_summary and qual_data.project_summary.is_solo_project is defined else false)) %}
                     <div style="margin-top: 4px;">
-                    {% if is_solo %}
+                    {% if has_proxy %}
+                    <span class="tag-pill" style="background-color: #fef2f2; color: #991b1b; border-left: 3px solid #ef4444; font-weight: bold; font-size: 8pt;">PROXY COMMITTER &bull; 1 Committer + {{ ia.co_authors_only_count }} Co-author(s)</span>
+                    {% elif is_solo %}
                     <span class="tag-pill" style="background-color: #e0f2fe; color: #0369a1; border-left: 3px solid #0284c7; font-weight: bold; font-size: 8pt;">SOLO PROJECT &bull; 1 Contributor</span>
                     {% elif ia and ia.resolved_alias_count and ia.resolved_alias_count > 0 %}
                     <span class="tag-pill" style="background-color: #f3f4f6; color: #374151; border-left: 3px solid #6b7280; font-weight: bold; font-size: 8pt;">IDENTITIES: {{ ia.raw_identity_count }} Git &rarr; {{ ia.canonical_contributor_count }} Contributors</span>
@@ -403,7 +406,13 @@
                 <div class="sc-value">{{ rm.score }}/10</div>
                 <div class="sc-sub">{{ rm.band }}</div>
             </td>
-            {% if is_solo %}
+            {% if has_proxy %}
+            <td style="background-color: #fef2f2; border: 2px solid #ffffff; color: #991b1b;">
+                <div class="sc-label">Work Balance</div>
+                <div class="sc-value">{{ gm.value if gm and gm.value != 'N/A' else 'Skewed' }}</div>
+                <div class="sc-sub">Extreme Disparity &bull; Proxy Commits</div>
+            </td>
+            {% elif is_solo %}
             <td style="background-color: #f0fdf4; border: 2px solid #ffffff; color: #166534;">
                 <div class="sc-label">Work Balance</div>
                 <div class="sc-value">N/A</div>
@@ -724,10 +733,14 @@
 
     {# ── Contributor Identity & Authenticity Assessment ── #}
     {% set identity_issues = report.suspected_identity_issues or (ia.all_issues if ia and ia.all_issues is defined else []) %}
-    {% if identity_issues or report.contributor_authenticity or is_solo %}
+    {% if identity_issues or report.contributor_authenticity or is_solo or has_proxy %}
     <h3 style="margin-top: 14px; margin-bottom: 4px; color: #1f4268;">Contributor Identity &amp; Authenticity Signals</h3>
     {% if report.contributor_authenticity %}
     <div style="margin-bottom: 8px; font-size: 8.5pt;">{{ report.contributor_authenticity | md }}</div>
+    {% elif has_proxy %}
+    <div class="section-note" style="border-left: 3px solid #ef4444; background-color: #fef2f2; color: #991b1b; padding: 6px 10px; margin-bottom: 8px;">
+        <strong>Warning &bull; Proxy Committer Pattern:</strong> This project has 1 committer pushing all repository commits on behalf of {{ ia.co_authors_only_count }} co-author(s) tagged via <code>Co-authored-by</code>. The co-authors have 0 direct commits, representing extreme workload imbalance and free-riding risk. Lecturer interview required.
+    </div>
     {% elif is_solo %}
     <div class="section-note">This project is confirmed as a single-contributor submission. Workload balance, collusion, and free-riding checks are marked not applicable.</div>
     {% endif %}
@@ -754,6 +767,7 @@
                     {% elif issue.kind == 'shared_account' %}Shared Account
                     {% elif issue.kind == 'pushed_by_other' %}Proxy Push / Committer Divergence
                     {% elif issue.kind == 'cross_submission' %}Cross-Submission
+                    {% elif issue.kind == 'proxy_committer' %}Proxy Committer / Co-author Discrepancy
                     {% else %}{{ issue.kind | replace('_', ' ') | title }}{% endif %}
                 </td>
                 <td>

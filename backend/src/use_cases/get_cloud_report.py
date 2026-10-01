@@ -260,7 +260,8 @@ def build_gemini_prompt(qual_data: dict, course_name: str, tech_requirements: Op
     low_coverage_warning = (coverage_pct < 25.0) or (sampled_commits < total_commits)
     
     identity_analysis = ps.get("identity_analysis") or {}
-    is_single_contributor = identity_analysis.get("is_solo_project", len(contributors) <= 1)
+    has_proxy = bool(identity_analysis.get("has_proxy_committers") or ps.get("has_proxy_committers"))
+    is_single_contributor = False if has_proxy else identity_analysis.get("is_solo_project", len(contributors) <= 1)
     raw_id_count = identity_analysis.get("raw_identity_count", len(contributors))
     canonical_count = identity_analysis.get("canonical_contributor_count", len(contributors))
     
@@ -299,6 +300,15 @@ def build_gemini_prompt(qual_data: dict, course_name: str, tech_requirements: Op
             members_str = ", ".join(issue.get("members", []))
             ev_str = "; ".join(issue.get("evidence", []))
             identity_lines.append(f"    * {members_str}: {ev_str}")
+
+    proxy_committers = identity_analysis.get("proxy_committers", [])
+    if proxy_committers:
+        identity_lines.append("  - Proxy Committer & Co-Author Discrepancies:")
+        for issue in proxy_committers:
+            members_str = ", ".join(issue.get("members", []))
+            ev_str = "; ".join(issue.get("evidence", []))
+            conf = issue.get("confidence", "HIGH")
+            identity_lines.append(f"    * [{conf} CONFIDENCE] {members_str}: {ev_str}")
 
     identity_block = "\n".join(identity_lines) if identity_lines else "  No identity anomalies detected."
 
@@ -466,7 +476,8 @@ Your task is to analyze the provided commit activity payload for a student softw
 4. NO DEADLINE RULE: If Deadline Configured is False, do NOT praise or criticize submission pacing or deadline compliance. State explicitly: "Pacing not tracked (no deadline configured)".
 5. ZERO HALLUCINATED METRICS: Do not invent any numbers, commit counts, or percentages not present in the payload.
 6. CONTRIBUTOR AUTHENTICITY & SPLIT IDENTITIES: Name similarity, matching usernames, and shared accounts are DECISION-SUPPORT SIGNALS, NOT PROOF of wrongdoing. Never assert academic misconduct from identity signals alone; state findings objectively as "possible split identity detected, requires lecturer verification".
-7. SOLO PROJECT WORKLOAD RULE: If Single Contributor Project is True (or is_solo_project is True), explicitly state: "Single-contributor submission — NOT a group project; work distribution and teamwork metrics are not applicable (N/A)."
+7. SOLO PROJECT WORKLOAD RULE: If Single Contributor Project is True (or is_solo_project is True) AND there are NO proxy committers, explicitly state: "Single-contributor submission — NOT a group project; work distribution and teamwork metrics are not applicable (N/A)."
+8. PROXY COMMITTER & CO-AUTHOR RULE: If Proxy Committer Discrepancies are flagged or a student has 0 direct commits and is flagged as a co-author, evaluate that student's verdict as "Unverified (Co-author, 0 direct commits pushed)". Explicitly note that they were acknowledged via Git 'Co-authored-by' metadata but pushed 0 standalone commits, requiring educator interview. Never assert misconduct, but clearly flag extreme workload disparity.
 
 === PROJECT & COURSE CONTEXT ===
 Course: {course_name}
@@ -788,6 +799,25 @@ def generate_cloud_report(qual_data: dict, api_key: str, course_name: str, tech_
                         score_unverified=bool(c_stats.get("score_unverified", False)),
                     )
                     row.verdict = apply_verdict_band(row.verdict, band)
+
+                # Ensure non-committing co-authors are represented in student_evaluations
+                existing_names = {str(row.student_name or "").strip().lower() for row in report_data.student_evaluations}
+                for c_key, c_data in (qual_data.get("contributors", {}) or {}).items():
+                    if isinstance(c_data, dict) and c_data.get("is_co_author_only"):
+                        c_name = c_data.get("author_name") or c_key
+                        if c_name.strip().lower() not in existing_names:
+                            from src.domain.entities import StudentReportEntity
+                            report_data.student_evaluations.append(
+                                StudentReportEntity(
+                                    student_name=c_name,
+                                    commits_summary="0 commits (Co-author)",
+                                    substance_breakdown="0 direct changes",
+                                    pacing_and_deadlines="No commits pushed",
+                                    quality_and_integrity_signals="Proxy committer: tagged via Co-authored-by in commit messages",
+                                    contribution_areas="None (code proxy-committed)",
+                                    verdict="Unverified (Co-author, 0 direct commits pushed)"
+                                )
+                            )
 
             print(f"[CLOUD-REPORT-LOG] [USE-CASE] Attempt {attempt}: Successfully validated Pydantic CloudReportData model!")
             return report_data

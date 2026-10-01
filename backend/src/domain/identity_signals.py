@@ -209,31 +209,91 @@ def analyze_identity_signals(
         canonical_groups[c_id].append(rec)
 
     # -----------------------------------------------------------------------
+    # (Co-Authors / Proxy Committer Extraction)
+    # -----------------------------------------------------------------------
+    co_author_pattern = re.compile(r"Co-authored-by:\s*(.*?)\s*<(.*?)>", re.IGNORECASE)
+    direct_commit_emails = {rec.email.lower() for rec in author_records.values() if rec.email}
+    co_authors_dict: Dict[str, str] = {}  # email -> name
+
+    if commits:
+        for c in commits:
+            msg = c.get("message")
+            if msg:
+                for match in co_author_pattern.findall(msg):
+                    co_name, co_email = match
+                    co_name = co_name.strip()
+                    co_email = co_email.strip().lower()
+                    if co_email and not is_bot_identity(co_name, co_email):
+                        if co_email not in direct_commit_emails and co_email not in co_authors_dict:
+                            co_authors_dict[co_email] = co_name
+
+    co_authors_no_commits = [
+        {"name": name, "email": email}
+        for email, name in co_authors_dict.items()
+    ]
+    co_authors_only_count = len(co_authors_no_commits)
+
+    # -----------------------------------------------------------------------
     # (A) Solo Project Detection
     # -----------------------------------------------------------------------
     raw_identity_count = len(author_records)
     canonical_contributor_count = len(canonical_groups)
-    is_solo_project = (canonical_contributor_count == 1)
     resolved_alias_count = max(0, raw_identity_count - canonical_contributor_count)
 
-    if is_solo_project:
-        if raw_identity_count > 1:
+    is_proxy_solo_committer = False
+    if canonical_contributor_count == 1:
+        if co_authors_only_count > 0:
+            is_solo_project = False
+            is_proxy_solo_committer = True
+            committer_name = next(iter(author_records.values())).name if author_records else "1 committer"
             identity_summary = (
-                f"Single-contributor submission ({raw_identity_count} Git identities "
-                f"consolidated to 1 contributor). Teamwork and workload distribution metrics are N/A."
+                f"Proxy committer group project: {committer_name} pushed all commits on behalf of "
+                f"{co_authors_only_count} co-author(s). Workload disparity is extreme."
             )
         else:
-            identity_summary = (
-                "Single-contributor submission. Teamwork and workload distribution metrics are N/A."
-            )
+            is_solo_project = True
+            if raw_identity_count > 1:
+                identity_summary = (
+                    f"Single-contributor submission ({raw_identity_count} Git identities "
+                    f"consolidated to 1 contributor). Teamwork and workload distribution metrics are N/A."
+                )
+            else:
+                identity_summary = (
+                    "Single-contributor submission. Teamwork and workload distribution metrics are N/A."
+                )
     elif resolved_alias_count > 0:
+        is_solo_project = False
         identity_summary = (
             f"Multi-contributor project ({raw_identity_count} Git identities resolved "
             f"to {canonical_contributor_count} distinct contributors)."
         )
     else:
+        is_solo_project = False
         identity_summary = (
             f"Multi-contributor project ({canonical_contributor_count} distinct contributors)."
+        )
+
+    proxy_committers: List[IdentityIssue] = []
+    if co_authors_only_count > 0:
+        committer_rec = next(iter(author_records.values())) if author_records else None
+        committer_label = f"{committer_rec.name} <{committer_rec.email}>" if committer_rec else "Single Committer"
+        proxy_committers.append(
+            IdentityIssue(
+                kind="proxy_committer",
+                confidence="HIGH",
+                members=[committer_label] + [f"{c['name']} <{c['email']}>" for c in co_authors_no_commits],
+                evidence=[
+                    f"{co_authors_only_count} team member(s) ({', '.join(c['name'] for c in co_authors_no_commits)}) "
+                    f"were tagged via Co-authored-by in Git commit messages, but have authored 0 direct commits.",
+                    f"All repository commits were pushed exclusively by {committer_label}.",
+                ],
+                recommended_action=(
+                    "Lecturer verification required: Interview group members to verify individual contributions, "
+                    "offline pair programming, or proxy commit practices."
+                ),
+                author_ids=list(author_records.keys()),
+                matched_tokens=[c["email"] for c in co_authors_no_commits],
+            )
         )
 
     suspected_same_person: List[IdentityIssue] = []
@@ -427,15 +487,20 @@ def analyze_identity_signals(
 
     # Combine all issues
     all_issues = (
-        suspected_same_person + shared_accounts + pushed_by_other + cross_submissions
+        proxy_committers + suspected_same_person + shared_accounts + pushed_by_other + cross_submissions
     )
 
     return {
         "is_solo_project": is_solo_project,
+        "is_proxy_solo_committer": is_proxy_solo_committer,
+        "has_proxy_committers": co_authors_only_count > 0,
+        "co_authors_only_count": co_authors_only_count,
+        "co_authors_no_commits": co_authors_no_commits,
         "canonical_contributor_count": canonical_contributor_count,
         "raw_identity_count": raw_identity_count,
         "resolved_alias_count": resolved_alias_count,
         "identity_summary": identity_summary,
+        "proxy_committers": [i.to_dict() for i in proxy_committers],
         "suspected_same_person": [i.to_dict() for i in suspected_same_person],
         "shared_accounts": [i.to_dict() for i in shared_accounts],
         "pushed_by_other": [i.to_dict() for i in pushed_by_other],

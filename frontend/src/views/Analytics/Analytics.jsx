@@ -628,7 +628,8 @@ export default function Analytics({ project, course, onBack, qualAnalysisState, 
           {/* Summary metrics */}
           <div className="analytics-summary-cards">
             {(() => {
-              const isSolo = qualData?.project_summary?.is_solo_project ?? (qualData?.project_summary?.identity_analysis?.is_solo_project ?? (analytics.contributions?.length === 1));
+              const hasProxy = (analytics?.co_authors_only_count > 0) || Boolean(qualData?.project_summary?.has_proxy_committers || qualData?.project_summary?.is_proxy_solo_committer);
+              const isSolo = hasProxy ? false : (qualData?.project_summary?.is_solo_project ?? (qualData?.project_summary?.identity_analysis?.is_solo_project ?? (analytics.contributions?.length === 1)));
               return (
                 <div className="stat-card card" style={{ position: 'relative' }}>
                   <div className="stat-card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
@@ -1710,12 +1711,14 @@ export default function Analytics({ project, course, onBack, qualAnalysisState, 
               const suspected = (ia.suspected_same_person || []).filter(issue => !isMergedIssue(issue));
               const shared = (ia.shared_accounts || []).filter(issue => !isMergedIssue(issue));
               const pushed = (ia.pushed_by_other || []).filter(issue => !isMergedIssue(issue));
-              const isSolo = ia.is_solo_project;
-              const hasSignals = suspected.length > 0 || shared.length > 0 || pushed.length > 0;
+              const proxies = ia.proxy_committers || [];
+              const hasProxy = Boolean(ia.is_proxy_solo_committer || (ia.co_authors_only_count > 0) || proxies.length > 0);
+              const isSolo = hasProxy ? false : ia.is_solo_project;
+              const hasSignals = suspected.length > 0 || shared.length > 0 || pushed.length > 0 || proxies.length > 0;
 
               if (!hasSignals && !isSolo) return null;
 
-              const isHigh = suspected.some(s => s.confidence === 'HIGH');
+              const isHigh = suspected.some(s => s.confidence === 'HIGH') || proxies.length > 0;
               const alertColor = isHigh ? '#ef4444' : hasSignals ? '#f59e0b' : '#0284c7';
               const alertBg = isHigh ? 'rgba(239, 68, 68, 0.04)' : hasSignals ? 'rgba(245, 158, 11, 0.04)' : 'rgba(2, 132, 199, 0.04)';
               const alertBorder = isHigh ? 'rgba(239, 68, 68, 0.2)' : hasSignals ? 'rgba(245, 158, 11, 0.2)' : 'rgba(2, 132, 199, 0.2)';
@@ -1813,6 +1816,37 @@ export default function Analytics({ project, course, onBack, qualAnalysisState, 
                       </div>
                     );
                   })}
+
+                  {/* If Proxy Committer issue exists */}
+                  {proxies.length > 0 && proxies.map((issue, idx) => (
+                    <div
+                      key={`proxy-${idx}`}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        flexWrap: 'wrap',
+                        gap: '12px',
+                        paddingTop: (idx > 0 || suspected.length > 0) ? '10px' : '0',
+                        borderTop: (idx > 0 || suspected.length > 0) ? '1px solid var(--border-color)' : 'none'
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'flex-start', gap: '14px', minWidth: 0 }}>
+                        <AlertCircle size={22} style={{ color: '#ef4444', flexShrink: 0, marginTop: '2px' }} />
+                        <div>
+                          <div style={{ fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.6px', fontWeight: '700', color: '#ef4444' }}>
+                            Proxy Committer / Extreme Workload Disparity
+                          </div>
+                          <div style={{ fontSize: '0.88rem', fontWeight: '600', color: 'var(--text-main)', marginTop: '2px' }}>
+                            {issue.evidence?.[0] || 'Co-authors detected via commit messages with 0 standalone commits.'}
+                          </div>
+                          <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: '2px' }}>
+                            {issue.recommended_action}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
 
                   {/* If Solo project and no split identities */}
                   {isSolo && suspected.length === 0 && (
@@ -2432,7 +2466,14 @@ export default function Analytics({ project, course, onBack, qualAnalysisState, 
                                 ) : getQualityBadge(qualityScore)}
                               </td>
                               <td>
-                                {isFreeRider ? (
+                                {info.is_co_author_only ? (
+                                  <Tag 
+                                    text="Proxy Co-author" 
+                                    variant="warning" 
+                                    style={{ fontSize: '10px', padding: '3px 6px', fontWeight: '700' }}
+                                    title="Tagged via Co-authored-by in commit messages; 0 direct commits"
+                                  />
+                                ) : isFreeRider ? (
                                   <Tag 
                                     text="Free-rider Risk" 
                                     variant="danger" 

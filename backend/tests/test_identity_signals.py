@@ -132,3 +132,28 @@ def test_pushed_by_other_commits():
     issue = res["pushed_by_other"][0]
     assert issue["kind"] == "pushed_by_other"
     assert "75%" in issue["evidence"][0]
+
+
+def test_proxy_committer_detection():
+    authors = [{"id": 1, "name": "Alice", "email": "alice@university.edu"}]
+    commits = [
+        {
+            "author_id": 1,
+            "message": "feat: add login\n\nCo-authored-by: Bob <bob@university.edu>\nCo-authored-by: Charlie <charlie@university.edu>"
+        },
+        {
+            "author_id": 1,
+            "message": "fix: bug\n\nCo-authored-by: Bob <bob@university.edu>"
+        }
+    ]
+    res = analyze_identity_signals(authors=authors, commits=commits)
+    assert res["is_solo_project"] is False
+    assert res["is_proxy_solo_committer"] is True
+    assert res["has_proxy_committers"] is True
+    assert res["co_authors_only_count"] == 2
+    assert len(res["proxy_committers"]) == 1
+    issue = res["proxy_committers"][0]
+    assert issue["kind"] == "proxy_committer"
+    assert issue["confidence"] == "HIGH"
+    assert "Bob" in issue["evidence"][0]
+    assert "Charlie" in issue["evidence"][0]

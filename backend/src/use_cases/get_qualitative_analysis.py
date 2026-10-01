@@ -475,6 +475,7 @@ class GetQualitativeAnalysisUseCase:
                 "committer_email": getattr(c, "committer_email", None),
                 "committer_name": getattr(c, "committer_name", None),
                 "hash": c.hash,
+                "message": c.message,
             }
             for c in commits
         ]
@@ -484,12 +485,15 @@ class GetQualitativeAnalysisUseCase:
             canonical_id_map=canonical_id_map,
         )
         is_solo = identity_analysis["is_solo_project"]
+        co_authors_no_commits = identity_analysis.get("co_authors_no_commits", [])
 
         if is_solo:
             gini_val = 0.0
             gini_status = "N/A (Single Contributor)"
         else:
-            gini_val = calculate_gini(contrib_commit_counts)
+            # Factor in non-committing co-authors as 0-commit contributors for realistic inequality assessment
+            gini_commit_counts = list(contrib_commit_counts) + [0] * len(co_authors_no_commits)
+            gini_val = calculate_gini(gini_commit_counts)
             gini_status = get_gini_status(gini_val)
 
         # Pre-calculate total lines of code changed (LOC) across the project
@@ -707,6 +711,55 @@ class GetQualitativeAnalysisUseCase:
                 }
             }
 
+        # Add any co-authors who have 0 direct commits to contributors_data
+        for idx, co in enumerate(co_authors_no_commits):
+            co_name = co["name"]
+            co_email = co["email"]
+            co_key = co_name
+            if co_key in contributors_data:
+                co_key = f"{co_name} ({co_email})"
+
+            contributors_data[co_key] = {
+                "author_id": -(idx + 1),
+                "canonical_author_id": -(idx + 1),
+                "author_name": co_name,
+                "email": co_email,
+                "is_solo": False,
+                "is_co_author_only": True,
+                "stats": {
+                    "total_project_commits": 0,
+                    "sampled_commits": 0,
+                    "commit_share_percentage": 0.0,
+                    "loc_share_percentage": 0.0,
+                    "lines_added": 0,
+                    "lines_removed": 0,
+                    "lines_changed": 0,
+                    "type_distribution": {},
+                    "substance_distribution": {"substantial": 0, "moderate": 0, "trivial": 0},
+                    "vague_message_percentage": 0,
+                    "message_mismatch_percentage": 0,
+                    "security_risk_commits": 0,
+                    "code_smell_distribution": {},
+                    "architecture_issue_distribution": {},
+                    "late_commits": 0 if deadline else None,
+                    "commits_near_deadline": 0 if deadline else None,
+                    "timing_pattern": "No direct commits (Co-author tagged in messages)",
+                    "ai_quality_score": 0,
+                    "score_unverified": True,
+                    "free_rider_suspected": True,
+                    "meaningful_work_deductions": 0,
+                    "detected_red_flags": [
+                        "Proxy committer pattern: tagged as co-author in commit messages, but authored 0 direct commits"
+                    ],
+                    "ownership_areas": []
+                },
+                "examples": {
+                    "substantial_commits": [],
+                    "trivial_commits": [],
+                    "after_deadline_commits": None
+                }
+            }
+
         # ── Code Resurrection Check ───────────────────────────────────────────
         resurrection_flags = []
         deleted_snippets = []
@@ -899,6 +952,10 @@ class GetQualitativeAnalysisUseCase:
             "substantial_to_trivial_ratio": round(proj_substance_dist["substantial"] / max(1, proj_substance_dist["trivial"]), 2) if proj_substance_dist["trivial"] > 0 or proj_substance_dist["substantial"] > 0 else None,
             "identity_analysis": identity_analysis,
             "is_solo_project": is_solo,
+            "is_proxy_solo_committer": identity_analysis.get("is_proxy_solo_committer", False),
+            "has_proxy_committers": len(co_authors_no_commits) > 0,
+            "co_authors_only_count": len(co_authors_no_commits),
+            "co_authors_no_commits": co_authors_no_commits,
             "excluded_bots": excluded_bot_names,
         }
 
