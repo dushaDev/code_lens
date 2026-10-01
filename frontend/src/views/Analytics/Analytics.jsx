@@ -32,7 +32,8 @@ import {
   Sparkles,
   ChevronRight,
   Check,
-  GitMerge
+  GitMerge,
+  ExternalLink
 } from 'lucide-react';
 import Tag from '../../components/Tag';
 import Tooltip from '../../components/Tooltip';
@@ -542,10 +543,35 @@ export default function Analytics({ project, course, onBack, qualAnalysisState, 
     );
   }
 
+  // Calculate GitHub / Git Web URL
+  const rawGitUrl = project?.git_url || project?.gitUrl || analytics?.git_url || qualData?.git_url || qualData?.project_summary?.git_url || '';
+  const getGithubWebUrl = (url) => {
+    if (!url || typeof url !== 'string') return null;
+    let clean = url.trim();
+    if (!clean) return null;
+    if (clean.startsWith('git@github.com:')) {
+      clean = 'https://github.com/' + clean.slice('git@github.com:'.length);
+    } else if (clean.startsWith('git@')) {
+      const match = clean.match(/^git@([^:]+):(.+)$/);
+      if (match) {
+        clean = `https://${match[1]}/${match[2]}`;
+      }
+    }
+    if (clean.endsWith('.git')) {
+      clean = clean.slice(0, -4);
+    }
+    clean = clean.replace(/\/+$/, '');
+    if (!clean.startsWith('http://') && !clean.startsWith('https://')) {
+      clean = 'https://' + clean;
+    }
+    return clean;
+  };
+  const githubWebUrl = getGithubWebUrl(rawGitUrl);
+
   return (
     <div className="analytics-view">
       {/* Switcher Tab Row */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px', position: 'relative', minHeight: '42px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px', position: 'relative', minHeight: '42px', flexWrap: 'wrap', gap: '8px' }}>
         {/* Left Side: Back Button */}
         <button 
           type="button"
@@ -588,16 +614,43 @@ export default function Analytics({ project, course, onBack, qualAnalysisState, 
           </button>
         </div>
 
-        {/* Right Side: Web File Browser Button */}
-        <button
-          type="button"
-          className="btn btn-secondary"
-          onClick={() => setShowFileBrowserModal(true)}
-          style={{ zIndex: 10, display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.85rem' }}
-        >
-          <Code size={16} className="blue-text" />
-          <span>Browse Project Files</span>
-        </button>
+        {/* Right Side: Action Buttons */}
+        <div style={{ zIndex: 10, display: 'flex', alignItems: 'center', gap: '8px' }}>
+          {githubWebUrl && (
+            <a
+              href={githubWebUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="btn btn-secondary btn-view-github"
+              title={`View project on GitHub (${githubWebUrl})`}
+            >
+              <svg
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22" />
+              </svg>
+              <span>View on GitHub</span>
+              <ExternalLink size={13} style={{ opacity: 0.65 }} />
+            </a>
+          )}
+
+          <button
+            type="button"
+            className="btn btn-secondary"
+            onClick={() => setShowFileBrowserModal(true)}
+            style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.85rem' }}
+          >
+            <Code size={16} className="blue-text" />
+            <span>Browse Project Files</span>
+          </button>
+        </div>
       </div>
 
       <div className="analytics-header" style={{ borderBottom: '1px solid var(--border-color)', paddingBottom: '10px', marginBottom: '14px' }}>
@@ -614,6 +667,36 @@ export default function Analytics({ project, course, onBack, qualAnalysisState, 
               textTransform: 'uppercase'
             }}>{project.group_no || project.groupNo || 'G-00'}</span>
             <span>{project.name}</span>
+            {githubWebUrl && (
+              <a
+                href={githubWebUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="project-github-badge"
+                title={`Open ${githubWebUrl} in GitHub`}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                  fontSize: '0.75rem',
+                  fontWeight: '600',
+                  color: 'var(--text-muted)',
+                  textDecoration: 'none',
+                  backgroundColor: 'var(--bg-app)',
+                  border: '1px solid var(--border-color)',
+                  padding: '2px 8px',
+                  borderRadius: '4px',
+                  marginLeft: '4px',
+                  transition: 'all 0.15s ease'
+                }}
+              >
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22" />
+                </svg>
+                <span>GitHub</span>
+                <ExternalLink size={10} style={{ opacity: 0.7 }} />
+              </a>
+            )}
             <span style={{ width: '1px', height: '18px', backgroundColor: 'var(--border-color)', display: 'inline-block', margin: '0 4px', alignSelf: 'center' }} />
             <span style={{ fontSize: '0.82rem', fontWeight: '400', color: 'var(--text-muted)', letterSpacing: 'normal' }}>
               {activeTab === 'quantitative'
