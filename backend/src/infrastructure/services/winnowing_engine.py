@@ -17,6 +17,9 @@ from dataclasses import dataclass
 from itertools import combinations
 from typing import Dict, List, Optional, Set, Tuple
 
+from src.domain.constants import HIGH_CONFIDENCE_THRESHOLD
+from src.use_cases.interfaces import ISimilarityEngine
+
 logger = logging.getLogger(__name__)
 
 
@@ -42,13 +45,33 @@ class Fingerprint:
 # =====================================================================
 class FileCollector:
     DEFAULT_EXTENSIONS = {
-        ".py", ".js", ".ts", ".jsx", ".tsx", ".java", ".kt", ".go", ".rs", ".cs", ".cpp", ".c", ".h"
+        # Python
+        ".py",
+        # JavaScript & TypeScript
+        ".js", ".mjs", ".cjs", ".jsx", ".ts", ".mts", ".cts", ".tsx",
+        # Java & Kotlin
+        ".java", ".kt", ".kts",
+        # Dart / Flutter
+        ".dart",
+        # C & C++
+        ".c", ".h", ".cpp", ".cc", ".cxx", ".hpp", ".hxx",
+        # Go & Rust
+        ".go", ".rs",
+        # C# & Swift
+        ".cs", ".swift",
+        # Ruby, Scala, Lua, PHP
+        ".rb", ".erb", ".scala", ".sc", ".lua", ".php", ".phtml",
+        # Shell scripts
+        ".sh", ".bash", ".zsh",
+        # Markup & Stylesheets
+        ".html", ".htm", ".css", ".scss", ".sass"
     }
 
     DEFAULT_EXCLUDED_DIRS = {
         "node_modules", ".git", ".svn", ".hg", "dist", "build", "out", "target", "vendor",
         "bin", "obj", ".idea", ".vscode", "venv", "env", ".venv", "__pycache__", "coverage",
-        "migrations", "static", "public", ".next", ".nuxt", ".svelte-kit", "gen", "generated"
+        "migrations", "static", "public", ".next", ".nuxt", ".svelte-kit", "gen", "generated",
+        ".dart_tool", ".flutter-plugins", ".flutter-plugins-dependencies"
     }
 
     # Exact filename match (lowercase)
@@ -269,7 +292,7 @@ class AstParserService:
     def parse_file(self, full_file_path: str, rel_file_path: str) -> List[TokenMeta]:
         try:
             with open(full_file_path, "r", encoding="utf-8", errors="ignore") as f:
-                content = f.read()
+                content = f.read().replace("\x00", "")
         except OSError as e:
             logger.warning(f"Could not read file {rel_file_path}: {e}", exc_info=e)
             return []
@@ -361,14 +384,15 @@ class MatchDetail:
 class SimilarityComparator:
     def __init__(
         self,
-        file_match_threshold: float = 50.0,  # 50% Hard File Match Threshold
-        high_confidence_threshold: float = 70.0,
-        corpus_stopword_pct: float = 0.12,   # 12% Corpus Stopword Suppression
-        min_run_hashes: int = 30,            # Minimum 30 k-grams (>= 150 contiguous tokens per block)
-        one_to_many_limit: int = 3,
-        min_identifier_overlap_pct: float = 25.0,  # Semantic Divergence Check
-        min_single_run_tokens: int = 150,    # At least ONE single match run >= 150 tokens
-        min_total_matched_tokens: int = 300,  # Total matched tokens >= 300
+        file_match_threshold: float = 25.0,  # Match threshold percentage
+        high_confidence_threshold: float = HIGH_CONFIDENCE_THRESHOLD,  # High confidence threshold percentage
+        corpus_stopword_pct: float = 0.20,   # 20% corpus stopword suppression
+        min_run_hashes: int = 100,           # Minimum 100 k-grams (>= 500 contiguous tokens per block)
+        one_to_many_limit: int = 4,
+        min_identifier_overlap_pct: float = 15.0,
+        min_single_run_tokens: int = 500,    # Strictly require match run >= 500 tokens
+        min_total_matched_tokens: int = 500, # At least 500 total matching tokens required for plagiarism
+        k: int = 5,
     ):
         self.file_match_threshold = file_match_threshold
         self.high_confidence_threshold = high_confidence_threshold
@@ -378,47 +402,8 @@ class SimilarityComparator:
         self.min_identifier_overlap_pct = min_identifier_overlap_pct
         self.min_single_run_tokens = min_single_run_tokens
         self.min_total_matched_tokens = min_total_matched_tokens
+        self.k = k
 
-    def compute_pairwise_similarity(
-        self,
-        project_fingerprints: Dict[int, List[Fingerprint]],
-    ) -> List[Dict]:
-        """
-        Computes pairwise similarity enforcing strict false-positive reduction:
-        1. 50% File-Level Match Threshold
-        2. At least ONE single contiguous match run >= 100 tokens
-        3. Total matched tokens >= 300 tokens
-        4. Structural Specificity
-        5. Corpus-Wide Pattern Suppression
-        6. Semantic Divergence Identifier Check
-        """
-        total_projects = len(project_fingerprints)
-        if total_projects < 2:
-            return []
-
-        # -------------------------------------------------------------
-        # STEP 4: Corpus-Wide Common Pattern Suppression
-        # -------------------------------------------------------------
-        hash_project_occurrence: Dict[int, Set[int]] = {}
-        for proj_id, fp_list in project_fingerprints.items():
-            for fp in fp_list:
-                if fp.hash_value not in hash_project_occurrence:
-                    hash_project_occurrence[fp.hash_value] = set()
-                hash_project_occurrence[fp.hash_value].add(proj_id)
-
-        stopword_threshold = max(2, int(total_projects * self.corpus_stopword_pct))
-        stopword_hashes: Set[int] = {
-            h for h, proj_set in hash_project_occurrence.items()
-            if len(proj_set) > stopword_threshold
-        }
-
-        filtered_project_fp: Dict[int, List[Fingerprint]] = {}
-        project_valid_hash_counts: Dict[int, int] = {}
-
-        for proj_id, fp_list in project_fingerprints.items():
-            valid_fps = [fp for fp in fp_list if fp.hash_value not in stopword_hashes]
-            filtered_project_fp[proj_id] = valid_fps
-            project_valid_hash_counts[proj_id] = len(set(fp.hash_value for fp in valid_fps))
 
     def _evaluate_pair_direct(
         self,
@@ -431,7 +416,7 @@ class SimilarityComparator:
         min_single_run_tokens: Optional[int] = None,
         min_total_matched_tokens: Optional[int] = None,
     ) -> Optional[Dict]:
-        """Directly evaluates pairwise similarity between two project fingerprint streams with custom thresholds."""
+        """Directly evaluates pairwise similarity between two project fingerprint streams with file-aware run matching."""
         thresh = file_match_threshold if file_match_threshold is not None else self.file_match_threshold
         run_h_thresh = min_run_hashes if min_run_hashes is not None else self.min_run_hashes
         single_tokens_thresh = min_single_run_tokens if min_single_run_tokens is not None else self.min_single_run_tokens
@@ -444,103 +429,98 @@ class SimilarityComparator:
         if min_count < 5:
             return None
 
-        # One-to-Many Sanity Check
-        p2_hash_counts: Dict[int, int] = defaultdict(int)
-        for fp in fps2:
-            p2_hash_counts[fp.hash_value] += 1
-
-        p1_hash_counts: Dict[int, int] = defaultdict(int)
+        # Group fingerprints by file
+        fps1_by_file: Dict[str, List[Fingerprint]] = defaultdict(list)
         for fp in fps1:
-            p1_hash_counts[fp.hash_value] += 1
+            fps1_by_file[fp.file_path].append(fp)
 
-        clean_fps1 = [
-            fp for fp in fps1
-            if p2_hash_counts[fp.hash_value] < self.one_to_many_limit
-            and p1_hash_counts[fp.hash_value] < self.one_to_many_limit
-        ]
-        clean_fps2 = [
-            fp for fp in fps2
-            if p2_hash_counts[fp.hash_value] < self.one_to_many_limit
-            and p1_hash_counts[fp.hash_value] < self.one_to_many_limit
-        ]
-
-        fp1_by_hash = defaultdict(list)
-        for idx, fp in enumerate(clean_fps1):
-            fp1_by_hash[fp.hash_value].append((idx, fp))
-
-        fp2_by_hash = defaultdict(list)
-        for idx, fp in enumerate(clean_fps2):
-            fp2_by_hash[fp.hash_value].append((idx, fp))
-
-        matching_pairs = []
-        for h_val, list1 in fp1_by_hash.items():
-            if h_val in fp2_by_hash:
-                for idx1, fp1 in list1:
-                    for idx2, fp2 in fp2_by_hash[h_val]:
-                        matching_pairs.append((idx1, idx2, fp1, fp2))
-
-        if not matching_pairs:
-            return None
-
-        matching_pairs.sort(key=lambda x: (x[0], x[1]))
+        fps2_by_file: Dict[str, List[Fingerprint]] = defaultdict(list)
+        for fp in fps2:
+            fps2_by_file[fp.file_path].append(fp)
 
         match_runs = []
-        visited_pairs = set()
+        max_file_sim = 0.0
 
-        for i, (idx1, idx2, fp1, fp2) in enumerate(matching_pairs):
-            if (idx1, idx2) in visited_pairs:
+        for file_a, f_list_a in fps1_by_file.items():
+            set_a = set(fp.hash_value for fp in f_list_a)
+            if not set_a:
                 continue
 
-            run_fps_a = [fp1]
-            run_fps_b = [fp2]
-            visited_pairs.add((idx1, idx2))
-
-            curr1, curr2 = idx1, idx2
-            while True:
-                next1, next2 = curr1 + 1, curr2 + 1
-                if next1 < len(clean_fps1) and next2 < len(clean_fps2):
-                    n_fp1 = clean_fps1[next1]
-                    n_fp2 = clean_fps2[next2]
-                    if (
-                        n_fp1.hash_value == n_fp2.hash_value
-                        and n_fp1.file_path == fp1.file_path
-                        and n_fp2.file_path == fp2.file_path
-                    ):
-                        run_fps_a.append(n_fp1)
-                        run_fps_b.append(n_fp2)
-                        visited_pairs.add((next1, next2))
-                        curr1, curr2 = next1, next2
-                        continue
-                break
-
-            if len(run_fps_a) >= run_h_thresh:
-                idents_a = set(fp.raw_ident for fp in run_fps_a if fp.raw_ident)
-                idents_b = set(fp.raw_ident for fp in run_fps_b if fp.raw_ident)
-
-                ident_overlap = 100.0
-                if idents_a and idents_b:
-                    shared = idents_a.intersection(idents_b)
-                    min_idents = min(len(idents_a), len(idents_b))
-                    ident_overlap = (len(shared) / min_idents) * 100.0 if min_idents > 0 else 100.0
-
-                if idents_a and idents_b and ident_overlap < self.min_identifier_overlap_pct:
+            for file_b, f_list_b in fps2_by_file.items():
+                set_b = set(fp.hash_value for fp in f_list_b)
+                if not set_b:
                     continue
 
-                match_runs.append({
-                    "file_a": fp1.file_path,
-                    "start_line_a": run_fps_a[0].line_number,
-                    "end_line_a": run_fps_a[-1].line_number,
-                    "file_b": fp2.file_path,
-                    "start_line_b": run_fps_b[0].line_number,
-                    "end_line_b": run_fps_b[-1].line_number,
-                    "run_length_hashes": len(run_fps_a),
-                    "token_span": len(run_fps_a) * 5,
-                    "ident_overlap": round(ident_overlap, 1),
-                    "hashes": [fp.hash_value for fp in run_fps_a],
-                })
+                common = set_a.intersection(set_b)
+                if not common:
+                    continue
+
+                cur_file_sim = (len(common) / min(len(set_a), len(set_b))) * 100.0
+                if cur_file_sim > max_file_sim:
+                    max_file_sim = cur_file_sim
+
+                # Index file B fingerprints by hash value
+                b_by_hash = defaultdict(list)
+                for idx_b, fp_b in enumerate(f_list_b):
+                    b_by_hash[fp_b.hash_value].append((idx_b, fp_b))
+
+                visited_b_indices = set()
+
+                for idx_a, fp_a in enumerate(f_list_a):
+                    if fp_a.hash_value in b_by_hash:
+                        for idx_b, fp_b in b_by_hash[fp_a.hash_value]:
+                            if (idx_a, idx_b) in visited_b_indices:
+                                continue
+
+                            run_fps_a = [fp_a]
+                            run_fps_b = [fp_b]
+                            visited_b_indices.add((idx_a, idx_b))
+
+                            curr_a, curr_b = idx_a, idx_b
+                            while curr_a + 1 < len(f_list_a) and curr_b + 1 < len(f_list_b):
+                                next_a = f_list_a[curr_a + 1]
+                                next_b = f_list_b[curr_b + 1]
+                                if next_a.hash_value == next_b.hash_value:
+                                    run_fps_a.append(next_a)
+                                    run_fps_b.append(next_b)
+                                    visited_b_indices.add((curr_a + 1, curr_b + 1))
+                                    curr_a += 1
+                                    curr_b += 1
+                                else:
+                                    break
+
+                            run_tokens = len(run_fps_a) * self.k
+                            if run_tokens >= single_tokens_thresh:
+                                idents_a = set(fp.raw_ident for fp in run_fps_a if fp.raw_ident)
+                                idents_b = set(fp.raw_ident for fp in run_fps_b if fp.raw_ident)
+
+                                ident_overlap = 100.0
+                                if idents_a and idents_b:
+                                    shared = idents_a.intersection(idents_b)
+                                    min_idents = min(len(idents_a), len(idents_b))
+                                    ident_overlap = (len(shared) / min_idents) * 100.0 if min_idents > 0 else 100.0
+
+                                if idents_a and idents_b and ident_overlap < self.min_identifier_overlap_pct:
+                                    continue
+
+                                match_runs.append({
+                                    "file_a": file_a,
+                                    "start_line_a": run_fps_a[0].line_number,
+                                    "end_line_a": run_fps_a[-1].line_number,
+                                    "file_b": file_b,
+                                    "start_line_b": run_fps_b[0].line_number,
+                                    "end_line_b": run_fps_b[-1].line_number,
+                                    "run_length_hashes": len(run_fps_a),
+                                    "token_span": len(run_fps_a) * self.k,
+                                    "ident_overlap": round(ident_overlap, 1),
+                                    "hashes": [fp.hash_value for fp in run_fps_a],
+                                })
 
         if not match_runs:
             return None
+
+        # Sort match runs by token span descending so largest blocks appear first
+        match_runs.sort(key=lambda r: r["token_span"], reverse=True)
 
         surviving_unique_hashes = set()
         for r in match_runs:
@@ -548,14 +528,15 @@ class SimilarityComparator:
                 surviving_unique_hashes.add(h)
 
         surviving_token_count = len(surviving_unique_hashes)
-        file_match_percentage = (surviving_token_count / min_count) * 100.0
+        overall_match_percentage = (surviving_token_count / min_count) * 100.0
+        final_similarity_score = max(overall_match_percentage, max_file_sim)
 
         max_run_hashes = max(r["run_length_hashes"] for r in match_runs)
         max_run_tokens = max(r["token_span"] for r in match_runs)
-        total_matched_tokens = surviving_token_count * 5
+        total_matched_tokens = surviving_token_count * self.k
 
         if (
-            file_match_percentage >= thresh
+            final_similarity_score >= thresh
             and max_run_tokens >= single_tokens_thresh
             and total_matched_tokens >= total_tokens_thresh
         ):
@@ -578,8 +559,8 @@ class SimilarityComparator:
             return {
                 "project_a_id": p1,
                 "project_b_id": p2,
-                "similarity_score": round(file_match_percentage, 2),
-                "file_match_percentage": round(file_match_percentage, 2),
+                "similarity_score": round(final_similarity_score, 2),
+                "file_match_percentage": round(final_similarity_score, 2),
                 "identifier_overlap_percentage": avg_ident_overlap,
                 "matched_hashes_count": surviving_token_count,
                 "total_matched_tokens": total_matched_tokens,
@@ -587,7 +568,7 @@ class SimilarityComparator:
                 "max_contiguous_run_hashes": max_run_hashes,
                 "max_contiguous_run_tokens": max_run_tokens,
                 "confidence_level": (
-                    "HIGH" if file_match_percentage >= self.high_confidence_threshold else "MEDIUM"
+                    "HIGH" if final_similarity_score >= self.high_confidence_threshold else "MEDIUM"
                 ),
                 "matched_blocks": block_highlights,
             }
@@ -796,4 +777,45 @@ class SimilarityComparator:
 
         results.sort(key=lambda r: r["similarity_score"], reverse=True)
         return results
+
+
+class WinnowingSimilarityEngine(ISimilarityEngine):
+    def extract_project_fingerprints(
+        self,
+        project_dir: str,
+        k: int = 5,
+        w: int = 4,
+        allowed_extensions: Optional[List[str]] = None,
+    ) -> List[Fingerprint]:
+        collector = FileCollector(allowed_extensions=set(allowed_extensions) if allowed_extensions else None)
+        parser = AstParserService()
+        winnowing = WinnowingService(k=k, w=w)
+
+        file_paths = collector.collect_files(project_dir) if project_dir else []
+        tokens = []
+        for rel_file in file_paths:
+            full_path = os.path.join(project_dir, rel_file)
+            clean_rel = rel_file.replace("\\", "/")
+            tokens.extend(parser.parse_file(full_path, clean_rel))
+
+        return winnowing.generate_fingerprints(tokens)
+
+    def compute_pairwise_similarity(
+        self,
+        project_fingerprints_map: dict,
+        similarity_threshold: float = 40.0,
+        k: int = 5,
+    ) -> List[dict]:
+        comparator = SimilarityComparator(file_match_threshold=similarity_threshold, k=k)
+        return comparator.compute_pairwise_similarity(project_fingerprints_map)
+
+    def reanalyze_cluster_pairs(
+        self,
+        cluster_pids: List[int],
+        project_fingerprints: dict,
+        existing_pairs: set,
+    ) -> List[dict]:
+        comparator = SimilarityComparator()
+        return comparator.reanalyze_cluster_pairs(cluster_pids, project_fingerprints, existing_pairs)
+
 

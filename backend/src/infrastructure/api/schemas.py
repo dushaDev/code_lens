@@ -340,6 +340,7 @@ class FileChangeASTResponse(BaseModel):
     filename: str
     language: str
     ast: Optional[ASTNodeResponse] = None
+    error: Optional[str] = None
 
 class SearchResultItem(BaseModel):
     id: str
@@ -387,13 +388,30 @@ class StudentReportRow(BaseModel):
     substance_breakdown: Optional[str] = "N/A"
     pacing_and_deadlines: Optional[str] = "N/A"
     quality_and_integrity_signals: Optional[str] = "N/A"
+    contribution_areas: Optional[str] = "N/A"
     verdict: Optional[str] = "No verdict provided."
+
+class IdentityIssueSchema(BaseModel):
+    kind: str = "split_identity"
+    confidence: str = "MEDIUM"
+    members: List[str] = []
+    evidence: List[str] = []
+    recommended_action: str = ""
+    author_ids: Optional[List[int]] = []
+    matched_tokens: Optional[List[str]] = []
 
 class CloudReportData(BaseModel):
     executive_summary: Optional[str] = "Executive summary not provided."
     work_distribution_and_fairness: Optional[str] = "Work distribution details not provided."
     student_evaluations: Optional[List[StudentReportRow]] = []
     academic_integrity_anomalies: Optional[str] = "No anomalies detailed."
+    contributor_authenticity: Optional[str] = None
+    suspected_identity_issues: Optional[List[IdentityIssueSchema]] = None
+    is_solo_project: Optional[bool] = None
     overall_project_risk_score: Optional[str] = "5/10 (Moderate)"
     actionable_recommendations: Optional[List[str]] = []
+    # Provenance of the cloud synthesis pass. Set post-generation (not by the LLM);
+    # optional so older cached reports without these keys still validate.
+    generation_provider: Optional[str] = None
+    generation_model: Optional[str] = None
 

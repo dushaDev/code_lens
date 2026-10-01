@@ -585,10 +585,6 @@ export default function App() {
   };
 
   const handleMergeAuthors = async (sourceId, targetId) => {
-    if (!window.confirm("Are you sure you want to merge these two author profiles? This will combine their git logs and contribution history.")) {
-      return;
-    }
-
     const token = localStorage.getItem('token');
 
     try {
@@ -704,6 +700,7 @@ export default function App() {
               qualAnalysisState={qualAnalysisState.projectId === selectedProject.id ? qualAnalysisState : { projectId: selectedProject.id, status: 'idle', progress: 0, message: '', data: null }}
               onStartQualitative={(forceRefresh, mode) => triggerQualitativeAnalysis(selectedProject.id, forceRefresh, mode)}
               onStopQualitative={() => handleStopQualitative(selectedProject.id)}
+              onMergeAuthors={handleMergeAuthors}
             />
           ) : (
             <>

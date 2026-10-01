@@ -58,6 +58,22 @@ def init_db():
             if 'status' not in sim_columns:
                 with engine.begin() as conn:
                     conn.execute(text("ALTER TABLE similarity_reports ADD COLUMN status VARCHAR DEFAULT 'Needs Review';"))
+
+        # Proactively inspect and run schema migration for author and commit identity signals
+        if inspector.has_table('authors'):
+            author_columns = [col['name'] for col in inspector.get_columns('authors')]
+            if 'name_variants' not in author_columns:
+                with engine.begin() as conn:
+                    conn.execute(text("ALTER TABLE authors ADD COLUMN name_variants TEXT NULL;"))
+
+        if inspector.has_table('commits'):
+            commit_columns = [col['name'] for col in inspector.get_columns('commits')]
+            if 'committer_email' not in commit_columns:
+                with engine.begin() as conn:
+                    conn.execute(text("ALTER TABLE commits ADD COLUMN committer_email VARCHAR NULL;"))
+            if 'committer_name' not in commit_columns:
+                with engine.begin() as conn:
+                    conn.execute(text("ALTER TABLE commits ADD COLUMN committer_name VARCHAR NULL;"))
     except Exception as e:
         logger.exception("Database migration check failed/skipped")
 

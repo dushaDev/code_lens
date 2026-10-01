@@ -3,10 +3,11 @@ import json
 import logging
 import httpx
 from typing import Optional
+from src.use_cases.interfaces import ILocalAIService
 
 logger = logging.getLogger(__name__)
 
-class LocalAIService:
+class LocalAIService(ILocalAIService):
     def __init__(self, model_name: str = "qwen2.5-coder:3b"):
         self.model_name = model_name
 
@@ -287,7 +288,7 @@ Respond ONLY with a JSON object conforming exactly to the one-shot example forma
                 model=self.model_name,
                 messages=[{'role': 'user', 'content': prompt}],
                 format="json",
-                options={'num_predict': 120, 'temperature': 0.1}
+                options={'num_predict': 250, 'temperature': 0.1}
             )
             result = json.loads(response['message']['content'])
             if validate_labels(result):
@@ -315,7 +316,7 @@ Respond ONLY with a corrected valid JSON object:"""
                     model=self.model_name,
                     messages=[{'role': 'user', 'content': retry_prompt}],
                     format="json",
-                    options={'num_predict': 120, 'temperature': 0.1}
+                    options={'num_predict': 250, 'temperature': 0.1}
                 )
                 result = json.loads(response['message']['content'])
                 if validate_labels(result):

@@ -6,6 +6,7 @@ import stat
 import subprocess
 import json
 import logging
+from typing import Optional, List, Dict, Any
 from datetime import timezone
 from sqlalchemy.orm import Session
 from pydriller import Repository
@@ -15,6 +16,7 @@ from src.domain.constants import (
     CLONE_TIMEOUT_SECONDS,
     MAX_REPO_SIZE_BYTES,
     GIT_ALLOWED_PROTOCOLS,
+    normalize_git_url,
 )
 from src.use_cases.interfaces import IGitExtractorService
 from src.infrastructure.database.models import ProjectModel, AuthorModel, CommitModel, FileChangeModel, BranchModel
@@ -22,12 +24,24 @@ from src.infrastructure.services.ast_parser import parse_source, get_language_fo
 
 logger = logging.getLogger(__name__)
 
+_normalize_git_url = normalize_git_url
+
 
 def clean_branch_short_name(full_name: str) -> str:
     parts = [p.strip() for p in full_name.split("/") if p.strip()]
     if len(parts) >= 2:
         return "/".join(parts[-2:])
     return "/".join(parts)
+
+
+def _sanitize_db_string(val: Optional[str]) -> Optional[str]:
+    """Strip NUL (0x00) characters to prevent PostgreSQL ValueError crashes."""
+    if val is None:
+        return None
+    if "\x00" in val:
+        return val.replace("\x00", "")
+    return val
+
 
 
 # Compiled regex for ignoring build, dependency, and cache directories/files
@@ -191,7 +205,13 @@ def _run_git_clone_bounded(
     Raises RuntimeError (mapped to HTTP 422 by the router) on any clone failure,
     timeout, or size-cap breach — the message is safe to surface to the user.
     """
-    cmd = ["git", "clone", "-c", "core.longpaths=true", "--", git_url, dest]
+    cmd = [
+        "git", "clone",
+        "-c", "core.longpaths=true",
+        "-c", "http.postBuffer=524288000",
+        "-c", "core.compression=0",
+        "--", git_url, dest
+    ]
     try:
         proc = subprocess.Popen(
             cmd,
@@ -405,22 +425,37 @@ class PyDrillerService(IGitExtractorService):
 
             for commit in repo.traverse_commits():
                 # 1. Author Resolution
-                author_email = commit.author.email
-                author_name = commit.author.name
+                author_email = _sanitize_db_string(commit.author.email) if (commit.author and commit.author.email) else "unknown@codelens.local"
+                author_name = _sanitize_db_string(commit.author.name) if (commit.author and commit.author.name) else "Unknown Contributor"
 
                 email_lower = author_email.lower()
                 if email_lower in mailmap_data:
                     mapped = mailmap_data[email_lower]
-                    author_email = mapped["email"]
-                    if mapped["name"]:
-                        author_name = mapped["name"]
+                    author_email = _sanitize_db_string(mapped["email"]) or author_email
+                    if mapped.get("name"):
+                        author_name = _sanitize_db_string(mapped["name"]) or author_name
 
+                raw_author_name = _sanitize_db_string(commit.author.name or author_name) if commit.author else author_name
                 author = self.db.query(AuthorModel).filter(AuthorModel.email == author_email).first()
                 if not author:
-                    author = AuthorModel(name=author_name, email=author_email)
+                    variants = [raw_author_name] if raw_author_name else ([author_name] if author_name else [])
+                    author = AuthorModel(
+                        name=author_name,
+                        email=author_email,
+                        name_variants=_sanitize_db_string(json.dumps(variants)) if variants else None,
+                    )
                     self.db.add(author)
                     self.db.flush()
                     new_authors_count += 1
+                else:
+                    # Update name_variants if a new display name is seen
+                    try:
+                        variants = json.loads(author.name_variants) if author.name_variants else [author.name]
+                    except Exception:
+                        variants = [author.name] if author.name else []
+                    if raw_author_name and raw_author_name not in variants:
+                        variants.append(raw_author_name)
+                        author.name_variants = _sanitize_db_string(json.dumps(variants))
 
                 # Check if commit already exists in DB to prevent UniqueViolation on commits_pkey during sync
                 if commit.hash in existing_commit_hashes:
@@ -434,11 +469,11 @@ class PyDrillerService(IGitExtractorService):
                                     BranchModel.name == b_name
                                 ).first()
                                 if not branch_model:
-                                    short = clean_branch_short_name(b_name)
+                                    clean_short = _sanitize_db_string(clean_branch_short_name(b_name)) or "branch"
                                     branch_model = BranchModel(
                                         project_id=project.id,
-                                        name=b_name,
-                                        short_name=short,
+                                        name=_sanitize_db_string(b_name) or "branch",
+                                        short_name=clean_short,
                                     )
                                     self.db.add(branch_model)
                                     self.db.flush()
@@ -452,7 +487,7 @@ class PyDrillerService(IGitExtractorService):
 
                 # 2. Squash Heuristics
                 is_squash = False
-                msg = commit.msg or ""   # guard: PyDriller may return None for empty commit messages
+                msg = _sanitize_db_string(commit.msg or "")   # guard: PyDriller may return None for empty commit messages
                 if commit.insertions > 1000:
                     is_squash = True
                 elif "Co-authored-by:" in msg:
@@ -483,6 +518,9 @@ class PyDrillerService(IGitExtractorService):
                     else commit.committer_date
                 )
 
+                committer_email = _sanitize_db_string(commit.committer.email) if commit.committer else None
+                committer_name = _sanitize_db_string(commit.committer.name) if commit.committer else None
+
                 db_commit = CommitModel(
                     hash=commit.hash,
                     project_id=project.id,
@@ -492,6 +530,8 @@ class PyDrillerService(IGitExtractorService):
                     insertions=kept_insertions,
                     deletions=kept_deletions,
                     is_squash_suspected=is_squash,
+                    committer_email=committer_email,
+                    committer_name=committer_name,
                 )
                 self.db.add(db_commit)
                 total_commits += 1
@@ -499,17 +539,18 @@ class PyDrillerService(IGitExtractorService):
                 # 4b. Link branches
                 if commit.branches:
                     for b_name in commit.branches:
-                        cache_key = (project.id, b_name)
+                        clean_b_name = _sanitize_db_string(b_name) or "branch"
+                        cache_key = (project.id, clean_b_name)
                         if cache_key not in branch_cache:
                             branch_model = self.db.query(BranchModel).filter(
                                 BranchModel.project_id == project.id,
-                                BranchModel.name == b_name
+                                BranchModel.name == clean_b_name
                             ).first()
                             if not branch_model:
-                                short = clean_branch_short_name(b_name)
+                                short = _sanitize_db_string(clean_branch_short_name(clean_b_name)) or clean_b_name
                                 branch_model = BranchModel(
                                     project_id=project.id,
-                                    name=b_name,
+                                    name=clean_b_name,
                                     short_name=short,
                                 )
                                 self.db.add(branch_model)
@@ -520,7 +561,7 @@ class PyDrillerService(IGitExtractorService):
 
                 # 5. Save File Changes with AST metrics
                 for mod in kept_files:
-                    filename = mod.new_path or mod.old_path or "unknown"
+                    filename = _sanitize_db_string(mod.new_path or mod.old_path or "unknown")
 
                     complexity_score = None
                     function_count = None
@@ -528,11 +569,12 @@ class PyDrillerService(IGitExtractorService):
                     lang = get_language_for_file(filename)
                     if lang and mod.source_code:
                         try:
-                            metrics = parse_source(mod.source_code, lang)
+                            clean_source = _sanitize_db_string(mod.source_code)
+                            metrics = parse_source(clean_source, lang)
                             if metrics:
                                 complexity_score = metrics.complexity_score
                                 function_count = metrics.function_count
-                                ast_fingerprint = metrics.ast_fingerprint
+                                ast_fingerprint = _sanitize_db_string(metrics.ast_fingerprint)
                         except Exception:
                             # AST failure never aborts commit extraction (tree-sitter raises untyped errors)
                             logger.debug("AST metrics skipped for %s", filename, exc_info=True)
@@ -540,10 +582,10 @@ class PyDrillerService(IGitExtractorService):
                     file_change = FileChangeModel(
                         commit_hash=commit.hash,
                         filename=filename,
-                        status=mod.change_type.name,
+                        status=_sanitize_db_string(mod.change_type.name),
                         lines_added=mod.added_lines or 0,
                         lines_removed=mod.deleted_lines or 0,
-                        raw_diff=mod.diff,
+                        raw_diff=_sanitize_db_string(mod.diff),
                         complexity_score=complexity_score,
                         function_count=function_count,
                         ast_fingerprint=ast_fingerprint,
@@ -566,13 +608,13 @@ class PyDrillerService(IGitExtractorService):
                                     continue
                                 match = re.search(r'<([^>]+)>', line)
                                 if match:
-                                    email = match.group(1).lower().strip()
+                                    email = _sanitize_db_string(match.group(1).lower().strip())
                                     if email in mailmap_data:
                                         email = mailmap_data[email]["email"]
                                     blame_counts[email] = blame_counts.get(email, 0) + 1
 
                             if blame_counts:
-                                file_change.blame_snapshot = json.dumps(blame_counts)
+                                file_change.blame_snapshot = _sanitize_db_string(json.dumps(blame_counts))
                         except (subprocess.SubprocessError, OSError, ValueError):
                             # Blame is best-effort enrichment; never abort commit extraction
                             logger.debug("git blame skipped for %s @ %s", mod.new_path, commit.hash, exc_info=True)

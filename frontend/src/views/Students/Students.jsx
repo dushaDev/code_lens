@@ -113,14 +113,13 @@ export default function Students({
 
   return (
     <div className="students-view">
-      <div className="view-header" style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: '14px', borderBottom: '1px solid var(--border-color)', paddingBottom: '16px', marginBottom: '8px' }}>
-        <h1 style={{ display: 'flex', alignItems: 'center', gap: '8px', margin: 0, textAlign: 'left', flexWrap: 'wrap' }}>
-          <span>Students Directory</span>
-          <span style={{ width: '1px', height: '18px', backgroundColor: 'var(--border-color)', display: 'inline-block', margin: '0 4px', alignSelf: 'center' }} />
-          <span style={{ fontSize: '0.82rem', fontWeight: '400', color: 'var(--text-muted)', letterSpacing: 'normal' }}>Overview of students, their total commit activities, and contribution logs.</span>
-        </h1>
+      <div className="view-header">
+        <div>
+          <h1>Students Directory</h1>
+          <p className="subtitle">Overview of students, their total commit activities, and contribution logs.</p>
+        </div>
         
-        {/* Project selector relocated to top left */}
+        {/* Project selector */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
           <div className="select-wrapper">
             <span className="select-label" style={{ fontWeight: '600' }}>Filter by Project:</span>
@@ -246,7 +245,15 @@ export default function Students({
       {/* Students list */}
       <div className="students-list-card card">
         <div className="table-container">
-          <table className="custom-table">
+          <table className="custom-table" style={{ tableLayout: 'fixed', width: '100%' }}>
+            <colgroup>
+              <col style={{ width: '20%' }} />
+              <col style={{ width: '24%' }} />
+              <col style={{ width: '24%' }} />
+              <col style={{ width: '9%' }} />
+              <col style={{ width: '11%' }} />
+              <col style={{ width: '12%' }} />
+            </colgroup>
             <thead>
               <tr>
                 <th>Name/Username</th>
@@ -270,15 +277,19 @@ export default function Students({
 
                 return (
                   <tr key={student.id} className={studentIsBot ? 'row-bot' : ''}>
-                    <td style={{ padding: '8px 12px' }}>
-                      <div className="student-name-row" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                        <span className="student-name">{student.name}</span>
-                        {studentIsBot && <Tag text="BOT" variant="danger" style={{ fontSize: '9px', padding: '1.5px 4px' }} />}
+                    <td style={{ padding: '10px 14px', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                      <div className="student-name-row" style={{ display: 'flex', alignItems: 'center', gap: '6px', minWidth: 0 }}>
+                        <span className="student-name" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '0.9rem' }} title={student.name}>
+                          {student.name}
+                        </span>
+                        {studentIsBot && <Tag text="BOT" variant="danger" style={{ fontSize: '9px', padding: '1.5px 4px', flexShrink: 0 }} />}
                       </div>
                     </td>
-                    <td className="muted-cell">{student.email}</td>
-                    <td>
-                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', alignItems: 'center' }}>
+                    <td className="muted-cell" style={{ padding: '10px 14px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '0.84rem' }} title={student.email}>
+                      {student.email}
+                    </td>
+                    <td style={{ padding: '10px 14px' }}>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', alignItems: 'center' }}>
                         {studentProjects.slice(0, 2).map((proj) => (
                           <button
                             key={proj.id}
@@ -286,17 +297,21 @@ export default function Students({
                             onClick={() => navigate({ project: proj })}
                             title={`Click to view analytics for ${proj.name}`}
                             style={{ 
-                              padding: '3px 8px', 
-                              fontSize: '0.75rem', 
+                              padding: '2px 7px', 
+                              fontSize: '0.74rem', 
                               gap: '4px',
                               color: 'var(--primary)',
                               borderColor: 'var(--border-color)',
                               backgroundColor: 'var(--bg-app)',
-                              cursor: 'pointer'
+                              cursor: 'pointer',
+                              maxWidth: '115px',
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
+                              whiteSpace: 'nowrap'
                             }}
                           >
-                            <FolderGit2 size={12} />
-                            <span>{proj.name}</span>
+                            <FolderGit2 size={11} style={{ flexShrink: 0 }} />
+                            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{proj.name}</span>
                           </button>
                         ))}
 
@@ -306,13 +321,14 @@ export default function Students({
                             onClick={() => setProjectsModalStudent({ student, projects: studentProjects })}
                             title="Click to view all contributed projects"
                             style={{ 
-                              padding: '3px 8px', 
-                              fontSize: '0.75rem', 
+                              padding: '2px 6px', 
+                              fontSize: '0.74rem', 
                               fontWeight: 'bold',
                               color: 'var(--primary)',
                               backgroundColor: 'var(--primary-alpha)',
                               borderColor: 'var(--border-color)',
-                              cursor: 'pointer'
+                              cursor: 'pointer',
+                              flexShrink: 0
                             }}
                           >
                             +{studentProjects.length - 2}
@@ -320,18 +336,21 @@ export default function Students({
                         )}
 
                         {studentProjects.length === 0 && (
-                          <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>No projects</span>
+                          <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>No projects</span>
                         )}
                       </div>
                     </td>
-                    <td className="bold-cell">{Math.round(student.commitsCount)}</td>
-                    <td>
+                    <td className="bold-cell" style={{ padding: '10px 14px', whiteSpace: 'nowrap', fontSize: '0.86rem' }}>
+                      {Math.round(student.commitsCount)}
+                    </td>
+                    <td style={{ padding: '10px 14px', whiteSpace: 'nowrap', fontSize: '0.84rem' }}>
                       <span className="additions-text">+{Math.round(student.additions)}</span>
                       <span className="deletions-text">-{Math.round(student.deletions)}</span>
                     </td>
-                    <td>
+                    <td style={{ padding: '10px 14px', whiteSpace: 'nowrap' }}>
                       <button 
-                        className="btn btn-outline btn-sm merge-btn-icon"
+                        className="btn btn-outline btn-sm"
+                        style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '3px 8px', fontSize: '0.75rem' }}
                         onClick={() => {
                           setSelectedSourceStudent(student);
                           setMergeTargetId('');
@@ -339,7 +358,7 @@ export default function Students({
                         }}
                         title="Merge aliases/duplicate profiles for this user"
                       >
-                        <GitMerge size={14} />
+                        <GitMerge size={12} />
                         <span>Merge Alias</span>
                       </button>
                     </td>

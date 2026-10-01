@@ -155,16 +155,7 @@ export default function Projects({
             <select 
               value={sortBy} 
               onChange={(e) => setSortBy(e.target.value)}
-              style={{ 
-                background: 'var(--card-bg, #1e293b)', 
-                color: 'var(--text-primary, #f8fafc)', 
-                border: '1px solid var(--border-color, #334155)', 
-                borderRadius: '6px', 
-                padding: '6px 12px', 
-                fontSize: '0.82rem', 
-                fontWeight: '500',
-                cursor: 'pointer' 
-              }}
+              className="sort-select"
             >
               <option value="added">Added Time (Newest First)</option>
               <option value="risk">Risk Level (Highest First)</option>

@@ -5,13 +5,15 @@ import logging
 from datetime import timedelta
 from typing import Dict, Any, List, Optional
 from collections import defaultdict
-from sqlalchemy.exc import SQLAlchemyError
-from src.use_cases.interfaces import IProjectRepository, IAuthorRepository, ICommitRepository
+from src.use_cases.interfaces import IProjectRepository, IAuthorRepository, ICommitRepository, ILocalAIService, IRepoInspector
 from src.use_cases.commit_sampler import build_stratified_sample, compute_sampling_stats
-from src.infrastructure.services.local_ai_service import LocalAIService
+from src.use_cases.author_utils import build_canonical_map
 from src.domain.metrics import calculate_gini, get_gini_status
+from src.domain.identity_signals import analyze_identity_signals, is_bot_identity
+from src.domain.contribution_quality import assess_contribution_quality
 
 logger = logging.getLogger(__name__)
+
 
 # Module-level thread pool executor for local AI tasks (long-lived)
 _LOCAL_AI_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=8)
@@ -65,140 +67,15 @@ def cancel_qualitative_analysis(project_id: int):
     if project_id in RUNNING_PROJECTS:
         update_running_project(project_id, status="cancelling")
 
-def extract_extended_quantitative_metrics(db, project_id: int, project=None, commits=None) -> dict:
+def extract_extended_quantitative_metrics(project_repo, project_id: int, project=None, commits=None) -> dict:
     """Extract extended quantitative metrics: branches, similarity reports, AST complexity, timeline peak."""
-    from sqlalchemy import func, desc
-    from src.infrastructure.database.models import (
-        BranchModel, commit_branches, SimilarityReportModel,
-        ProjectModel, FileChangeModel, CommitModel
-    )
-    
-    # 1. Branches summary
-    branches_summary = {"total_branches": 0, "top_branches": []}
-    try:
-        if db:
-            results = db.query(
-                BranchModel.name,
-                func.count(commit_branches.c.commit_hash).label("commit_count")
-            ).outerjoin(commit_branches, BranchModel.id == commit_branches.c.branch_id)\
-             .filter(BranchModel.project_id == project_id)\
-             .group_by(BranchModel.id, BranchModel.name)\
-             .order_by(desc("commit_count")).all()
-            
-            total_b = len(results)
-            top_b = [{"name": r[0], "commits": r[1]} for r in results[:10]]
-            branches_summary = {
-                "total_branches": total_b,
-                "top_branches": top_b
-            }
-    except SQLAlchemyError as e:
-        logger.warning(f"Branch extraction error: {e}")
-
-    # 2. Plagiarism / Similarity summary
-    plagiarism_summary = {
-        "has_scan": False,
-        "max_similarity_score": 0.0,
-        "matched_project_name": None,
-        "status": "No Scan Performed",
-        "matched_blocks_count": 0
-    }
-    try:
-        if db:
-            reports = db.query(SimilarityReportModel).filter(
-                (SimilarityReportModel.project_a_id == project_id) |
-                (SimilarityReportModel.project_b_id == project_id)
-            ).order_by(desc(SimilarityReportModel.similarity_score)).all()
-            
-            if reports:
-                top_r = reports[0]
-                partner_id = top_r.project_b_id if top_r.project_a_id == project_id else top_r.project_a_id
-                partner_proj = db.query(ProjectModel).filter(ProjectModel.id == partner_id).first()
-                partner_name = partner_proj.name if partner_proj else f"Project #{partner_id}"
-                
-                plagiarism_summary = {
-                    "has_scan": True,
-                    "max_similarity_score": round(top_r.similarity_score * 100.0, 1) if top_r.similarity_score <= 1.0 else round(top_r.similarity_score, 1),
-                    "matched_project_name": partner_name,
-                    "status": top_r.status or "Needs Review",
-                    "matched_blocks_count": top_r.matched_hashes_count or 0
-                }
-    except SQLAlchemyError as e:
-        logger.warning(f"Similarity extraction error: {e}")
-
-    # 3. AST Complexity & Squash commits
-    ast_complexity_summary = {
-        "avg_complexity_score": 0.0,
-        "total_functions": 0,
-        "squash_suspected_commits": 0
-    }
-    try:
-        if db:
-            ast_res = db.query(
-                func.avg(FileChangeModel.complexity_score),
-                func.sum(FileChangeModel.function_count)
-            ).join(CommitModel, FileChangeModel.commit_hash == CommitModel.hash)\
-             .filter(CommitModel.project_id == project_id).first()
-            
-            squash_count = db.query(func.count(CommitModel.hash)).filter(
-                CommitModel.project_id == project_id,
-                CommitModel.is_squash_suspected == True
-            ).scalar() or 0
-
-            avg_comp = round(float(ast_res[0]), 1) if ast_res and ast_res[0] is not None else 0.0
-            tot_func = int(ast_res[1]) if ast_res and ast_res[1] is not None else 0
-            
-            ast_complexity_summary = {
-                "avg_complexity_score": avg_comp,
-                "total_functions": tot_func,
-                "squash_suspected_commits": squash_count
-            }
-    except SQLAlchemyError as e:
-        logger.warning(f"AST complexity error: {e}")
-
-    # 4. Pacing peak & daily velocity summary
-    pacing_summary = {
-        "peak_commit_date": "N/A",
-        "peak_commit_count": 0,
-        "avg_commits_per_active_day": 0.0,
-        "project_span_days": 0,
-        "active_days_count": 0
-    }
-    try:
-        if commits:
-            daily_counts = {}
-            for c in commits:
-                if c.timestamp:
-                    d_str = c.timestamp.strftime("%Y-%m-%d")
-                    daily_counts[d_str] = daily_counts.get(d_str, 0) + 1
-            if daily_counts:
-                peak_date = max(daily_counts, key=daily_counts.get)
-                peak_val = daily_counts[peak_date]
-                avg_val = round(sum(daily_counts.values()) / len(daily_counts), 1)
-                
-                # Calculate project span (start date to end date)
-                timestamps = [c.timestamp for c in commits if c.timestamp]
-                project_span_days = 0
-                if timestamps:
-                    start_date = min(timestamps)
-                    end_date = max(timestamps)
-                    project_span_days = (end_date.date() - start_date.date()).days + 1
-                
-                pacing_summary = {
-                    "peak_commit_date": peak_date,
-                    "peak_commit_count": peak_val,
-                    "avg_commits_per_active_day": avg_val,
-                    "project_span_days": project_span_days,
-                    "active_days_count": len(daily_counts)
-                }
-    except Exception as e:
-        # Last-resort boundary to ensure pacing calculation errors do not crash the entire quantitative metrics extraction
-        logger.exception(f"Pacing summary extraction failed: {e}")
-
+    if project_repo is not None and hasattr(project_repo, "get_extended_quantitative_metrics"):
+        return project_repo.get_extended_quantitative_metrics(project_id, commits)
     return {
-        "branches_summary": branches_summary,
-        "plagiarism_summary": plagiarism_summary,
-        "ast_complexity_summary": ast_complexity_summary,
-        "pacing_summary": pacing_summary
+        "branches_summary": {"total_branches": 0, "top_branches": []},
+        "plagiarism_summary": {"has_scan": False, "max_similarity_score": 0.0, "matched_project_name": None, "status": "No Scan Performed", "matched_blocks_count": 0},
+        "ast_complexity_summary": {"avg_complexity_score": 0.0, "total_functions": 0, "squash_suspected_commits": 0},
+        "pacing_summary": {"peak_commit_date": "N/A", "peak_commit_count": 0, "avg_commits_per_active_day": 0.0, "project_span_days": 0, "active_days_count": 0}
     }
 
 class GetQualitativeAnalysisUseCase:
@@ -207,12 +84,14 @@ class GetQualitativeAnalysisUseCase:
         project_repo: IProjectRepository,
         author_repo: IAuthorRepository,
         commit_repo: ICommitRepository,
-        local_ai: LocalAIService = None
+        local_ai: ILocalAIService,
+        repo_inspector: IRepoInspector,
     ):
         self.project_repo = project_repo
         self.author_repo = author_repo
         self.commit_repo = commit_repo
-        self.local_ai = local_ai or LocalAIService()
+        self.local_ai = local_ai
+        self.repo_inspector = repo_inspector
 
     def execute_stream(
         self,
@@ -252,14 +131,8 @@ class GetQualitativeAnalysisUseCase:
         # relationship. Load the course row via the repo's DB session instead.
         deadline: Optional[object] = None
         try:
-            db_session = getattr(self.project_repo, 'db', None)
-            course_id = getattr(project, 'course_id', None)
-            if db_session is not None and course_id is not None:
-                from src.infrastructure.database.models import CourseModel
-                course = db_session.query(CourseModel).filter(CourseModel.id == course_id).first()
-                if course and course.deadline:
-                    deadline = course.deadline
-        except (SQLAlchemyError, AttributeError) as deadline_err:
+            deadline = self.project_repo.get_course_deadline(project_id)
+        except Exception as deadline_err:
             logger.warning(f"Course deadline resolution failed: {deadline_err}")
 
         # Check the DB cache first (unless force_refresh). `project` is a
@@ -276,6 +149,22 @@ class GetQualitativeAnalysisUseCase:
             logger.info("[QUAL] DB cache hit for project %s — skipping local AI analysis.", project_id)
             try:
                 cached_data = json.loads(cached_report_json)
+                ps = cached_data.setdefault("project_summary", {})
+                if "identity_analysis" not in ps:
+                    try:
+                        raw_authors = self.author_repo.get_by_project_id(project_id)
+                        raw_commits = self.commit_repo.get_by_project_id(project_id)
+                        c_map = build_canonical_map(self.author_repo, raw_authors)
+                        a_payload = [{"id": a.id, "name": a.name, "email": a.email, "name_variants": getattr(a, "name_variants", None), "canonical_author_id": a.canonical_author_id} for a in raw_authors]
+                        c_payload = [{"author_id": c.author_id, "committer_email": getattr(c, "committer_email", None), "committer_name": getattr(c, "committer_name", None)} for c in raw_commits]
+                        ia = analyze_identity_signals(a_payload, c_payload, c_map)
+                        ps["identity_analysis"] = ia
+                        ps["is_solo_project"] = ia["is_solo_project"]
+                        if ia["is_solo_project"]:
+                            ps["gini_coefficient"] = "N/A (Single Contributor)"
+                    except Exception as backfill_err:
+                        logger.warning("[QUAL] Error backfilling identity_analysis on cached report: %s", backfill_err)
+
                 update_running_project(project_id, new_state={"status": "complete", "progress": 100, "message": "Loaded from database cache."})
                 yield {"type": "complete", "progress": 100, "message": "Loaded cached analysis from database.", "data": cached_data}
                 return
@@ -302,18 +191,8 @@ class GetQualitativeAnalysisUseCase:
             return
 
         # ── Stratified Sampling with Canonical Author Consolidation ──────────
-        # Resolve each author_id to its canonical root id (caching results)
-        canonical_id_map = {}
-        for a in authors:
-            curr_id = a.id
-            visited = set()
-            while curr_id is not None and curr_id not in visited:
-                visited.add(curr_id)
-                author = self.author_repo.get_by_id(curr_id)
-                if not author or author.canonical_author_id is None:
-                    break
-                curr_id = author.canonical_author_id
-            canonical_id_map[a.id] = curr_id or a.id
+        # Resolve each author_id to its canonical root id
+        canonical_id_map = build_canonical_map(self.author_repo, authors)
 
         # Build author map using canonical authors
         author_map = {}
@@ -359,6 +238,8 @@ class GetQualitativeAnalysisUseCase:
         processed_commits: Dict = defaultdict(list)
         total_parse_failures = 0
         total_fallbacks = 0
+        reliability_degraded = False
+        reliability_warning = None
 
         # ── Per-Commit LLM Classification ─────────────────────────────────────
         for idx, c in enumerate(commits_to_process):
@@ -455,6 +336,8 @@ class GetQualitativeAnalysisUseCase:
                         "code_smells": [],
                         "architecture_issues": [],
                         "notes": "Timeout fallback",
+                        "parse_failure": True,
+                        "fell_back": True,
                         "analysis_available": False,
                     }
                 except Exception as ai_err:
@@ -474,6 +357,8 @@ class GetQualitativeAnalysisUseCase:
                         "code_smells": [],
                         "architecture_issues": [],
                         "notes": "Failure fallback",
+                        "parse_failure": True,
+                        "fell_back": True,
                         "analysis_available": False,
                     }
                 CLASSIFICATION_CACHE[cache_key] = labels
@@ -508,22 +393,31 @@ class GetQualitativeAnalysisUseCase:
             }
             processed_commits[canonical_aid].append(commit_data)
 
-        # Quality check: parse failures & fallback rate
+        # Quality check: keep the analysis available in degraded mode. Reliability
+        # metrics and warnings are carried into the payload/PDF so consumers do not
+        # mistake deterministic fallback labels for successful local-AI analysis.
         if total_process > 0:
             parse_fail_rate = total_parse_failures / total_process
             fallback_rate = total_fallbacks / total_process
             if parse_fail_rate > 0.15 or fallback_rate > 0.15:
-                err_msg = (
+                reliability_degraded = True
+                reliability_warning = (
                     f"Local AI analysis reliability is low. "
                     f"Parse failure rate: {parse_fail_rate:.1%}, Fallback rate: {fallback_rate:.1%}. "
-                    f"This exceeds the allowed 15% threshold. Please check if your local LLM is running correctly."
+                    f"This exceeds the preferred 15% threshold; fallback-based results are marked as degraded."
                 )
-                update_running_project(project_id, new_state={"status": "failed", "progress": 0, "message": err_msg})
-                raise ValueError(err_msg)
+                logger.warning("[QUAL] %s", reliability_warning)
+                update_running_project(project_id, progress=91, message=reliability_warning)
+                yield {
+                    "type": "progress",
+                    "progress": 91,
+                    "message": reliability_warning,
+                    "warning": True,
+                }
 
         # ── Per-Contributor Aggregation ───────────────────────────────────────
         contributors_data = {}
-        ai_degraded = False
+        ai_degraded = reliability_degraded
 
         proj_type_dist = defaultdict(int)
         proj_substance_dist = {"trivial": 0, "moderate": 0, "substantial": 0}
@@ -539,18 +433,71 @@ class GetQualitativeAnalysisUseCase:
         # Pacing: count substantial commits in the final 3 days before deadline
         proj_final_3d_substantial = 0
 
-        # Calculate Gini Coefficient first so we can use it to determine individual risk anomalies
+        # Calculate Gini Coefficient and run Identity Analysis
         unique_canonical_ids = set(canonical_id_map.values())
-        contrib_commit_counts = [len(commits_by_author.get(cid, [])) for cid in unique_canonical_ids]
-        gini_val = calculate_gini(contrib_commit_counts)
-        gini_status = get_gini_status(gini_val)
+        # Only canonical identities with >=1 attributed commit are real members.
+        # Zero-commit rows (authors created from committer/co-author metadata whose
+        # commits are attributed to another id) must NOT inflate member counts,
+        # bias the Gini coefficient, or be flagged as free-riders.
+        # Automated (bot) identities are not students: exclude from member counts,
+        # contribution shares, Gini, and risk scoring.
+        bot_canonical_ids = {
+            canonical_id_map.get(a.id, a.id)
+            for a in authors
+            if is_bot_identity(getattr(a, "name", None), getattr(a, "email", None))
+        }
+        excluded_bot_names = sorted({
+            author_map[cid].name for cid in bot_canonical_ids
+            if cid in author_map and author_map[cid] is not None
+        })
+
+        active_canonical_ids = {
+            cid for cid in unique_canonical_ids
+            if commits_by_author.get(cid) and cid not in bot_canonical_ids
+        }
+        contrib_commit_counts = [len(commits_by_author.get(cid, [])) for cid in active_canonical_ids]
+
+        # ── Contributor Identity & Authenticity Signals ───────────────────────
+        authors_payload = [
+            {
+                "id": a.id,
+                "name": a.name,
+                "email": a.email,
+                "name_variants": getattr(a, "name_variants", None),
+                "canonical_author_id": a.canonical_author_id,
+                "project_id": project_id,
+            }
+            for a in authors
+        ]
+        commits_payload = [
+            {
+                "author_id": c.author_id,
+                "committer_email": getattr(c, "committer_email", None),
+                "committer_name": getattr(c, "committer_name", None),
+                "hash": c.hash,
+            }
+            for c in commits
+        ]
+        identity_analysis = analyze_identity_signals(
+            authors=authors_payload,
+            commits=commits_payload,
+            canonical_id_map=canonical_id_map,
+        )
+        is_solo = identity_analysis["is_solo_project"]
+
+        if is_solo:
+            gini_val = 0.0
+            gini_status = "N/A (Single Contributor)"
+        else:
+            gini_val = calculate_gini(contrib_commit_counts)
+            gini_status = get_gini_status(gini_val)
 
         # Pre-calculate total lines of code changed (LOC) across the project
         total_project_loc = 0
         canonical_loc_map = {}
         canonical_added_map = {}
         canonical_removed_map = {}
-        for cid in unique_canonical_ids:
+        for cid in active_canonical_ids:
             author_commits = commits_by_author.get(cid, [])
             author_added = sum(getattr(c, 'insertions', 0) or 0 for c in author_commits)
             author_removed = sum(getattr(c, 'deletions', 0) or 0 for c in author_commits)
@@ -560,11 +507,37 @@ class GetQualitativeAnalysisUseCase:
             canonical_removed_map[cid] = author_removed
             total_project_loc += author_loc
 
-        total_commits_all = len(commits)
+        # Human commits only — bot commits must not dilute contributor shares.
+        total_commits_all = sum(len(commits_by_author.get(cid, [])) for cid in active_canonical_ids)
         lowest_commit_count = min(contrib_commit_counts) if contrib_commit_counts else 0
+
+        # ── Per-Contributor Ownership Areas (top folders touched) ─────────────
+        # Derive each canonical author's most-touched top-level folders from the
+        # file-change history so the report can show "who owns what". Best-effort:
+        # any DB issue leaves ownership empty and never blocks the core analysis.
+        ownership_by_canonical: Dict = defaultdict(lambda: defaultdict(int))
+        try:
+            own_rows = self.commit_repo.get_file_change_author_pairs(project_id)
+            for filename, author_id_raw in own_rows:
+                if not filename:
+                    continue
+                cid = canonical_id_map.get(author_id_raw, author_id_raw)
+                norm = str(filename).replace("\\", "/").lstrip("/")
+                top = norm.split("/")[0] if "/" in norm else "(root)"
+                ownership_by_canonical[cid][top or "(root)"] += 1
+        except Exception as own_err:
+            logger.warning(f"Unexpected error during ownership aggregation: {own_err}")
+            ownership_by_canonical = defaultdict(lambda: defaultdict(int))
+
+        def _top_folders(cid, limit=4):
+            counts = ownership_by_canonical.get(cid) or {}
+            ranked = sorted(counts.items(), key=lambda kv: kv[1], reverse=True)
+            return [name for name, _cnt in ranked[:limit]]
 
         # Loop through all canonical contributors (even if 0 commits processed/sampled)
         for author_id in unique_canonical_ids:
+            if author_id in bot_canonical_ids:
+                continue  # bots are not evaluated as contributors
             author_name = author_map[author_id].name if author_id in author_map else str(author_id)
             author_processed = processed_commits.get(author_id, [])
 
@@ -619,7 +592,7 @@ class GetQualitativeAnalysisUseCase:
                     except Exception as pacing_err:
                         logger.warning(f"Pacing timestamp parsing failed: {pacing_err}")
 
-                example_obj = {"hash": pc["hash"], "message": pc["message"], "type": c_type}
+                example_obj = {"hash": pc["hash"], "message": pc["message"], "type": c_type, "notes": lbls.get("notes", "")}
                 if sub == "substantial" and len(substantial_examples) < 3:
                     substantial_examples.append(example_obj)
                 elif sub == "trivial" and len(trivial_examples) < 3:
@@ -656,55 +629,32 @@ class GetQualitativeAnalysisUseCase:
             author_loc = canonical_loc_map.get(author_id, 0)
             loc_share = round((author_loc / total_project_loc) * 100, 1) if total_project_loc > 0 else 0.0
 
-            num_members = len(unique_canonical_ids)
+            num_members = len(active_canonical_ids)
             expected_avg_share = 100.0 / num_members if num_members > 0 else 100.0
 
-            # suspections of free-riding (skewed contribution share)
-            is_free_rider_suspected = False
-            red_flags_list = []
-
-            # 1. Volume / share metric under half the expected average
-            if num_members > 1:
-                half_avg = expected_avg_share / 2.0
-                if commit_share < half_avg or loc_share < half_avg:
-                    is_free_rider_suspected = True
-                    red_flags_list.append("Low contribution share suspected (Free-rider risk)")
-
-            # 2. Contradiction avoidance: if Gini is High Risk and this is a lowest contributor
-            if gini_val >= 0.5 and num_members > 1 and total_author_commits == lowest_commit_count:
-                is_free_rider_suspected = True
-                if "Low contribution share suspected (Free-rider risk)" not in red_flags_list:
-                    red_flags_list.append("Lowest project contributor (Gini-flagged inequality)")
-
-            # Calculate individual quality risk
-            quality_risk = 0
-            if total_sampled_ai > 0:
-                vague_pct = (vague_count / total_sampled_ai) * 100
-                if vague_pct > 50:
-                    quality_risk += 3
-                elif vague_pct > 30:
-                    quality_risk += 2
-                elif vague_pct > 10:
-                    quality_risk += 1
-
-                mismatch_pct = (mismatch_count / total_sampled_ai) * 100
-                if mismatch_pct > 30:
-                    quality_risk += 4
-                elif mismatch_pct > 15:
-                    quality_risk += 2
-
-                if sec_risk_count > 0:
-                    quality_risk += min(3, sec_risk_count)
-
-            # Timing flags (if deadline is present)
-            timing_risk = 0
-            if deadline and late_commits_count > 0:
-                timing_risk += min(2, late_commits_count)
-
-            # Combine risk scores
-            base_risk = quality_risk + timing_risk
-            volume_risk_floor = 6 if is_free_rider_suspected else 0
-            final_individual_risk = min(10, max(base_risk, volume_risk_floor))
+            # Contribution Quality scoring + free-rider detection (pure domain logic;
+            # see src/domain/contribution_quality.py). Quality flags are gated on a
+            # minimum analyzed sample so a single flagged commit can't read as, e.g.,
+            # "100% mismatch"; the share-based free-rider flag fires regardless.
+            assessment = assess_contribution_quality(
+                total_author_commits=total_author_commits,
+                num_members=num_members,
+                expected_avg_share=expected_avg_share,
+                commit_share=commit_share,
+                loc_share=loc_share,
+                gini_val=gini_val,
+                lowest_commit_count=lowest_commit_count,
+                total_sampled_ai=total_sampled_ai,
+                total_project_commits=total_commits_all,
+                substantial_count=substance_dist["substantial"],
+                moderate_count=substance_dist["moderate"],
+                trivial_count=substance_dist["trivial"],
+                vague_count=vague_count,
+                mismatch_count=mismatch_count,
+                sec_risk_count=sec_risk_count,
+                late_commits_count=late_commits_count,
+                deadline_tracked=bool(deadline),
+            )
 
             if total_sampled > 0:
                 late_pct = round((deadline_close_count / total_sampled) * 100, 0)
@@ -712,9 +662,19 @@ class GetQualitativeAnalysisUseCase:
             else:
                 timing_pattern = "No commits sampled"
 
+            contrib_key = author_name
+            if contrib_key in contributors_data:
+                author_email_display = author_map[author_id].email if author_id in author_map else str(author_id)
+                contrib_key = f"{author_name} ({author_email_display})"
+
             # PR review evaluations default to None if missing/not tracked
             # We don't have native PR review tracking, so we represent it as None / not tracked
-            contributors_data[author_name] = {
+            contributors_data[contrib_key] = {
+                "author_id": author_id,
+                "canonical_author_id": author_id,
+                "author_name": author_name,
+                "email": author_map[author_id].email if author_id in author_map else "",
+                "is_solo": is_solo,
                 "stats": {
                     "total_project_commits": total_author_commits,
                     "sampled_commits": total_sampled,
@@ -733,9 +693,12 @@ class GetQualitativeAnalysisUseCase:
                     "late_commits": late_commits_count if deadline else None,
                     "commits_near_deadline": deadline_close_count if deadline else None,
                     "timing_pattern": timing_pattern if deadline else "Not Tracked (No deadline configured)",
-                    "ai_risk_score": final_individual_risk if (total_sampled_ai > 0 or is_free_rider_suspected) else 0,
-                    "free_rider_suspected": is_free_rider_suspected,
-                    "detected_red_flags": red_flags_list if red_flags_list else ["None"]
+                    "ai_quality_score": assessment.quality_score if assessment.score_assessed else 0,
+                    "score_unverified": assessment.score_unverified,
+                    "free_rider_suspected": assessment.free_rider_suspected,
+                    "meaningful_work_deductions": assessment.meaningful_work_deductions,
+                    "detected_red_flags": assessment.red_flags if assessment.red_flags else ["None"],
+                    "ownership_areas": _top_folders(author_id)
                 },
                 "examples": {
                     "substantial_commits": substantial_examples,
@@ -896,118 +859,20 @@ class GetQualitativeAnalysisUseCase:
         repo_path = getattr(project, 'local_saved_path', None)
         if repo_path and os.path.exists(repo_path) and os.path.isdir(repo_path):
             try:
-                top_dirs = []
-                tot_files = 0
-                tot_dirs = 0
-                has_tests = False
-                
-                # Build a clean 3-level tree representation for visual layout
-                tree_structure = {}
-                ignore_dirs = {'node_modules', '__pycache__', 'venv', 'env', 'build', 'dist', 'target', '.git', '.idea', '.vscode', '.gradle', 'ios', 'android'}
-                
-                for root, dirs, files in os.walk(repo_path):
-                    dirs[:] = [d for d in dirs if not d.startswith('.') and d not in ignore_dirs]
-                    tot_dirs += len(dirs)
-                    tot_files += len(files)
-                    
-                    rel_root = os.path.relpath(root, repo_path)
-                    if rel_root == ".":
-                        top_dirs = list(dirs)
-                        for d in dirs[:8]:
-                            tree_structure[d] = {"dirs": {}, "files": []}
-                    else:
-                        parts = rel_root.split(os.sep)
-                        if len(parts) == 1 and parts[0] in tree_structure:
-                            # Level 2 directory
-                            for d in dirs[:4]:
-                                tree_structure[parts[0]]["dirs"][d] = []
-                            tree_structure[parts[0]]["files"] = [f for f in files if not f.startswith('.')][:3]
-                        elif len(parts) == 2 and parts[0] in tree_structure and parts[1] in tree_structure[parts[0]]["dirs"]:
-                            # Level 3 directory/files
-                            tree_structure[parts[0]]["dirs"][parts[1]] = [f for f in files if not f.startswith('.')][:3]
-
-                    for d in dirs:
-                        if d.lower() in ('test', 'tests', '__tests__', 'spec', 'specs'):
-                            has_tests = True
-
-                # Filter directories using Local AI service to select max 10 architectural folders
-                all_rel_dirs = []
-                for root, dirs, files in os.walk(repo_path):
-                    dirs[:] = [d for d in dirs if not d.startswith('.') and d not in ignore_dirs]
-                    rel = os.path.relpath(root, repo_path)
-                    if rel != ".":
-                        all_rel_dirs.append(rel.replace("\\", "/"))
-
-                filtered_ai_folders = self.local_ai.filter_important_folders(all_rel_dirs or top_dirs)
-
-                modularity = "Monolithic (Flat)"
-                if len(top_dirs) >= 3 or has_tests:
-                    modularity = "High Modularity (Structured Directories)"
-                elif len(top_dirs) >= 1:
-                    modularity = "Moderate Modularity"
-
-                folder_structure = {
-                    "top_level_directories": top_dirs[:8],
-                    "total_directories": tot_dirs,
-                    "total_files": tot_files,
-                    "has_tests_dir": has_tests,
-                    "modularity_score": modularity,
-                    "tree_structure": tree_structure,
-                    "filtered_ai_folders": filtered_ai_folders[:10]
-                }
-
-                readme_file = None
-                for fname in os.listdir(repo_path):
-                    if fname.lower().startswith('readme'):
-                        readme_file = os.path.join(repo_path, fname)
-                        break
-                
-                if readme_file and os.path.isfile(readme_file):
-                    size_kb = round(os.path.getsize(readme_file) / 1024.0, 2)
-                    has_setup = False
-                    has_arch = False
-                    
-                    try:
-                        with open(readme_file, 'r', encoding='utf-8', errors='ignore') as f:
-                            content = f.read().lower()
-                            if any(k in content for k in ['install', 'setup', 'run', 'build', 'usage', 'getting started']):
-                                has_setup = True
-                            if any(k in content for k in ['architecture', 'design', 'structure', 'api', 'component', 'overview']):
-                                has_arch = True
-                    except Exception as readme_err:
-                        logger.warning(f"Failed to read README file at '{readme_file}': {readme_err}")
-
-                    if size_kb > 2.0 and has_setup and has_arch:
-                        doc_score = "Comprehensive (9/10)"
-                    elif size_kb > 0.5 or has_setup:
-                        doc_score = "Basic (5/10)"
-                    else:
-                        doc_score = "Minimal (3/10)"
-
-                    readme_quality = {
-                        "has_readme": True,
-                        "readme_size_kb": size_kb,
-                        "has_setup_guide": has_setup,
-                        "has_architecture_doc": has_arch,
-                        "documentation_score": doc_score
-                    }
-                else:
-                    readme_quality["documentation_score"] = "Missing (0/10)"
+                repo_info = self.repo_inspector.inspect_repository(repo_path, self.local_ai)
+                folder_structure = repo_info.get("folder_structure", folder_structure)
+                readme_quality = repo_info.get("readme_quality", readme_quality)
             except Exception as repo_err:
                 logger.warning(f"Error inspecting repo folder structure / README: {repo_err}")
 
         # ── Extract Extended Quantitative Metrics (Branches, Plagiarism, AST, Peak Timeline) ──
         ext_metrics = {}
         try:
-            db_session = getattr(self.project_repo, 'db', None)
-            ext_metrics = extract_extended_quantitative_metrics(
-                db=db_session,
+            ext_metrics = self.project_repo.get_extended_quantitative_metrics(
                 project_id=project_id,
-                project=project,
                 commits=commits
             )
         except Exception as ext_err:
-            # Last-resort boundary to prevent failure in extended metrics from halting the main qualitative analysis
             logger.exception(f"Error generating extended metrics: {ext_err}")
 
         project_summary = {
@@ -1028,14 +893,19 @@ class GetQualitativeAnalysisUseCase:
             "architecture_issue_distribution": dict(proj_architecture_dist),
             "code_resurrection_flags": resurrection_flags,
             "overall_pacing": pacing_note if deadline else "Not Tracked (No deadline configured)",
-            "gini_coefficient": f"{gini_val} ({gini_status})",
+            "gini_coefficient": "N/A (Single Contributor)" if is_solo else f"{gini_val} ({gini_status})",
             "red_flags": red_flags,
             "peer_review_summary": peer_review_summary,
-            "substantial_to_trivial_ratio": round(proj_substance_dist["substantial"] / max(1, proj_substance_dist["trivial"]), 2) if proj_substance_dist["trivial"] > 0 or proj_substance_dist["substantial"] > 0 else None
+            "substantial_to_trivial_ratio": round(proj_substance_dist["substantial"] / max(1, proj_substance_dist["trivial"]), 2) if proj_substance_dist["trivial"] > 0 or proj_substance_dist["substantial"] > 0 else None,
+            "identity_analysis": identity_analysis,
+            "is_solo_project": is_solo,
+            "excluded_bots": excluded_bot_names,
         }
 
         # Data Quality Assessment object
         classification_reliability = "high"
+        if reliability_degraded:
+            classification_reliability = "low"
         for sub_cat, count in proj_substance_dist.items():
             if proj_total_sampled_ai > 0 and (count / proj_total_sampled_ai) > 0.90:
                 classification_reliability = "low"
@@ -1047,12 +917,15 @@ class GetQualitativeAnalysisUseCase:
 
         data_quality = {
             "classification_reliability": classification_reliability,
+            "local_model": getattr(self.local_ai, 'model_name', 'qwen2.5-coder:3b'),
             "fallback_rate_type": round(total_fallbacks / max(1, total_process), 3) if total_process > 0 else 0.0,
             "fallback_rate_substance": round(total_fallbacks / max(1, total_process), 3) if total_process > 0 else 0.0,
             "parse_failure_rate": round(total_parse_failures / max(1, total_process), 3) if total_process > 0 else 0.0,
             "missing_fields": [],
             "partial_analysis_degraded": ai_degraded
         }
+        if reliability_warning:
+            data_quality["reliability_warning"] = reliability_warning
         if not deadline:
             data_quality["missing_fields"].append("deadline_compliance")
         if review_count == 0:
@@ -1071,6 +944,13 @@ class GetQualitativeAnalysisUseCase:
         try:
             if hasattr(self.project_repo, 'save_qualitative_report'):
                 self.project_repo.save_qualitative_report(project_id, json.dumps(final_payload))
+            # A fresh qualitative pass (first-time analyze OR Re-analyze) makes any
+            # cached cloud narrative stale: cloud_report was synthesized from the
+            # OLD qualitative_report. Drop it here so the next report generation
+            # rebuilds from this latest data instead of silently reusing the
+            # outdated cloud_report in the PDF endpoint.
+            if hasattr(self.project_repo, 'clear_cloud_report'):
+                self.project_repo.clear_cloud_report(project_id)
         except SQLAlchemyError as db_save_err:
             logger.warning(f"Failed to persist qualitative_report to DB: {db_save_err}")
 

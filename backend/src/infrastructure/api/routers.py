@@ -20,13 +20,16 @@ logger = logging.getLogger(__name__)
 limiter = Limiter(key_func=get_remote_address)
 
 
-def _normalize_git_url(url: str) -> str:
-    return (url or "").strip().rstrip("/").removesuffix(".git").lower()
+from src.domain.constants import (
+    EXTENSION_TO_LANGUAGE,
+    SAVED_REPOS_PATH_TEMPLATE,
+    TEMP_REPOS_PATH_TEMPLATE,
+    normalize_git_url,
+)
+_normalize_git_url = normalize_git_url
 
-
-from src.domain.constants import EXTENSION_TO_LANGUAGE, SAVED_REPOS_PATH_TEMPLATE, TEMP_REPOS_PATH_TEMPLATE
 from src.infrastructure.database.session import get_db
-from src.infrastructure.database.repositories import ProjectRepository, AuthorRepository, CommitRepository, DatabaseService, CourseRepository
+from src.infrastructure.database.repositories import ProjectRepository, AuthorRepository, CommitRepository, DatabaseService, CourseRepository, SimilarityRepository
 from src.infrastructure.services.pydriller_service import PyDrillerService
 from src.infrastructure.services.ast_parser import build_ast_tree, get_language_for_file, supported_languages
 from src.infrastructure.auth.dependencies import get_current_user
@@ -48,7 +51,11 @@ from src.infrastructure.api.schemas import (
     ApiKeySaveRequest, ApiKeyStatusResponse, CloudReportResponse, CloudReportData
 )
 from src.infrastructure.auth.crypto import encrypt_api_key, decrypt_api_key, mask_api_key
+from src.infrastructure.services.local_ai_service import LocalAIService
+from src.infrastructure.services.repo_inspector import RepoInspector
 from src.use_cases.get_cloud_report import generate_cloud_report, render_pdf_report
+from src.use_cases.contributor_evidence import enrich_contributors_with_file_evidence
+from src.use_cases.enrich_qualitative_report import EnrichQualitativeReportUseCase
 from src.use_cases.extract_git_history import ExtractGitHistoryUseCase
 from src.use_cases.get_author_commits import (
     GetAuthorCommitsUseCase, GetAuthorFullProfileUseCase,
@@ -60,6 +67,7 @@ from src.use_cases.get_project_files import (
 )
 from src.use_cases.get_project_analytics import GetProjectAnalyticsUseCase
 from src.use_cases.get_qualitative_analysis import GetQualitativeAnalysisUseCase, cancel_qualitative_analysis, get_project_analysis_status, extract_extended_quantitative_metrics
+from src.use_cases.detect_similarity import get_project_plagiarism_detail
 from src.use_cases.get_project_details import (
     GetProjectByIdUseCase, GetProjectBranchesUseCase, GetProjectCommitsUseCase
 )
@@ -285,6 +293,49 @@ def delete_user(
 # User API Key Management endpoints
 # ---------------------------------------------------------------------------
 
+def _resolve_active_api_key(db: Session, user_id: int, project: Optional[ProjectModel] = None) -> Optional[str]:
+    """
+    Retrieves the decrypted plain active API key for the user,
+    transparently auto-migrating legacy course keys if needed.
+    Returns None if no key is configured or decryption fails.
+    """
+    active_key_record = db.query(UserApiKeyModel).filter(
+        UserApiKeyModel.user_id == user_id,
+        UserApiKeyModel.is_active == True
+    ).first()
+
+    if not active_key_record:
+        courses = []
+        if project and getattr(project, 'course', None):
+            courses = [project.course]
+        else:
+            courses = db.query(CourseModel).filter(CourseModel.user_id == user_id).all()
+
+        for course in courses:
+            legacy_key = getattr(course, 'encrypted_api_key', None)
+            if legacy_key:
+                plain = decrypt_api_key(legacy_key)
+                if plain:
+                    logger.info(f"Auto-migrating legacy course key for course '{course.name}' to user_api_keys table...")
+                    active_key_record = UserApiKeyModel(
+                        user_id=user_id,
+                        name=f"Migrated Key ({course.name or 'Course'})",
+                        provider="AgentRouter" if plain.startswith("sk-") else "Gemini",
+                        encrypted_api_key=legacy_key,
+                        masked_key=mask_api_key(plain),
+                        is_active=True
+                    )
+                    db.add(active_key_record)
+                    db.commit()
+                    db.refresh(active_key_record)
+                    break
+
+    if not active_key_record or not active_key_record.encrypted_api_key:
+        return None
+
+    return decrypt_api_key(active_key_record.encrypted_api_key)
+
+
 @router.get(
     "/user/api-keys",
     response_model=List[UserApiKeyResponse],
@@ -297,23 +348,7 @@ def list_user_api_keys(
     """List all API keys stored by the current user."""
     keys = db.query(UserApiKeyModel).filter(UserApiKeyModel.user_id == current_user.id).order_by(UserApiKeyModel.created_at.desc()).all()
     if not keys:
-        # Check if user's courses have any encrypted_api_key stored
-        courses = db.query(CourseModel).filter(CourseModel.user_id == current_user.id).all()
-        for course in courses:
-            if course.encrypted_api_key:
-                plain = decrypt_api_key(course.encrypted_api_key)
-                if plain:
-                    migrated = UserApiKeyModel(
-                        user_id=current_user.id,
-                        name=f"Migrated Key ({course.name})",
-                        provider="AgentRouter" if plain.startswith("sk-") else "Gemini",
-                        encrypted_api_key=course.encrypted_api_key,
-                        masked_key=mask_api_key(plain),
-                        is_active=True
-                    )
-                    db.add(migrated)
-                    db.commit()
-                    break
+        _resolve_active_api_key(db, current_user.id)
         keys = db.query(UserApiKeyModel).filter(UserApiKeyModel.user_id == current_user.id).order_by(UserApiKeyModel.created_at.desc()).all()
     return keys
 
@@ -743,40 +778,18 @@ def create_project(
             detail=f"Course with ID {request.course_id} not found."
         )
 
-    # 0. Check duplicate Group No / Tag in the same course
-    if request.group_no and request.group_no.strip():
-        existing_group = repo.db.query(ProjectModel).filter(
-            ProjectModel.course_id == request.course_id,
-            func.lower(ProjectModel.group_no) == request.group_no.strip().lower()
-        ).first()
-        if existing_group:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Group No / Tag '{request.group_no.strip()}' already exists in this course."
-            )
-
-    # Check duplicate Git URL in the same course
-    if request.git_url and request.git_url.strip():
-        clean_url = _normalize_git_url(request.git_url)
-        course_projects = repo.db.query(ProjectModel).filter(ProjectModel.course_id == request.course_id).all()
-        for p in course_projects:
-            if p.git_url and _normalize_git_url(p.git_url) == clean_url:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Repository URL '{request.git_url.strip()}' is already imported in this course."
-                )
-
-    # Check duplicate Project Name in the same course
-    if request.name and request.name.strip():
-        existing_name = repo.db.query(ProjectModel).filter(
-            ProjectModel.course_id == request.course_id,
-            func.lower(ProjectModel.name) == request.name.strip().lower()
-        ).first()
-        if existing_name:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Project name '{request.name.strip()}' already exists in this course."
-            )
+    # Validate uniqueness within course
+    val_err = repo.validate_new_project(
+        course_id=request.course_id,
+        name=request.name,
+        git_url=request.git_url,
+        group_no=request.group_no,
+    )
+    if val_err:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=val_err
+        )
 
     # 1. Create project row to flush / populate project ID
     project = repo.create(
@@ -1246,7 +1259,13 @@ def get_qualitative_analysis(
     project_repo = ProjectRepository(db)
     author_repo = AuthorRepository(db)
     commit_repo = CommitRepository(db)
-    use_case = GetQualitativeAnalysisUseCase(project_repo, author_repo, commit_repo)
+    use_case = GetQualitativeAnalysisUseCase(
+        project_repo,
+        author_repo,
+        commit_repo,
+        local_ai=LocalAIService(),
+        repo_inspector=RepoInspector(),
+    )
 
     def generate_events():
         try:
@@ -1334,103 +1353,13 @@ def _get_and_enrich_qualitative_data(project: ProjectModel, db: Session) -> dict
 
     try:
         qual_data = json.loads(qual_report_json)
-        
-        # Dynamic on-the-fly enrichment for legacy DB caches
-        ps = qual_data.get("project_summary", {})
-        project_repo = ProjectRepository(db)
-        commit_repo = CommitRepository(db)
-        if not ps.get("folder_structure") or not ps.get("readme_quality") or not ps.get("language_distribution"):
-            try:
-                if not ps.get("language_distribution") and hasattr(project_repo, 'get_language_distribution'):
-                    ps["language_distribution"] = project_repo.get_language_distribution(project.id) or {}
-                
-                repo_path = getattr(project, 'local_saved_path', None)
-                if repo_path and os.path.exists(repo_path) and os.path.isdir(repo_path):
-                    if not ps.get("folder_structure"):
-                        top_dirs = []
-                        tot_files = 0
-                        tot_dirs = 0
-                        has_tests = False
-                        for root, dirs, files in os.walk(repo_path):
-                            dirs[:] = [d for d in dirs if not d.startswith('.') and d not in ('node_modules', '__pycache__', 'venv', 'env', 'build', 'dist')]
-                            tot_dirs += len(dirs)
-                            tot_files += len(files)
-                            if root == repo_path:
-                                top_dirs = list(dirs)
-                            for d in dirs:
-                                if d.lower() in ('test', 'tests', '__tests__', 'spec', 'specs'):
-                                    has_tests = True
-
-                        modularity = "Monolithic (Flat)"
-                        if len(top_dirs) >= 3 or has_tests:
-                            modularity = "High Modularity (Structured Directories)"
-                        elif len(top_dirs) >= 1:
-                            modularity = "Moderate Modularity"
-
-                        ps["folder_structure"] = {
-                            "top_level_directories": top_dirs[:8],
-                            "total_directories": tot_dirs,
-                            "total_files": tot_files,
-                            "has_tests_dir": has_tests,
-                            "modularity_score": modularity
-                        }
-
-                    if not ps.get("readme_quality"):
-                        readme_file = None
-                        for fname in os.listdir(repo_path):
-                            if fname.lower().startswith('readme'):
-                                readme_file = os.path.join(repo_path, fname)
-                                break
-                        if readme_file and os.path.isfile(readme_file):
-                            size_kb = round(os.path.getsize(readme_file) / 1024.0, 2)
-                            has_setup = False
-                            has_arch = False
-                            try:
-                                with open(readme_file, 'r', encoding='utf-8', errors='ignore') as f:
-                                    content = f.read().lower()
-                                    if any(k in content for k in ['install', 'setup', 'run', 'build', 'usage', 'getting started']):
-                                        has_setup = True
-                                    if any(k in content for k in ['architecture', 'design', 'structure', 'api', 'component', 'overview']):
-                                        has_arch = True
-                            except Exception as e:
-                                logger.warning(f"Error reading README file: {e}")
-
-                            if size_kb > 2.0 and has_setup and has_arch:
-                                doc_score = "Comprehensive (9/10)"
-                            elif size_kb > 0.5 or has_setup:
-                                doc_score = "Basic (5/10)"
-                            else:
-                                doc_score = "Minimal (3/10)"
-
-                            ps["readme_quality"] = {
-                                "has_readme": True,
-                                "readme_size_kb": size_kb,
-                                "has_setup_guide": has_setup,
-                                "has_architecture_doc": has_arch,
-                                "documentation_score": doc_score
-                            }
-                        else:
-                            ps["readme_quality"] = {"documentation_score": "Missing (0/10)"}
-                qual_data["project_summary"] = ps
-            except Exception as enrich_err:
-                logger.warning(f"On-the-fly cache enrichment warning: {enrich_err}")
-
-        # Always ensure branches_summary, plagiarism_summary, ast_complexity_summary exist
-        if not ps.get("branches_summary") or not ps.get("plagiarism_summary") or not ps.get("ast_complexity_summary"):
-            try:
-                db_session = getattr(project_repo, 'db', db)
-                commits_list = commit_repo.get_by_project_id(project.id) if hasattr(commit_repo, 'get_by_project_id') else None
-                ext = extract_extended_quantitative_metrics(
-                    db=db_session,
-                    project_id=project.id,
-                    project=project,
-                    commits=commits_list
-                )
-                ps.update(ext)
-                qual_data["project_summary"] = ps
-            except Exception as ext_err:
-                logger.warning(f"On-the-fly extended metrics warning: {ext_err}")
-        return qual_data
+        enrich_use_case = EnrichQualitativeReportUseCase(
+            project_repo=ProjectRepository(db),
+            commit_repo=CommitRepository(db),
+            author_repo=AuthorRepository(db),
+            repo_inspector=RepoInspector(),
+        )
+        return enrich_use_case.execute(project.id, qual_data)
     except HTTPException:
         raise
     except Exception as e:
@@ -1455,47 +1384,9 @@ def generate_and_cache_cloud_report(
     logger.info(f"Found Project ID: {project.id}")
 
     # Fetch active API key for current user (or auto-migrate legacy course key)
-    active_key_record = db.query(UserApiKeyModel).filter(
-        UserApiKeyModel.user_id == current_user.id,
-        UserApiKeyModel.is_active == True
-    ).first()
-
-    if active_key_record:
-        logger.info(f"Found active API key record for project ID {project.id}.")
-    else:
-        logger.info("No active user API key record found. Checking legacy course key...")
-        # Check if course has a legacy encrypted key to auto-migrate
-        course = getattr(project, 'course', None)
-        legacy_key = getattr(course, 'encrypted_api_key', None) if course else None
-        if legacy_key:
-            plain = decrypt_api_key(legacy_key)
-            if plain:
-                logger.info("Found legacy course API key. Auto-migrating to user_api_keys table...")
-                active_key_record = UserApiKeyModel(
-                    user_id=current_user.id,
-                    name=f"Migrated Key ({course.name or 'Course'})",
-                    provider="AgentRouter" if plain.startswith("sk-") else "Gemini",
-                    encrypted_api_key=legacy_key,
-                    masked_key=mask_api_key(plain),
-                    is_active=True
-                )
-                db.add(active_key_record)
-                db.commit()
-                db.refresh(active_key_record)
-                logger.info(f"Auto-migration successful. Created Key ID {active_key_record.id}")
-
-    encrypted_key = active_key_record.encrypted_api_key if active_key_record else None
-
-    if not encrypted_key:
-        logger.error("No active API key found. Returning HTTP 402 PAYMENT_REQUIRED.")
-        raise HTTPException(
-            status_code=status.HTTP_402_PAYMENT_REQUIRED,
-            detail="NO_API_KEY"
-        )
-
-    plain_key = decrypt_api_key(encrypted_key)
+    plain_key = _resolve_active_api_key(db, current_user.id, project)
     if not plain_key:
-        logger.error("Failed to decrypt active API key.")
+        logger.error("No active API key found. Returning HTTP 402 PAYMENT_REQUIRED.")
         raise HTTPException(
             status_code=status.HTTP_402_PAYMENT_REQUIRED,
             detail="NO_API_KEY"
@@ -1517,7 +1408,8 @@ def generate_and_cache_cloud_report(
             api_key=plain_key,
             course_name=course_name,
             tech_requirements=tech_req,
-            deadline=deadline_str
+            deadline=deadline_str,
+            canonical_map=AuthorRepository(db).get_project_canonical_map(project.id)
         )
         logger.info("generate_cloud_report returned valid CloudReportData object!")
         
@@ -1564,6 +1456,21 @@ def generate_cloud_ai_report(
     # Load local AI qualitative report from DB cache and enrich it
     qual_data = _get_and_enrich_qualitative_data(project, db)
 
+    # Live raw-author -> canonical-root map, so identity anomalies for accounts
+    # already merged by the educator are hidden even in cached reports.
+    canonical_map = AuthorRepository(db).get_project_canonical_map(project.id)
+
+    # Detailed, LIVE plagiarism/similarity findings for THIS project, computed fresh
+    # from the DB at render time. Re-scans and status changes (resolve/dismiss) happen
+    # after the cloud-report / qual caches are written and never regenerate them, so
+    # recompute here. Only *unresolved* matches are kept; a clean or fully-resolved
+    # project yields has_findings=False and the template omits the whole section.
+    try:
+        qual_data.setdefault("project_summary", {})["plagiarism_detail"] = \
+            get_project_plagiarism_detail(SimilarityRepository(db), project.id)
+    except Exception as plag_err:
+        logger.warning(f"Plagiarism detail computation failed for project {project.id}: {plag_err}")
+
     # 1. Check if cached report is available
     report_data = None
     cached_report_json = getattr(project, 'cloud_report', None)
@@ -1576,39 +1483,9 @@ def generate_cloud_ai_report(
 
     # 2. If not cached, call generate_cloud_report (which calls LLM and caches result)
     if not report_data:
-        # Fetch active API key
-        active_key_record = db.query(UserApiKeyModel).filter(
-            UserApiKeyModel.user_id == current_user.id,
-            UserApiKeyModel.is_active == True
-        ).first()
-
-        if not active_key_record:
-            course_obj = getattr(project, 'course', None)
-            legacy_key = getattr(course_obj, 'encrypted_api_key', None) if course_obj else None
-            if legacy_key:
-                plain = decrypt_api_key(legacy_key)
-                if plain:
-                    logger.info("Auto-migrating legacy course key to user_api_keys table...")
-                    active_key_record = UserApiKeyModel(
-                        user_id=current_user.id,
-                        name=f"Migrated Key ({course_name or 'Course'})",
-                        provider="AgentRouter" if plain.startswith("sk-") else "Gemini",
-                        encrypted_api_key=legacy_key,
-                        masked_key=mask_api_key(plain),
-                        is_active=True
-                    )
-                    db.add(active_key_record)
-                    db.commit()
-                    db.refresh(active_key_record)
-
-        encrypted_key = active_key_record.encrypted_api_key if active_key_record else None
-        if not encrypted_key:
-            logger.error("No active API key found. Returning HTTP 402 PAYMENT_REQUIRED.")
-            raise HTTPException(status_code=status.HTTP_402_PAYMENT_REQUIRED, detail="NO_API_KEY")
-
-        plain_key = decrypt_api_key(encrypted_key)
+        plain_key = _resolve_active_api_key(db, current_user.id, project)
         if not plain_key:
-            logger.error("Failed to decrypt active API key.")
+            logger.error("No active API key found. Returning HTTP 402 PAYMENT_REQUIRED.")
             raise HTTPException(status_code=status.HTTP_402_PAYMENT_REQUIRED, detail="NO_API_KEY")
 
         try:
@@ -1618,7 +1495,8 @@ def generate_cloud_ai_report(
                 api_key=plain_key,
                 course_name=course_name,
                 tech_requirements=tech_req,
-                deadline=deadline_str
+                deadline=deadline_str,
+                canonical_map=canonical_map
             )
             # Save cache in DB
             project.cloud_report = report_data.model_dump_json()
@@ -1647,62 +1525,9 @@ def generate_cloud_ai_report(
         if qual_data and getattr(project, 'local_saved_path', None) and os.path.exists(project.local_saved_path):
             try:
                 ps = qual_data.setdefault("project_summary", {})
-                fs = ps.setdefault("folder_structure", {})
-                repo_path = project.local_saved_path
-                top_dirs = []
-                tot_files = 0
-                tot_dirs = 0
-                has_tests = False
-                tree_structure = {}
-                ignore_dirs = {'node_modules', '__pycache__', 'venv', 'env', 'build', 'dist', 'target', '.git', '.idea', '.vscode', '.gradle'}
-
-                for root, dirs, files in os.walk(repo_path):
-                    dirs[:] = [d for d in dirs if not d.startswith('.') and d not in ignore_dirs]
-                    tot_dirs += len(dirs)
-                    tot_files += len(files)
-                    rel_root = os.path.relpath(root, repo_path)
-                    if rel_root == ".":
-                        top_dirs = list(dirs)
-                        for d in dirs[:8]:
-                            tree_structure[d] = {"dirs": {}, "files": []}
-                    else:
-                        parts = rel_root.split(os.sep)
-                        if len(parts) == 1 and parts[0] in tree_structure:
-                            for d in dirs[:4]:
-                                tree_structure[parts[0]]["dirs"][d] = []
-                            tree_structure[parts[0]]["files"] = [f for f in files if not f.startswith('.')][:3]
-                        elif len(parts) == 2 and parts[0] in tree_structure and parts[1] in tree_structure[parts[0]]["dirs"]:
-                            tree_structure[parts[0]]["dirs"][parts[1]] = [f for f in files if not f.startswith('.')][:3]
-                    for d in dirs:
-                        if d.lower() in ('test', 'tests', '__tests__', 'spec', 'specs'):
-                            has_tests = True
-
-                modularity = "Monolithic (Flat)"
-                if len(top_dirs) >= 3 or has_tests:
-                    modularity = "High Modularity (Structured Directories)"
-                elif len(top_dirs) >= 1:
-                    modularity = "Moderate Modularity"
-
-                all_rel_dirs = []
-                for root, dirs, files in os.walk(repo_path):
-                    dirs[:] = [d for d in dirs if not d.startswith('.') and d not in ignore_dirs]
-                    rel = os.path.relpath(root, repo_path)
-                    if rel != ".":
-                        all_rel_dirs.append(rel.replace("\\", "/"))
-
-                try:
-                    local_ai = LocalAIService()
-                    fs["filtered_ai_folders"] = local_ai.filter_important_folders(all_rel_dirs or top_dirs)[:10]
-                except Exception as ai_err:
-                    logger.warning(f"Local AI folder filtering fallback: {ai_err}")
-                    fs["filtered_ai_folders"] = (top_dirs)[:10]
-
-                fs["top_level_directories"] = top_dirs[:8]
-                fs["total_directories"] = tot_dirs
-                fs["total_files"] = tot_files
-                fs["has_tests_dir"] = has_tests
-                fs["modularity_score"] = modularity
-                fs["tree_structure"] = tree_structure
+                inspector = RepoInspector()
+                ai_service = LocalAIService()
+                ps["folder_structure"] = inspector.inspect_folder_structure(project.local_saved_path, ai_service)
             except Exception as fs_err:
                 logger.warning(f"Error enriching real-time folder structure: {fs_err}")
 
@@ -1715,7 +1540,8 @@ def generate_cloud_ai_report(
             group_no=getattr(project, 'group_no', None),
             lecturer_name=lecturer,
             git_url=getattr(project, 'git_url', None),
-            deadline=course_dl
+            deadline=course_dl,
+            canonical_map=canonical_map
         )
         logger.info(f"PDF rendered successfully ({len(pdf_bytes)} bytes).")
         
@@ -2079,7 +1905,7 @@ def get_file_ast(
     """Parses the stored source code on-the-fly using tree-sitter and returns
     a simplified, JSON-serialisable AST tree structure.
 
-    Supported languages: Python, JavaScript, TypeScript, Java, Kotlin, Dart, C, C++, Go.
+    Supported languages: Python, JavaScript, TypeScript, Java, C++, C, C#, Go, Rust, Ruby, PHP, Swift, Kotlin, Dart, HTML, CSS, SQL, Shell.
     The full AST is never persisted — it is generated here and discarded after serialisation."""
     fc = db.query(FileChangeModel).filter(FileChangeModel.id == file_change_id).first()
     if not fc:

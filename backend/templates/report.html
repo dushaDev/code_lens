@@ -187,6 +187,94 @@
             -pdf-keep-with-next: true;
         }
 
+        /* At-a-glance verdict scorecard (page 1). Table-based — xhtml2pdf has no
+           flex/grid; white cell borders create the separated-chip look. */
+        table.scorecard {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 6px;
+            margin-bottom: 8px;
+            page-break-inside: avoid;
+        }
+
+        table.scorecard td {
+            text-align: center;
+            padding: 4px 3px;
+            vertical-align: middle;
+        }
+
+        .sc-label {
+            font-size: 6pt;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            font-weight: bold;
+            margin-bottom: 2px;
+        }
+
+        .sc-value {
+            font-size: 10pt;
+            font-weight: bold;
+            line-height: 1.0;
+        }
+
+        .sc-sub {
+            font-size: 6.5pt;
+            margin-top: 1px;
+        }
+
+        /* Conditional advisory banners (coverage / reliability). */
+        .callout {
+            padding: 7px 11px;
+            margin-top: 4px;
+            margin-bottom: 10px;
+            border-radius: 4px;
+            font-size: 8pt;
+            page-break-inside: avoid;
+        }
+
+        .callout-danger {
+            background-color: #fce8e6;
+            border: 1px solid #fad2cf;
+            border-left: 4px solid #c5221f;
+            color: #a50e0e;
+        }
+
+        .callout-warn {
+            background-color: #fef7e0;
+            border: 1px solid #ffeeba;
+            border-left: 4px solid #e6a23c;
+            color: #8a5a00;
+        }
+
+        .callout-ok {
+            background-color: #e6f4ea;
+            border: 1px solid #ceedd5;
+            border-left: 4px solid #137333;
+            color: #0d652d;
+        }
+
+        .folder-pill {
+            display: inline-block;
+            background-color: #eef3fb;
+            color: #1f4268;
+            border: 1px solid #d2e3fc;
+            padding: 2px 7px;
+            border-radius: 8px;
+            font-size: 7.8pt;
+            font-family: 'Courier New', Courier, monospace;
+            font-weight: bold;
+            margin-right: 4px;
+            margin-bottom: 3px;
+        }
+
+        .section-note {
+            font-size: 7.8pt;
+            color: #5f6368;
+            font-style: italic;
+            margin-top: 2px;
+            margin-bottom: 6px;
+        }
+
         ul {
             padding-left: 16px;
             margin-top: 4px;
@@ -225,8 +313,13 @@
             {% endif %}
         </tr>
     </table>
-    <div class="subtitle" style="margin-top: 3px; margin-bottom: 10px; text-align: left;">Academic Integrity &amp;
+    <div class="subtitle" style="margin-top: 3px; margin-bottom: 4px; text-align: left;">Academic Integrity &amp;
         Software Engineering Assessment</div>
+    <div class="section-note">
+        Scope: evaluates individual contribution, commit pacing, and code-integrity signals derived from the Git
+        history. It does <strong>not</strong> execute the project or verify runtime functionality or feature
+        correctness.
+    </div>
 
     <div class="project-details">
         <table class="meta-table">
@@ -251,6 +344,18 @@
                     {% endif %}
                     <span style="font-size: 8.5pt; color: #555555;">Report Date:</span> <strong
                         style="font-size: 9pt; color: #333333;">{{ date }}</strong>
+                    {% set ia = qual_data.project_summary.identity_analysis if qual_data and qual_data.project_summary and qual_data.project_summary.identity_analysis is defined else {} %}
+                    {% set is_solo = (report.is_solo_project if report.is_solo_project is defined and report.is_solo_project is not none else (qual_data.project_summary.is_solo_project if qual_data and qual_data.project_summary and qual_data.project_summary.is_solo_project is defined else false)) %}
+                    <div style="margin-top: 4px;">
+                    {% if is_solo %}
+                    <span class="tag-pill" style="background-color: #e0f2fe; color: #0369a1; border-left: 3px solid #0284c7; font-weight: bold; font-size: 8pt;">SOLO PROJECT &bull; 1 Contributor</span>
+                    {% elif ia and ia.resolved_alias_count and ia.resolved_alias_count > 0 %}
+                    <span class="tag-pill" style="background-color: #f3f4f6; color: #374151; border-left: 3px solid #6b7280; font-weight: bold; font-size: 8pt;">IDENTITIES: {{ ia.raw_identity_count }} Git &rarr; {{ ia.canonical_contributor_count }} Contributors</span>
+                    {% endif %}
+                    {% if report.suspected_identity_issues and (report.suspected_identity_issues | length > 0) %}
+                    <span class="tag-pill" style="background-color: #fef3c7; color: #92400e; border-left: 3px solid #f59e0b; font-weight: bold; font-size: 8pt;">ALIASES SUSPECTED</span>
+                    {% endif %}
+                    </div>
                 </td>
                 <td width="50%">
                     {% if qual_data and qual_data.project_summary and qual_data.project_summary.language_distribution %}
@@ -276,22 +381,233 @@
         </table>
     </div>
 
-    {% if qual_data and qual_data.project_summary and qual_data.project_summary.plagiarism_summary %}
-    {% set plag = qual_data.project_summary.plagiarism_summary %}
-    {% if plag.has_scan %}
-    <div
-        style="background-color: {% if plag.max_similarity_score > 50 %}#fce8e6{% elif plag.max_similarity_score > 25 %}#fef7e0{% else %}#e6f4ea{% endif %}; border: 1px solid {% if plag.max_similarity_score > 50 %}#fad2cf{% elif plag.max_similarity_score > 25 %}#ffeeba{% else %}#ceedd5{% endif %}; color: {% if plag.max_similarity_score > 50 %}#c5221f{% elif plag.max_similarity_score > 25 %}#b06000{% else %}#137333{% endif %}; padding: 6px 10px; margin-bottom: 10px; border-radius: 4px; font-size: 8pt; page-break-inside: avoid;">
-        <strong>AST Winnowing Similarity Scan:</strong>
-        Max Similarity: <strong>{{ plag.max_similarity_score }}%</strong>
-        {% if plag.matched_project_name %}with <em>{{ plag.matched_project_name }}</em>{% endif %}
-        &nbsp;|&nbsp; Status: <strong>{{ plag.status }}</strong>
-        &nbsp;|&nbsp; Matched Hash Blocks: {{ plag.matched_blocks_count }}
+    {# ── At-a-glance scorecard + conditional advisory banners ───────────────── #}
+    {% if qual_data and qual_data.project_summary %}
+    {% set ps = qual_data.project_summary %}
+    {% set dq = qual_data.data_quality if qual_data.data_quality is defined and qual_data.data_quality else {} %}
+    {% set rm = report.overall_project_quality_score | quality_meta %}
+    {% set gm = ps.gini_coefficient | gini_meta %}
+    {% set gini_band = 'Balanced' if gm.sev == 'ok' else ('Uneven' if gm.sev == 'warn' else 'Skewed') %}
+    {% set flag_count = (ps.red_flags | length) if ps.red_flags is defined and ps.red_flags else 0 %}
+    {% set flag_sev = 'ok' if flag_count == 0 else ('warn' if flag_count <= 2 else 'danger') %}
+    {% set cov_pct = ((ps.sampled_commits / ps.total_commits) * 100.0) if ps.total_commits and ps.sampled_commits is
+    defined else 100.0 %}
+    {% set cov_sev = 'ok' if cov_pct >= 75 else ('warn' if cov_pct >= 25 else 'danger') %}
+    {% set rel = dq.classification_reliability | default('unknown', true) %}
+    {% set rel_degraded = dq.partial_analysis_degraded if dq and dq.partial_analysis_degraded is defined else false %}
+    {% set rel_sev = 'danger' if (rel == 'low' or rel_degraded) else ('ok' if rel == 'high' else 'warn') %}
+    <table class="scorecard">
+        <tr>
+            <td style="{{ rm.sev | sev }} border: 2px solid #ffffff;">
+                <div class="sc-label">Overall Quality</div>
+                <div class="sc-value">{{ rm.score }}/10</div>
+                <div class="sc-sub">{{ rm.band }}</div>
+            </td>
+            {% if is_solo %}
+            <td style="background-color: #f0fdf4; border: 2px solid #ffffff; color: #166534;">
+                <div class="sc-label">Work Balance</div>
+                <div class="sc-value">N/A</div>
+                <div class="sc-sub">Single Contributor</div>
+            </td>
+            {% else %}
+            <td style="{{ gm.sev | sev }} border: 2px solid #ffffff;">
+                <div class="sc-label">Work Balance</div>
+                <div class="sc-value">{{ gm.value }}</div>
+                <div class="sc-sub">Gini &middot; {{ gini_band }}{% if ps.excluded_bots %} ({{ ps.excluded_bots | length }} bots exc.){% endif %}</div>
+            </td>
+            {% endif %}
+            <td style="{{ flag_sev | sev }} border: 2px solid #ffffff;">
+                <div class="sc-label">Integrity Flags</div>
+                <div class="sc-value">{{ flag_count }}</div>
+                <div class="sc-sub">project-level</div>
+            </td>
+            <td style="{{ cov_sev | sev }} border: 2px solid #ffffff;">
+                <div class="sc-label">Coverage</div>
+                <div class="sc-value">{{ cov_pct | int }}%</div>
+                <div class="sc-sub">{{ ps.sampled_commits | default(ps.total_commits) }}/{{ ps.total_commits }}
+                    commits</div>
+            </td>
+            <td style="{{ rel_sev | sev }} border: 2px solid #ffffff;">
+                <div class="sc-label">Reliability</div>
+                <div class="sc-value">{{ rel | title }}</div>
+                <div class="sc-sub">{{ 'degraded run' if rel_degraded else 'classifier' }}</div>
+            </td>
+        </tr>
+    </table>
+
+    {% if cov_pct < 25 %}
+    <div class="callout callout-warn">
+        <strong>Limited coverage.</strong> Only {{ cov_pct | int }}% of commits ({{ ps.sampled_commits |
+        default(ps.total_commits) }} of {{ ps.total_commits }}) were classified in <strong>{{ ps.sampling_mode |
+        default('stratified') | title }}</strong> mode. Individual and integrity findings reflect this sample — read
+        the absence of a flag as &ldquo;not seen in the sample,&rdquo; not &ldquo;confirmed clean.&rdquo;
+    </div>
+    {% endif %}
+    {% if rel_degraded or rel == 'low' %}
+    <div class="callout callout-danger">
+        <strong>Reduced analysis reliability.</strong>
+        {% if rel_degraded %}Part of the local classification pass ran in a degraded state (some commits could not be
+        classified).{% endif %}
+        {% if rel == 'low' %} Commit type/substance labels were heavily skewed toward a single category, lowering
+        classifier confidence.{% endif %}
+        Weigh the AI-derived signals below with extra caution and corroborate against the raw commit history.
     </div>
     {% endif %}
     {% endif %}
 
+    <h2 class="section">1. Executive Summary</h2>
+    <div>{{ report.executive_summary | md }}</div>
+
+    <h2 class="section">2. Work Distribution & Engineering Metrics</h2>
+    <div>{{ report.work_distribution_and_fairness | md }}</div>
+
+    {% if charts %}
+    <div class="charts-container" style="text-align: center; margin-top: 14px; margin-bottom: 14px;">
+        {% if charts.commit_bar %}
+        <div style="text-align: center; margin-bottom: 14px; page-break-inside: avoid;">
+            <img src="{{ charts.commit_bar }}" style="width: 17cm; height: auto;" />
+        </div>
+        {% endif %}
+
+        {% if charts.lorenz_curve %}
+        <div style="text-align: center; margin-bottom: 14px; page-break-inside: avoid;">
+            <img src="{{ charts.lorenz_curve }}" style="width: 17cm; height: auto;" />
+        </div>
+        {% endif %}
+
+        {% if charts.commit_timeline %}
+        <div style="text-align: center; margin-bottom: 14px; page-break-inside: avoid; border: none; outline: none;">
+            <img src="{{ charts.commit_timeline }}" style="width: 16.5cm; height: auto; border: none; outline: none;" />
+        </div>
+        {% endif %}
+    </div>
+    {% endif %}
+
+    {% if qual_data and qual_data.contributors %}
+    <h3 style="margin-top: 14px; margin-bottom: 6px; color: #1f4268;">Quantitative Contributor Share</h3>
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th style="width: 25%;">Contributor</th>
+                <th style="width: 15%;">Total Commits</th>
+                <th style="width: 15%;">Commit Share</th>
+                <th style="width: 15%;">Lines Added (+)</th>
+                <th style="width: 15%;">Lines Removed (-)</th>
+                <th style="width: 15%;">LOC Share</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for name, cdata in qual_data.contributors.items() | sort(attribute='1.stats.total_project_commits',
+            reverse=True) %}
+            {% set stats = cdata.stats if cdata.stats is defined and cdata.stats else cdata %}
+            <tr>
+                <td><strong>{{ name }}</strong></td>
+                <td>{{ stats.total_project_commits if stats.total_project_commits is defined else 'N/A' }}</td>
+                <td>{{ stats.commit_share_percentage if stats.commit_share_percentage is defined else
+                    (stats.commit_share if stats.commit_share is defined else 'N/A') }}%</td>
+                <td>+{{ stats.lines_added if stats.lines_added is defined else (stats.lines_changed if
+                    stats.lines_changed is defined else 0) }}</td>
+                <td>-{{ stats.lines_removed if stats.lines_removed is defined else 0 }}</td>
+                <td>{{ stats.loc_share_percentage if stats.loc_share_percentage is defined else (stats.loc_share if
+                    stats.loc_share is defined else 'N/A') }}%</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% endif %}
+
+    {# ── Contribution Areas / Ownership Map (top folders each contributor touched) ── #}
+    {% if qual_data and qual_data.contributors %}
+    {% set ns = namespace(has_ownership=false) %}
+    {% for name, cdata in qual_data.contributors.items() %}
+    {% set st = cdata.stats if cdata.stats is defined and cdata.stats else cdata %}
+    {% if st.ownership_areas is defined and st.ownership_areas %}{% set ns.has_ownership = true %}{% endif %}
+    {% endfor %}
+    {% if ns.has_ownership %}
+    <h3 style="margin-top: 14px; margin-bottom: 4px; color: #1f4268;">Contribution Areas &amp; Code Ownership Map</h3>
+    <div class="section-note">Top-level folders each contributor modified most often (by file-change volume). Signals
+        where a student concentrated their work — it indicates ownership, not exclusivity.</div>
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th style="width: 20%;">Contributor</th>
+                <th style="width: 30%;">Code Ownership Map</th>
+                <th style="width: 50%;">Contribution Summary</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for name, cdata in qual_data.contributors.items() | sort(attribute='1.stats.total_project_commits', reverse=True) %}
+            {% set st = cdata.stats if cdata.stats is defined and cdata.stats else cdata %}
+            <tr>
+                <td><strong>{{ name }}</strong></td>
+                <td>
+                    {% if st.ownership_areas is defined and st.ownership_areas %}
+                    {% for folder in st.ownership_areas %}
+                    <span class="folder-pill">{{ folder }}{{ '/' if folder != '(root)' else '' }}</span>
+                    {% endfor %}
+                    {% else %}
+                    <span style="color: #9aa0a6;">No file-level ownership data</span>
+                    {% endif %}
+                </td>
+                <td style="font-size: 8.5pt;">
+                    {% set ns = namespace(summary=None) %}
+                    {% for s in report.student_evaluations %}
+                        {% if s.student_name == name %}
+                            {% set ns.summary = s.contribution_areas %}
+                        {% endif %}
+                    {% endfor %}
+                    {{ cdata | contrib_summary(ns.summary) }}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% endif %}
+    {% endif %}
+
+    {% if qual_data and qual_data.project_summary and qual_data.project_summary.peer_review_summary %}
+    {% set pr = qual_data.project_summary.peer_review_summary %}
+    <div class="health-box">
+        <strong>Peer Review & Collaboration Signals:</strong><br>
+        • <strong>Evaluated Review Comments:</strong> {{ pr.evaluated_comments }} &nbsp;|&nbsp;
+        <strong>Constructive Reviews:</strong> {{ pr.constructive_reviews }} &nbsp;|&nbsp;
+        <strong>Rubber Stamps:</strong> {{ pr.rubber_stamps }} &nbsp;|&nbsp;
+        <strong>Average Review Score:</strong> {{ pr.average_quality_score }}/10
+    </div>
+    {% endif %}
+
+    <h2 class="section">3. Individual Student Evaluations</h2>
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th style="width: 16%;">Student</th>
+                <th style="width: 13%;">Commits</th>
+                <th style="width: 18%;">Substance</th>
+                <th style="width: 18%;">Pacing & Deadlines</th>
+                <th style="width: 18%;">Quality Signals</th>
+                <th style="width: 17%;">Verdict</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for s in report.student_evaluations %}
+            <tr>
+                <td><strong>{{ s.student_name }}</strong></td>
+                <td>{{ s.commits_summary }}</td>
+                <td>{{ s.substance_breakdown }}</td>
+                <td>{{ s.pacing_and_deadlines }}</td>
+                <td>{{ s.quality_and_integrity_signals }}</td>
+                <td style="{{ s.verdict | verdict_style }}">
+                    {{ s.verdict }}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    {# ── Repository & engineering detail (structure, branches, AST, velocity) ── #}
     {% if qual_data and qual_data.project_summary %}
     {% set ps = qual_data.project_summary %}
+    <h2 class="section">4. Repository &amp; Engineering Detail</h2>
     <div class="health-box"
         style="background-color: #f8fafe; border: 1px solid #d2e3fc; padding: 10px 14px; border-radius: 6px; margin-top: 10px; margin-bottom: 12px;">
         <div
@@ -323,7 +639,7 @@
                 <span style="color: #5f6368; font-size: 8pt;">(<strong>{{ ps.folder_structure.total_files }}</strong>
                     files across <strong>{{ ps.folder_structure.total_directories }}</strong> directories, Tests Dir:
                     <strong>{{ "Present" if ps.folder_structure.has_tests_dir else "None" }}</strong>)</span>
-                
+
                 {% if ps.folder_structure.filtered_ai_folders or ps.folder_structure.top_level_directories %}
                 {% set ai_folders = ps.folder_structure.filtered_ai_folders or ps.folder_structure.top_level_directories[:10] %}
                 <div style="margin-top: 4px; margin-left: 4px; background-color: #fafafa; border: 1px solid #e5e7eb; padding: 4px 8px; border-radius: 4px; font-family: 'Courier New', Courier, monospace; font-size: 7.5pt; color: #374151; line-height: 1.2; page-break-inside: avoid;">
@@ -403,108 +719,155 @@
     </div>
     {% endif %}
 
-    <h2 class="section">1. Executive Summary</h2>
-    <div>{{ report.executive_summary | md }}</div>
+    <h2 class="section">5. Academic Integrity, Code Smells & Architecture Assessment</h2>
+    <div>{{ report.academic_integrity_anomalies | md }}</div>
 
-    <h2 class="section">2. Work Distribution & Engineering Metrics</h2>
-    <div>{{ report.work_distribution_and_fairness | md }}</div>
-
-    {% if charts %}
-    <div class="charts-container" style="text-align: center; margin-top: 14px; margin-bottom: 14px;">
-        {% if charts.commit_bar %}
-        <div style="text-align: center; margin-bottom: 14px; page-break-inside: avoid;">
-            <img src="{{ charts.commit_bar }}" style="width: 17cm; height: auto;" />
-        </div>
-        {% endif %}
-
-        {% if charts.lorenz_curve %}
-        <div style="text-align: center; margin-bottom: 14px; page-break-inside: avoid;">
-            <img src="{{ charts.lorenz_curve }}" style="width: 17cm; height: auto;" />
-        </div>
-        {% endif %}
-
-        {% if charts.commit_timeline %}
-        <div style="text-align: center; margin-bottom: 14px; page-break-inside: avoid; border: none; outline: none;">
-            <img src="{{ charts.commit_timeline }}" style="width: 16.5cm; height: auto; border: none; outline: none;" />
-        </div>
-        {% endif %}
-    </div>
+    {# ── Contributor Identity & Authenticity Assessment ── #}
+    {% set identity_issues = report.suspected_identity_issues or (ia.all_issues if ia and ia.all_issues is defined else []) %}
+    {% if identity_issues or report.contributor_authenticity or is_solo %}
+    <h3 style="margin-top: 14px; margin-bottom: 4px; color: #1f4268;">Contributor Identity &amp; Authenticity Signals</h3>
+    {% if report.contributor_authenticity %}
+    <div style="margin-bottom: 8px; font-size: 8.5pt;">{{ report.contributor_authenticity | md }}</div>
+    {% elif is_solo %}
+    <div class="section-note">This project is confirmed as a single-contributor submission. Workload balance, collusion, and free-riding checks are marked not applicable.</div>
     {% endif %}
 
-    {% if qual_data and qual_data.contributors %}
-    <h3 style="margin-top: 14px; margin-bottom: 6px; color: #1f4268;">Quantitative Contributor Share</h3>
-    <table class="data-table">
+    {% if identity_issues %}
+    <div class="section-note">
+        <strong>Decision-Support Signals:</strong> The following identity anomalies and suspected aliases were detected in the Git history. These are heuristic signals to support educator evaluation and do not constitute proof of misconduct. Confirm before merging identities.
+    </div>
+    <table class="data-table" style="margin-top: 6px; margin-bottom: 10px;">
         <thead>
             <tr>
-                <th style="width: 25%;">Contributor</th>
-                <th style="width: 15%;">Total Commits</th>
-                <th style="width: 15%;">Commit Share</th>
-                <th style="width: 15%;">Lines Added (+)</th>
-                <th style="width: 15%;">Lines Removed (-)</th>
-                <th style="width: 15%;">LOC Share</th>
+                <th style="width: 22%;">Signal Type</th>
+                <th style="width: 28%;">Identities Involved</th>
+                <th style="width: 12%;">Confidence</th>
+                <th style="width: 38%;">Evidence &amp; Recommended Action</th>
             </tr>
         </thead>
         <tbody>
-            {% for name, cdata in qual_data.contributors.items() | sort(attribute='1.stats.total_project_commits',
-            reverse=True) %}
-            {% set stats = cdata.stats if cdata.stats is defined and cdata.stats else cdata %}
+            {% for issue in identity_issues %}
+            {% set conf_style = 'background-color: #fef2f2; color: #b91c1c; border-left: 3px solid #ef4444;' if issue.confidence == 'HIGH' else ('background-color: #fffbeb; color: #b45309; border-left: 3px solid #f59e0b;' if issue.confidence == 'MEDIUM' else 'background-color: #f9fafb; color: #4b5563; border-left: 3px solid #9ca3af;') %}
             <tr>
-                <td><strong>{{ name }}</strong></td>
-                <td>{{ stats.total_project_commits if stats.total_project_commits is defined else 'N/A' }}</td>
-                <td>{{ stats.commit_share_percentage if stats.commit_share_percentage is defined else
-                    (stats.commit_share if stats.commit_share is defined else 'N/A') }}%</td>
-                <td>+{{ stats.lines_added if stats.lines_added is defined else (stats.lines_changed if
-                    stats.lines_changed is defined else 0) }}</td>
-                <td>-{{ stats.lines_removed if stats.lines_removed is defined else 0 }}</td>
-                <td>{{ stats.loc_share_percentage if stats.loc_share_percentage is defined else (stats.loc_share if
-                    stats.loc_share is defined else 'N/A') }}%</td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
-    {% endif %}
-
-    {% if qual_data and qual_data.project_summary and qual_data.project_summary.peer_review_summary %}
-    {% set pr = qual_data.project_summary.peer_review_summary %}
-    <div class="health-box">
-        <strong>Peer Review & Collaboration Signals:</strong><br>
-        • <strong>Evaluated Review Comments:</strong> {{ pr.evaluated_comments }} &nbsp;|&nbsp;
-        <strong>Constructive Reviews:</strong> {{ pr.constructive_reviews }} &nbsp;|&nbsp;
-        <strong>Rubber Stamps:</strong> {{ pr.rubber_stamps }} &nbsp;|&nbsp;
-        <strong>Average Review Score:</strong> {{ pr.average_quality_score }}/10
-    </div>
-    {% endif %}
-
-    <h2 class="section">3. Individual Student Evaluations</h2>
-    <table class="data-table">
-        <thead>
-            <tr>
-                <th style="width: 16%;">Student</th>
-                <th style="width: 13%;">Commits</th>
-                <th style="width: 18%;">Substance</th>
-                <th style="width: 18%;">Pacing & Deadlines</th>
-                <th style="width: 18%;">Quality Signals</th>
-                <th style="width: 17%;">Verdict</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for s in report.student_evaluations %}
-            <tr>
-                <td><strong>{{ s.student_name }}</strong></td>
-                <td>{{ s.commits_summary }}</td>
-                <td>{{ s.substance_breakdown }}</td>
-                <td>{{ s.pacing_and_deadlines }}</td>
-                <td>{{ s.quality_and_integrity_signals }}</td>
-                <td style="{{ s.verdict | verdict_style }}">
-                    {{ s.verdict }}
+                <td style="font-weight: bold; color: #1f4268;">
+                    {% if issue.kind == 'split_identity' %}Possible Split Identity
+                    {% elif issue.kind == 'shared_account' %}Shared Account
+                    {% elif issue.kind == 'pushed_by_other' %}Proxy Push / Committer Divergence
+                    {% elif issue.kind == 'cross_submission' %}Cross-Submission
+                    {% else %}{{ issue.kind | replace('_', ' ') | title }}{% endif %}
+                </td>
+                <td>
+                    {% for m in issue.members %}
+                    <div style="font-size: 8pt; font-family: monospace;">{{ m }}</div>
+                    {% endfor %}
+                </td>
+                <td>
+                    <span class="tag-pill" style="{{ conf_style }} font-weight: bold; font-size: 7.5pt;">{{ issue.confidence }}</span>
+                </td>
+                <td style="font-size: 8pt;">
+                    {% for ev in issue.evidence %}
+                    <div>&bull; {{ ev }}</div>
+                    {% endfor %}
+                    {% if issue.recommended_action %}
+                    <div style="margin-top: 4px; font-weight: bold; color: #1e40af;">Action: {{ issue.recommended_action }}</div>
+                    {% endif %}
                 </td>
             </tr>
             {% endfor %}
         </tbody>
     </table>
+    {% endif %}
+    {% endif %}
 
-    <h2 class="section">4. Academic Integrity, Code Smells & Architecture Assessment</h2>
-    <div>{{ report.academic_integrity_anomalies | md }}</div>
+    {# ── Code Similarity & Plagiarism Signals ─────────────────────────────────
+       Detailed, decision-support view of AST-Winnowing matches for THIS project,
+       driven by the LIVE `plagiarism_detail` injected at render time. Rendered
+       ONLY when unresolved findings exist — resolved/dismissed matches and clean
+       scans are intentionally omitted (no section at all, per report design).
+       A minimal, status-aware one-liner fallback covers any caller that only has
+       the legacy `plagiarism_summary` (i.e. the live detail wasn't injected). #}
+    {% set plag_detail = qual_data.project_summary.plagiarism_detail if qual_data and qual_data.project_summary and qual_data.project_summary.plagiarism_detail is defined else None %}
+    {% if plag_detail %}
+    {% if plag_detail.has_findings %}
+    {% set pm = plag_detail.max_similarity_score | plag_meta %}
+    <h3 style="margin-top: 14px; margin-bottom: 4px; color: #1f4268;">Code Similarity &amp; Plagiarism Signals</h3>
+    <div class="section-note">
+        Structural (AST-Winnowing) similarity matches against other submissions in this course. These are heuristic
+        decision-support signals, not proof of misconduct; matches you have resolved or dismissed are omitted.
+    </div>
+    <div
+        style="{{ pm.style }} padding: 6px 10px; margin-top: 6px; margin-bottom: 8px; border-radius: 4px; font-size: 8pt; page-break-inside: avoid;">
+        <strong>{{ plag_detail.total_matches }} unresolved similarity match{{ '' if plag_detail.total_matches == 1 else 'es' }}</strong>
+        &nbsp;|&nbsp; Highest similarity: <strong>{{ plag_detail.max_similarity_score }}%</strong>
+        {% if plag_detail.matches and plag_detail.matches[0] %}with <em>{{ plag_detail.matches[0].partner_project_name }}</em>{% endif %}
+    </div>
+    {% if plag_detail.cluster %}
+    <div class="callout callout-danger">
+        <strong>Multi-project copying cluster.</strong> This project is one of
+        <strong>{{ plag_detail.cluster.member_count }}</strong> submissions in a connected similarity group
+        (avg {{ plag_detail.cluster.avg_similarity_score }}%).
+        {% if plag_detail.cluster.is_probable_origin %}It is the <strong>probable origin</strong> (earliest submission in
+        the group).{% else %}It is <strong>not</strong> the earliest submission in the group.{% endif %}
+        Members: {% for mem in plag_detail.cluster.members %}{{ mem.name }}{% if mem.is_probable_origin %} (origin){% endif %}{% if not loop.last %}, {% endif %}{% endfor %}.
+    </div>
+    {% endif %}
+    <table class="data-table" style="margin-top: 6px; margin-bottom: 10px;">
+        <thead>
+            <tr>
+                <th style="width: 22%;">Matched Submission</th>
+                <th style="width: 13%;">Similarity</th>
+                <th style="width: 12%;">Confidence</th>
+                <th style="width: 15%;">Review Status</th>
+                <th style="width: 38%;">Match Evidence</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for m in plag_detail.matches %}
+            {% set conf_style = 'background-color: #fef2f2; color: #b91c1c; border-left: 3px solid #ef4444;' if m.confidence_level == 'HIGH' else 'background-color: #fffbeb; color: #b45309; border-left: 3px solid #f59e0b;' %}
+            {% set sm = m.similarity_score | plag_meta %}
+            <tr>
+                <td><strong>{{ m.partner_project_name }}</strong></td>
+                <td>
+                    <span class="tag-pill" style="{{ sm.style }} font-weight: bold; font-size: 8pt;">{{ m.similarity_score }}%</span>
+                    <div style="font-size: 7pt; color: #5f6368; margin-top: 2px;">ident. overlap {{ m.identifier_overlap_percentage }}%</div>
+                </td>
+                <td>
+                    <span class="tag-pill" style="{{ conf_style }} font-weight: bold; font-size: 7.5pt;">{{ m.confidence_level }}</span>
+                </td>
+                <td style="font-size: 8pt;">{{ m.status }}</td>
+                <td style="font-size: 7.8pt;">
+                    <div>{{ m.total_match_runs }} matched run(s), {{ m.matched_blocks_count }} hash blocks; longest contiguous {{ m.max_contiguous_run_tokens }} tokens.</div>
+                    {% if m.top_files %}
+                    <div style="margin-top: 3px;">
+                        {% for f in m.top_files %}
+                        <div style="font-family: 'Courier New', Courier, monospace; font-size: 7pt; color: #3c4043;">
+                            {{ f.this_file }}{% if f.this_lines %}:{{ f.this_lines }}{% endif %}
+                            &rarr; {{ f.partner_file }}{% if f.partner_lines %}:{{ f.partner_lines }}{% endif %}
+                            <span style="color: #9aa0a6;">({{ f.token_span }} tok)</span>
+                        </div>
+                        {% endfor %}
+                    </div>
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% endif %}
+    {% elif qual_data and qual_data.project_summary and qual_data.project_summary.plagiarism_summary and qual_data.project_summary.plagiarism_summary.has_scan and (qual_data.project_summary.plagiarism_summary.status | lower) not in ['resolved', 'dismissed', 'verified clean', 'clean'] %}
+    {# Fallback one-liner for callers lacking the live detail structure (non-PDF paths). #}
+    {% set plag = qual_data.project_summary.plagiarism_summary %}
+    {% set pm = plag.max_similarity_score | plag_meta %}
+    <h3 style="margin-top: 14px; margin-bottom: 4px; color: #1f4268;">Code Similarity &amp; Plagiarism Signals</h3>
+    <div
+        style="{{ pm.style }} padding: 6px 10px; margin-top: 6px; margin-bottom: 10px; border-radius: 4px; font-size: 8pt; page-break-inside: avoid;">
+        <strong>AST Winnowing Similarity Scan:</strong>
+        Max Similarity: <strong>{{ plag.max_similarity_score }}%</strong>
+        {% if plag.matched_project_name %}with <em>{{ plag.matched_project_name }}</em>{% endif %}
+        &nbsp;|&nbsp; Status: <strong>{{ plag.status }}</strong>
+        &nbsp;|&nbsp; Matched Hash Blocks: {{ plag.matched_blocks_count }}
+    </div>
+    {% endif %}
 
     {% if qual_data and qual_data.project_summary %}
     {% set ps = qual_data.project_summary %}
@@ -573,8 +936,11 @@
     {% endif %}
     {% endif %}
 
-    <h2 class="section">5. Final Risk Score & Recommendations</h2>
-    <div class="risk-score">Overall Project Risk Score: {{ report.overall_project_risk_score }}</div>
+    <h2 class="section">6. Final Quality Score & Recommendations</h2>
+    
+    {% set rm = report.overall_project_quality_score | quality_meta %}
+    <div class="risk-score" style="{{ rm.sev | sev }} border-left: 4px solid {{ rm.fg }};">Overall Project Quality Score: 
+        {{ report.overall_project_quality_score }}</div>
 
     <h3>Actionable Recommendations for Course Lecturer:</h3>
     <ul>
@@ -589,9 +955,13 @@
         • <strong>Report Purpose &amp; Accuracy:</strong> This report is generated by CodeLens as an automated
         decision-support tool to assist course lecturers in evaluating Contributions, commit timing patterns, and
         codebase integrity. All findings serve as quantitative investigative signals for academic review.<br>
+        {% set local_model = (qual_data.data_quality.local_model if qual_data and qual_data.data_quality is defined and
+        qual_data.data_quality and qual_data.data_quality.local_model is defined and qual_data.data_quality.local_model
+        else 'qwen2.5-coder:3b') %}
         • <strong>AI Models Utilized:</strong>
-        Local Classification: <code>Qwen2.5-Coder (Local LLM via Ollama)</code> &nbsp;|&nbsp;
-        Cloud Synthesis: <code>Google Gemini 2.0 Flash / AgentRouter API</code><br>
+        Local Classification: <code>{{ local_model }} (via Ollama)</code> &nbsp;|&nbsp;
+        Cloud Synthesis: <code>{{ report.generation_provider | default('Cloud LLM', true) }}{% if
+        report.generation_model %} — {{ report.generation_model }}{% else %} (model not recorded){% endif %}</code><br>
         {% if qual_data and qual_data.project_summary %}
         {% set ps = qual_data.project_summary %}
         • <strong>Analysis Level &amp; Coverage:</strong>

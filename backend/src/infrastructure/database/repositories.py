@@ -1,28 +1,49 @@
 import os
 import shutil
+import json
 import logging
-from collections import Counter
+from collections import Counter, defaultdict
 from datetime import datetime
-from typing import List, Optional, Tuple, Set
+from typing import List, Optional, Tuple, Set, Any
+from sqlalchemy import func, desc
 from sqlalchemy.orm import Session, selectinload, joinedload, defer
 from src.domain.entities import ProjectEntity, AuthorEntity, CommitEntity, FileChangeEntity, BranchEntity, CourseEntity
-from src.use_cases.interfaces import IProjectRepository, IAuthorRepository, ICommitRepository, IDatabaseService, ICourseRepository
+from src.use_cases.interfaces import IProjectRepository, IAuthorRepository, ICommitRepository, IDatabaseService, ICourseRepository, ISimilarityRepository
 from src.infrastructure.database.models import (
     ProjectModel, AuthorModel, CommitModel, FileChangeModel, BranchModel, CourseModel, Base,
-    ProjectFingerprintModel, SimilarityReportModel, ComparisonCoverageModel
+    ProjectFingerprintModel, SimilarityReportModel, ComparisonCoverageModel, commit_branches
 )
 from src.infrastructure.database.session import engine, SessionLocal
 from src.domain.constants import (
     DEFAULT_GROUP, DEFAULT_SAMPLING_MODE, EXTENSION_TO_LANGUAGE,
-    SAVED_REPOS_PATH_TEMPLATE, TEMP_REPOS_PATH_TEMPLATE
+    SAVED_REPOS_PATH_TEMPLATE, TEMP_REPOS_PATH_TEMPLATE, normalize_git_url
 )
 
 logger = logging.getLogger(__name__)
 
 def _resolve_canonical_author(db: Session, author_model: AuthorModel) -> Tuple[AuthorModel, List[int]]:
     """
-    Resolves an author to their root canonical parent, returning the root parent
-    and a list of all IDs including the root and all its aliases.
+    [DEAD CODE — RETAINED INTENTIONALLY]
+
+    Resolves an author ORM model to its root canonical parent by walking the
+    canonical_author_id chain, and returns both the root AuthorModel and all
+    alias IDs (root + every alias linked via the `aliases` relationship).
+
+    WHY THIS IS KEPT:
+    - This is the DB-layer (infrastructure) counterpart of `build_canonical_map()`
+      in `src/use_cases/author_utils.py`.
+    - `build_canonical_map()` works through the IAuthorRepository interface (use-case
+      layer) and builds a flat id→root_id dict for a batch of authors.
+    - THIS function works directly with SQLAlchemy ORM objects and additionally
+      returns the full alias ID list via `root.aliases` — a relationship not
+      available through the abstract interface.
+    - If future infrastructure-layer code (e.g., a merge validator, a DB migration
+      script, or a cascade-cleanup job) needs to walk the canonical chain and also
+      resolve the SQLAlchemy `aliases` relationship in one call, use THIS function.
+    - For all use-case-level canonical resolution, use `build_canonical_map()` instead
+      to preserve the Clean Architecture dependency boundary.
+
+    CALLERS: None currently. If still unused after 2 refactor cycles, delete it.
     """
     root = author_model
     visited = {author_model.id}
@@ -32,7 +53,7 @@ def _resolve_canonical_author(db: Session, author_model: AuthorModel) -> Tuple[A
         if not parent:
             break
         root = parent
-    
+
     alias_ids = [alias.id for alias in root.aliases]
     author_ids = [root.id] + alias_ids
     return root, author_ids
@@ -127,11 +148,11 @@ class ProjectRepository(IProjectRepository):
         def_mode = course.default_sampling_mode if (course and course.default_sampling_mode) else DEFAULT_SAMPLING_MODE
         # Initial saved path is empty, updated via update_local_path once ID is flushed/committed
         project_model = ProjectModel(
-            name=name,
-            description=description,
-            git_url=git_url,
+            name=(name or "").replace("\x00", ""),
+            description=description.replace("\x00", "") if description else None,
+            git_url=(git_url or "").replace("\x00", ""),
             local_saved_path="",
-            group_no=group_no,
+            group_no=(group_no or DEFAULT_GROUP).replace("\x00", ""),
             store_local_copy=True,
             is_local_copy_stored=True,
             sampling_mode=def_mode,
@@ -181,6 +202,21 @@ class ProjectRepository(IProjectRepository):
         """
         project_model = self.db.query(ProjectModel).filter(ProjectModel.id == project_id).first()
         return project_model.qualitative_report if project_model else None
+
+    def clear_cloud_report(self, project_id: int) -> None:
+        """Invalidate the cached cloud narrative so the next report generation
+        rebuilds from the latest data.
+
+        The cloud_report is synthesized *from* the qualitative_report, so once a
+        fresh qualitative pass runs (first-time analyze or Re-analyze) the cached
+        cloud narrative is stale and must not be silently reused by the PDF
+        endpoint. Only writes when a cached value actually exists, so a
+        first-time analyze (cloud_report already NULL) incurs no needless commit.
+        """
+        project_model = self.db.query(ProjectModel).filter(ProjectModel.id == project_id).first()
+        if project_model and project_model.cloud_report is not None:
+            project_model.cloud_report = None
+            self.db.commit()
 
     def delete(self, project_id: int) -> bool:
         project_model = self.db.query(ProjectModel).filter(ProjectModel.id == project_id).first()
@@ -296,6 +332,162 @@ class ProjectRepository(IProjectRepository):
             )
             for m in branch_models
         ]
+
+    def get_extended_quantitative_metrics(self, project_id: int, commits: Optional[List[Any]] = None) -> dict:
+        """Extract extended quantitative metrics: branches, similarity reports, AST complexity, timeline peak."""
+        branches_summary = {"total_branches": 0, "top_branches": []}
+        try:
+            results = self.db.query(
+                BranchModel.name,
+                func.count(commit_branches.c.commit_hash).label("commit_count")
+            ).outerjoin(commit_branches, BranchModel.id == commit_branches.c.branch_id)\
+             .filter(BranchModel.project_id == project_id)\
+             .group_by(BranchModel.id, BranchModel.name)\
+             .order_by(desc("commit_count")).all()
+
+            total_b = len(results)
+            top_b = [{"name": r[0], "commits": r[1]} for r in results[:10]]
+            branches_summary = {
+                "total_branches": total_b,
+                "top_branches": top_b
+            }
+        except Exception as e:
+            logger.warning(f"Branch extraction error: {e}")
+
+        plagiarism_summary = {
+            "has_scan": False,
+            "max_similarity_score": 0.0,
+            "matched_project_name": None,
+            "status": "No Scan Performed",
+            "matched_blocks_count": 0
+        }
+        try:
+            reports = self.db.query(SimilarityReportModel).filter(
+                (SimilarityReportModel.project_a_id == project_id) |
+                (SimilarityReportModel.project_b_id == project_id)
+            ).order_by(desc(SimilarityReportModel.similarity_score)).all()
+
+            if reports:
+                top_r = reports[0]
+                partner_id = top_r.project_b_id if top_r.project_a_id == project_id else top_r.project_a_id
+                partner_proj = self.db.query(ProjectModel).filter(ProjectModel.id == partner_id).first()
+                partner_name = partner_proj.name if partner_proj else f"Project #{partner_id}"
+
+                plagiarism_summary = {
+                    "has_scan": True,
+                    "max_similarity_score": round(top_r.similarity_score * 100.0, 1) if top_r.similarity_score <= 1.0 else round(top_r.similarity_score, 1),
+                    "matched_project_name": partner_name,
+                    "status": top_r.status or "Needs Review",
+                    "matched_blocks_count": top_r.matched_hashes_count or 0
+                }
+        except Exception as e:
+            logger.warning(f"Similarity extraction error: {e}")
+
+        ast_complexity_summary = {
+            "avg_complexity_score": 0.0,
+            "total_functions": 0,
+            "squash_suspected_commits": 0
+        }
+        try:
+            ast_res = self.db.query(
+                func.avg(FileChangeModel.complexity_score),
+                func.sum(FileChangeModel.function_count)
+            ).join(CommitModel, FileChangeModel.commit_hash == CommitModel.hash)\
+             .filter(CommitModel.project_id == project_id).first()
+
+            squash_count = self.db.query(func.count(CommitModel.hash)).filter(
+                CommitModel.project_id == project_id,
+                CommitModel.is_squash_suspected == True
+            ).scalar() or 0
+
+            avg_comp = round(float(ast_res[0]), 1) if ast_res and ast_res[0] is not None else 0.0
+            tot_func = int(ast_res[1]) if ast_res and ast_res[1] is not None else 0
+
+            ast_complexity_summary = {
+                "avg_complexity_score": avg_comp,
+                "total_functions": tot_func,
+                "squash_suspected_commits": squash_count
+            }
+        except Exception as e:
+            logger.warning(f"AST complexity error: {e}")
+
+        pacing_summary = {
+            "peak_commit_date": "N/A",
+            "peak_commit_count": 0,
+            "avg_commits_per_active_day": 0.0,
+            "project_span_days": 0,
+            "active_days_count": 0
+        }
+        try:
+            if commits:
+                daily_counts = {}
+                for c in commits:
+                    ts = getattr(c, "timestamp", None)
+                    if ts:
+                        d_str = ts.strftime("%Y-%m-%d")
+                        daily_counts[d_str] = daily_counts.get(d_str, 0) + 1
+                if daily_counts:
+                    peak_date = max(daily_counts, key=daily_counts.get)
+                    peak_val = daily_counts[peak_date]
+                    avg_val = round(sum(daily_counts.values()) / len(daily_counts), 1)
+
+                    timestamps = [getattr(c, "timestamp", None) for c in commits if getattr(c, "timestamp", None)]
+                    project_span_days = 0
+                    if timestamps:
+                        start_date = min(timestamps)
+                        end_date = max(timestamps)
+                        project_span_days = (end_date.date() - start_date.date()).days + 1
+
+                    pacing_summary = {
+                        "peak_commit_date": peak_date,
+                        "peak_commit_count": peak_val,
+                        "avg_commits_per_active_day": avg_val,
+                        "project_span_days": project_span_days,
+                        "active_days_count": len(daily_counts)
+                    }
+        except Exception as e:
+            logger.exception(f"Pacing summary extraction failed: {e}")
+
+        return {
+            "branches_summary": branches_summary,
+            "plagiarism_summary": plagiarism_summary,
+            "ast_complexity_summary": ast_complexity_summary,
+            "pacing_summary": pacing_summary
+        }
+
+    def get_course_deadline(self, project_id: int) -> Optional[datetime]:
+        project = self.db.query(ProjectModel).filter(ProjectModel.id == project_id).first()
+        if project and project.course_id:
+            course = self.db.query(CourseModel).filter(CourseModel.id == project.course_id).first()
+            if course and course.deadline:
+                return course.deadline
+        return None
+
+    def validate_new_project(self, course_id: int, name: str, git_url: str, group_no: Optional[str] = None) -> Optional[str]:
+        if group_no and group_no.strip():
+            existing_group = self.db.query(ProjectModel).filter(
+                ProjectModel.course_id == course_id,
+                func.lower(ProjectModel.group_no) == group_no.strip().lower()
+            ).first()
+            if existing_group:
+                return f"Group No / Tag '{group_no.strip()}' already exists in this course."
+
+        if git_url and git_url.strip():
+            clean_url = normalize_git_url(git_url)
+            course_projects = self.db.query(ProjectModel).filter(ProjectModel.course_id == course_id).all()
+            for p in course_projects:
+                if p.git_url and normalize_git_url(p.git_url) == clean_url:
+                    return f"Repository URL '{git_url.strip()}' is already imported in this course."
+
+        if name and name.strip():
+            existing_name = self.db.query(ProjectModel).filter(
+                ProjectModel.course_id == course_id,
+                func.lower(ProjectModel.name) == name.strip().lower()
+            ).first()
+            if existing_name:
+                return f"Project name '{name.strip()}' already exists in this course."
+        return None
+
 
 
 class AuthorRepository(IAuthorRepository):
@@ -417,6 +609,29 @@ class AuthorRepository(IAuthorRepository):
             )
             for r in resolved_authors.values()
         ]
+
+    def get_project_canonical_map(self, project_id: int) -> dict:
+        """Map every raw author id tied to the project (including merged aliases)
+        to its canonical root id.
+
+        Merging only sets canonical_author_id; it does not reassign commits or
+        regenerate cached reports. Callers use this live map to hide identity
+        anomaly / "needs merge" suggestions for accounts an educator has already
+        merged."""
+        author_models = (
+            self.db.query(AuthorModel)
+            .join(CommitModel)
+            .filter(CommitModel.project_id == project_id)
+            .distinct()
+            .all()
+        )
+        mapping = {}
+        for m in author_models:
+            root, author_ids = _resolve_canonical_author(self.db, m)
+            for aid in author_ids:
+                mapping[aid] = root.id
+            mapping[m.id] = root.id
+        return mapping
 
     def get_by_project_id_and_branch(self, project_id: int, branch: str) -> List[AuthorEntity]:
         # Query all authors who have committed to the project on a specific branch
@@ -581,6 +796,29 @@ class CommitRepository(ICommitRepository):
             for m in commit_models
         ]
 
+    def get_raw_contributor_file_change_stats(self, project_id: int) -> List[tuple]:
+        return (
+            self.db.query(
+                FileChangeModel.filename,
+                CommitModel.author_id,
+                func.count(FileChangeModel.id),
+                func.sum(func.coalesce(FileChangeModel.complexity_score, 0)),
+                func.sum(func.coalesce(FileChangeModel.function_count, 0)),
+            )
+            .join(CommitModel, FileChangeModel.commit_hash == CommitModel.hash)
+            .filter(CommitModel.project_id == project_id)
+            .group_by(FileChangeModel.filename, CommitModel.author_id)
+            .all()
+        )
+
+    def get_file_change_author_pairs(self, project_id: int) -> List[tuple]:
+        return (
+            self.db.query(FileChangeModel.filename, CommitModel.author_id)
+            .join(CommitModel)
+            .filter(CommitModel.project_id == project_id)
+            .all()
+        )
+
 class DatabaseService(IDatabaseService):
     def __init__(self, db: Optional[Session] = None):
         self.db = db
@@ -726,3 +964,229 @@ class CourseRepository(ICourseRepository):
             )
             for m in project_models
         ]
+
+
+class SimilarityRepository(ISimilarityRepository):
+    def __init__(self, db: Session):
+        self.db = db
+
+    def get_course(self, course_id: int) -> Optional[CourseEntity]:
+        m = self.db.query(CourseModel).filter(CourseModel.id == course_id).first()
+        if not m:
+            return None
+        return CourseEntity(id=m.id, name=m.name, user_id=m.user_id)
+
+    def get_course_projects(self, course_id: int) -> List[ProjectEntity]:
+        project_models = self.db.query(ProjectModel).filter(ProjectModel.course_id == course_id).all()
+        return [
+            ProjectEntity(
+                id=m.id,
+                name=m.name,
+                git_url=m.git_url,
+                local_saved_path=m.local_saved_path,
+                group_no=m.group_no or DEFAULT_GROUP,
+                course_id=m.course_id
+            )
+            for m in project_models
+        ]
+
+    def save_project_fingerprints(self, project_id: int, fingerprints: List[Any]) -> None:
+        self.db.query(ProjectFingerprintModel).filter(
+            ProjectFingerprintModel.project_id == project_id
+        ).delete(synchronize_session=False)
+        if fingerprints:
+            db_fps = []
+            for fp in fingerprints:
+                db_fps.append(ProjectFingerprintModel(
+                    project_id=project_id,
+                    file_path=(fp.file_path or "").replace("\x00", ""),
+                    hash_value=getattr(fp, 'hash_value', getattr(fp, 'hash_val', 0)),
+                    line_number=getattr(fp, 'line_number', getattr(fp, 'line_no', 0)),
+                ))
+            self.db.bulk_save_objects(db_fps)
+        self.db.commit()
+
+    def get_existing_reports(self, course_id: int) -> List[Any]:
+        return self.db.query(SimilarityReportModel).filter(SimilarityReportModel.course_id == course_id).all()
+
+    def clear_course_reports(self, course_id: int) -> None:
+        self.db.query(SimilarityReportModel).filter(SimilarityReportModel.course_id == course_id).delete(synchronize_session=False)
+        self.db.commit()
+
+    def save_similarity_reports(self, course_id: int, reports: List[dict]) -> List[Any]:
+        existing_reports = self.db.query(SimilarityReportModel).filter(
+            SimilarityReportModel.course_id == course_id
+        ).all()
+        status_map = {
+            (r.project_a_id, r.project_b_id): getattr(r, "status", "Needs Review")
+            for r in existing_reports
+            if getattr(r, "status", None)
+        }
+        self.db.query(SimilarityReportModel).filter(
+            SimilarityReportModel.course_id == course_id
+        ).delete(synchronize_session=False)
+
+        created_reports = []
+        for rep in reports:
+            pair_key = (rep["project_a_id"], rep["project_b_id"])
+            rev_pair_key = (rep["project_b_id"], rep["project_a_id"])
+            saved_status = status_map.get(pair_key, status_map.get(rev_pair_key))
+            status = saved_status or rep.get("status", "Needs Review")
+            matched_blocks_json = json.dumps(rep.get("matched_blocks", [])).replace("\x00", "")
+
+            obj = SimilarityReportModel(
+                course_id=course_id,
+                project_a_id=rep["project_a_id"],
+                project_b_id=rep["project_b_id"],
+                similarity_score=rep.get("similarity_score", 0.0),
+                matched_hashes_count=rep.get("matched_hashes_count", 0),
+                matched_blocks_json=matched_blocks_json,
+                status=status,
+            )
+            self.db.add(obj)
+            self.db.flush()
+            rep["id"] = obj.id
+            rep["status"] = status
+            created_reports.append(obj)
+        self.db.commit()
+        return created_reports
+
+    def get_course_reports(self, course_id: int, min_similarity: Optional[float] = None) -> List[Any]:
+        q = self.db.query(SimilarityReportModel).filter(SimilarityReportModel.course_id == course_id)
+        if min_similarity is not None:
+            q = q.filter(SimilarityReportModel.similarity_score >= min_similarity)
+        return q.order_by(SimilarityReportModel.similarity_score.desc()).all()
+
+    def update_comparison_coverage(self, course_id: int, projects: List[Any], reports: List[Any]) -> None:
+        total_projects = len(projects)
+        required_per_proj = max(0, total_projects - 1)
+        completed_pairs = set()
+        for r in reports:
+            p_a = getattr(r, "project_a_id", None)
+            p_b = getattr(r, "project_b_id", None)
+            if p_a is not None and p_b is not None:
+                completed_pairs.add((min(p_a, p_b), max(p_a, p_b)))
+
+        for p in projects:
+            comp_count = sum(
+                1 for other in projects
+                if other.id != p.id and (min(p.id, other.id), max(p.id, other.id)) in completed_pairs
+            )
+            status_str = "completed" if comp_count >= required_per_proj else ("in_progress" if comp_count > 0 else "pending")
+            cov = self.db.query(ComparisonCoverageModel).filter(ComparisonCoverageModel.project_id == p.id).first()
+            if not cov:
+                cov = ComparisonCoverageModel(
+                    course_id=course_id,
+                    project_id=p.id,
+                    total_required_comparisons=required_per_proj,
+                    completed_comparisons=comp_count,
+                    status=status_str,
+                )
+                self.db.add(cov)
+            else:
+                cov.total_required_comparisons = required_per_proj
+                cov.completed_comparisons = comp_count
+                cov.status = status_str
+        self.db.commit()
+
+    def get_comparison_coverage(self, course_id: int) -> List[dict]:
+        projects = self.get_course_projects(course_id)
+        proj_map = {p.id: p.name for p in projects}
+        coverage_rows = self.db.query(ComparisonCoverageModel).filter(ComparisonCoverageModel.course_id == course_id).all()
+        output_rows = []
+        for r in coverage_rows:
+            output_rows.append({
+                "project_id": r.project_id,
+                "project_name": proj_map.get(r.project_id, f"Project #{r.project_id}"),
+                "total_required": r.total_required_comparisons,
+                "completed": r.completed_comparisons,
+                "status": r.status,
+                "last_updated": r.last_updated.isoformat() if r.last_updated else None,
+            })
+        return output_rows
+
+    def get_project_plagiarism_detail(self, project_id: int) -> dict:
+        project = self.db.query(ProjectModel).filter(ProjectModel.id == project_id).first()
+        if not project or not project.course_id:
+            return {
+                "scanned": False,
+                "has_findings": False,
+                "max_similarity_score": 0.0,
+                "total_matches": 0,
+                "matches": [],
+                "cluster": None,
+            }
+        from src.use_cases.detect_similarity import get_course_similarity_reports
+        from src.domain.constants import RESOLVED_PLAGIARISM_STATUSES
+        course_data = get_course_similarity_reports(self, project.course_id)
+        all_reports = course_data.get("reports", [])
+        clusters = course_data.get("clusters", [])
+
+        project_reports = [
+            r for r in all_reports
+            if r.get("project_a_id") == project_id or r.get("project_b_id") == project_id
+        ]
+        scanned = len(project_reports) > 0
+        matches = []
+        for r in project_reports:
+            status = (r.get("status") or "").strip()
+            if status.lower() in RESOLVED_PLAGIARISM_STATUSES:
+                continue
+
+            is_a = (r.get("project_a_id") == project_id)
+            partner_name = r.get("project_b_name") if is_a else r.get("project_a_name")
+            top_files = []
+            for b in (r.get("matched_blocks") or [])[:5]:
+                this_file = b.get("file_a") if is_a else b.get("file_b")
+                partner_file = b.get("file_b") if is_a else b.get("file_a")
+                this_start = b.get("line_a") if is_a else b.get("line_b")
+                this_end = b.get("end_line_a") if is_a else b.get("end_line_b")
+                partner_start = b.get("line_b") if is_a else b.get("line_a")
+                partner_end = b.get("end_line_b") if is_a else b.get("end_line_a")
+                top_files.append({
+                    "this_file": this_file or "?",
+                    "this_lines": f"{this_start}-{this_end}" if this_start is not None else "",
+                    "partner_file": partner_file or "?",
+                    "partner_lines": f"{partner_start}-{partner_end}" if partner_start is not None else "",
+                    "token_span": b.get("token_span", 0),
+                    "ident_overlap": b.get("ident_overlap", 100.0),
+                })
+
+            matches.append({
+                "partner_project_name": partner_name or "Unknown Project",
+                "similarity_score": r.get("file_match_percentage", r.get("similarity_score", 0)),
+                "identifier_overlap_percentage": r.get("identifier_overlap_percentage", 100.0),
+                "confidence_level": r.get("confidence_level", "MEDIUM"),
+                "status": status or "Needs Review",
+                "matched_blocks_count": r.get("matched_hashes_count", 0),
+                "total_match_runs": r.get("total_match_runs", len(r.get("matched_blocks", []))),
+                "max_contiguous_run_tokens": r.get("max_contiguous_run_tokens", 0),
+                "top_files": top_files,
+            })
+
+        matches.sort(key=lambda m: m["similarity_score"], reverse=True)
+        has_findings = len(matches) > 0
+        max_score = round(max((m["similarity_score"] for m in matches), default=0.0), 1)
+
+        cluster_info = None
+        if has_findings:
+            for c in clusters:
+                if project_id in (c.get("project_ids") or []):
+                    members = c.get("projects", [])
+                    is_origin = any(m.get("id") == project_id and m.get("is_probable_origin") for m in members)
+                    cluster_info = {
+                        "member_count": c.get("member_count", len(members)),
+                        "avg_similarity_score": c.get("avg_similarity_score", 0.0),
+                        "is_probable_origin": is_origin,
+                    }
+                    break
+
+        return {
+            "scanned": scanned,
+            "has_findings": has_findings,
+            "max_similarity_score": max_score,
+            "total_matches": len(matches),
+            "matches": matches,
+            "cluster": cluster_info,
+        }
+

@@ -103,18 +103,28 @@ body {
   margin: 0 auto;
 }
 
-/* Typography */
+/* Typography & Unified Page Headers */
+.view-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+
 h1 {
-  font-size: 1.75rem;
-  font-weight: 600;
+  font-size: 1.85rem;
+  font-weight: 700;
   color: var(--text-main);
-  letter-spacing: -0.02em;
+  letter-spacing: -0.025em;
+  line-height: 1.2;
 }
 
 p.subtitle {
   color: var(--text-muted);
-  font-size: 0.95rem;
-  margin-top: 4px;
+  font-size: 0.92rem;
+  margin-top: 5px;
+  line-height: 1.4;
 }
 
 /* Buttons */
@@ -171,6 +181,15 @@ p.subtitle {
 
 .btn-danger:hover {
   background-color: #dc2626;
+}
+
+.btn-sm {
+  padding: 0 12px;
+  height: 32px;
+  font-size: 0.82rem;
+  gap: 6px;
+  border-radius: var(--radius-sm);
+  box-sizing: border-box;
 }
 
 /* Card UI component */

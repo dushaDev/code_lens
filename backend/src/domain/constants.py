@@ -18,6 +18,12 @@ MAX_REPO_SIZE_BYTES = 50 * 1024 * 1024  # 50 MB cap on the cloned working tree
 # Passed per-subprocess via GIT_ALLOW_PROTOCOL, never mutated into os.environ.
 GIT_ALLOWED_PROTOCOLS = "https"
 
+
+def normalize_git_url(url: str) -> str:
+    """Normalize git repository URL for case-insensitive and suffix-insensitive comparison."""
+    return (url or "").strip().rstrip("/").removesuffix(".git").lower()
+
+
 # Security
 PBKDF2_ITERATIONS = 100000
 
@@ -52,3 +58,17 @@ EXTENSION_TO_LANGUAGE = {
     '.sql': 'SQL',
     '.sh': 'Shell'
 }
+
+HIGH_CONFIDENCE_THRESHOLD = 60.0
+
+# Plagiarism review statuses that an educator has explicitly cleared.
+# Pairs with these statuses are NOT surfaced as active warnings in the UI,
+# AI prompt, or PDF report. Keep this frozenset as the single source of truth —
+# import it from here in all consumers (detect_similarity, get_cloud_report, etc.).
+RESOLVED_PLAGIARISM_STATUSES: frozenset = frozenset({
+    "resolved",
+    "dismissed",
+    "verified clean",
+    "clean",
+    "no match",
+})

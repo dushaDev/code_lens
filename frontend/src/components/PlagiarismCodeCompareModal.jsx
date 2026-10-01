@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { X, AlertOctagon, FileCode, ArrowRight, CornerDownRight, CheckCircle2 } from 'lucide-react';
+import { apiFetch } from '../api/client';
 import './PlagiarismCodeCompareModal.css';
 
-export default function PlagiarismCodeCompareModal({ alert, onClose }) {
-  const [selectedBlockIdx, setSelectedBlockIdx] = useState(0);
+export default function PlagiarismCodeCompareModal({ alert, initialBlockIdx = 0, onClose }) {
+  const [selectedBlockIdx, setSelectedBlockIdx] = useState(initialBlockIdx || 0);
   const [fileAContent, setFileAContent] = useState('');
   const [fileBContent, setFileBContent] = useState('');
   const [loadingA, setLoadingA] = useState(true);
@@ -39,11 +40,7 @@ export default function PlagiarismCodeCompareModal({ alert, onClose }) {
     setLoadingA(true);
     setErrorA(null);
 
-    const token = localStorage.getItem('token');
-    // TODO: migrate to apiFetch
-    fetch(`/api/v1/projects/${projectAId}/files/content?file_path=${encodeURIComponent(fileA)}`, {
-      headers: { 'Authorization': `Bearer ${token}` }
-    })
+    apiFetch(`/api/v1/projects/${projectAId}/files/content?file_path=${encodeURIComponent(fileA)}`)
       .then(res => {
         if (!res.ok) throw new Error('File not found in Project A repo');
         return res.json();
@@ -63,11 +60,7 @@ export default function PlagiarismCodeCompareModal({ alert, onClose }) {
     setLoadingB(true);
     setErrorB(null);
 
-    const token = localStorage.getItem('token');
-    // TODO: migrate to apiFetch
-    fetch(`/api/v1/projects/${projectBId}/files/content?file_path=${encodeURIComponent(fileB)}`, {
-      headers: { 'Authorization': `Bearer ${token}` }
-    })
+    apiFetch(`/api/v1/projects/${projectBId}/files/content?file_path=${encodeURIComponent(fileB)}`)
       .then(res => {
         if (!res.ok) throw new Error('File not found in Project B repo');
         return res.json();
@@ -135,9 +128,7 @@ export default function PlagiarismCodeCompareModal({ alert, onClose }) {
               <AlertOctagon size={20} style={{ color: '#ef4444' }} />
               <span>Code Review</span>
             </h3>
-            <span style={{ backgroundColor: 'rgba(239,68,68,0.15)', color: '#ef4444', padding: '4px 10px', borderRadius: '4px', fontSize: '0.82rem', fontWeight: '600' }}>
-              {alert?.percentage || 0}% Overlap
-            </span>
+         
 
         
           </div>

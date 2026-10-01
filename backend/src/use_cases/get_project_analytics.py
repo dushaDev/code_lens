@@ -1,5 +1,7 @@
 from typing import List, Dict, Any
 from src.use_cases.interfaces import IProjectRepository, IAuthorRepository, ICommitRepository
+from src.use_cases.author_utils import build_canonical_map
+from src.domain.identity_signals import is_bot_identity
 from src.domain.metrics import calculate_gini, get_gini_status
 
 class GetProjectAnalyticsUseCase:
@@ -20,25 +22,15 @@ class GetProjectAnalyticsUseCase:
 
         # 1. Fetch all authors and commits for the project
         authors = self.author_repo.get_by_project_id(project_id)
+        # Exclude GitHub bot accounts — they are not students and skew Gini/percentages
+        authors = [a for a in authors if not is_bot_identity(a.name, a.email)]
         commits = self.commit_repo.get_by_project_id(project_id)
 
         total_commits = len(commits)
         total_insertions = sum(c.insertions for c in commits)
 
-        # Resolve each commit's author_id to its canonical root id (caching results)
-        canonical_id_map = {}
-        for c in commits:
-            author_id = c.author_id
-            if author_id not in canonical_id_map:
-                curr_id = author_id
-                visited = set()
-                while curr_id is not None and curr_id not in visited:
-                    visited.add(curr_id)
-                    author = self.author_repo.get_by_id(curr_id)
-                    if not author or author.canonical_author_id is None:
-                        break
-                    curr_id = author.canonical_author_id
-                canonical_id_map[author_id] = curr_id or author_id
+        # Resolve each author_id to its canonical root id
+        canonical_id_map = build_canonical_map(self.author_repo, authors)
 
         # Initialize tracking maps for authors
         contributions_map = {
@@ -75,9 +67,9 @@ class GetProjectAnalyticsUseCase:
         # Sort contributions descending by lines added
         contributions_list.sort(key=lambda x: x["lines_added"], reverse=True)
 
-        # 4. Calculate Gini Coefficient using central domain metric
-        lines_list = [contrib["lines_added"] for contrib in contributions_list]
-        gini = calculate_gini(lines_list)
+        # 4. Calculate Gini Coefficient using commit count (consistent with qualitative analysis)
+        commit_count_list = [contrib["commit_count"] for contrib in contributions_list]
+        gini = calculate_gini(commit_count_list)
 
         # 5. Determine distribution status / risk category
         status = get_gini_status(gini)

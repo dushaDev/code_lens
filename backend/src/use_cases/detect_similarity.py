@@ -6,33 +6,23 @@ storing them in the database, performing inverted index pairwise matching,
 and generating similarity reports.
 """
 
-from datetime import datetime
+import os
 import json
 import logging
-from typing import Dict, List, Optional, Tuple
+from datetime import datetime
+from typing import Dict, List, Optional, Tuple, Any
 from collections import defaultdict
 
-from sqlalchemy.orm import Session
-from src.infrastructure.database.models import (
-    CourseModel,
-    ProjectFingerprintModel,
-    ProjectModel,
-    SimilarityReportModel,
-    ComparisonCoverageModel,
-)
-from src.infrastructure.services.winnowing_engine import (
-    AstParserService,
-    FileCollector,
-    Fingerprint,
-    SimilarityComparator,
-    WinnowingService,
-)
+from src.domain.constants import HIGH_CONFIDENCE_THRESHOLD, RESOLVED_PLAGIARISM_STATUSES
+from src.domain.entities import FingerprintEntity
+from src.use_cases.interfaces import ISimilarityRepository, ISimilarityEngine
 
 logger = logging.getLogger(__name__)
 
 
 def analyze_course_similarity(
-    db: Session,
+    repo: ISimilarityRepository,
+    engine: ISimilarityEngine,
     course_id: int,
     k: int = 5,
     w: int = 4,
@@ -40,11 +30,11 @@ def analyze_course_similarity(
     allowed_extensions: Optional[List[str]] = None,
 ) -> Dict:
     """Runs the 10-step Winnowing AST similarity analysis across all projects in a course."""
-    course = db.query(CourseModel).filter(CourseModel.id == course_id).first()
+    course = repo.get_course(course_id)
     if not course:
         raise ValueError(f"Course with ID {course_id} not found.")
 
-    projects = db.query(ProjectModel).filter(ProjectModel.course_id == course_id).all()
+    projects = repo.get_course_projects(course_id)
     if len(projects) < 2:
         return {
             "status": "warning",
@@ -53,128 +43,56 @@ def analyze_course_similarity(
             "reports": [],
         }
 
-    ext_set = set(allowed_extensions) if allowed_extensions else None
-    collector = FileCollector(allowed_extensions=ext_set)
-    parser = AstParserService()
-    winnowing = WinnowingService(k=k, w=w)
-
-    project_fingerprints_map: Dict[int, List[Fingerprint]] = {}
+    project_fingerprints_map: Dict[int, List[Any]] = {}
 
     # STEP 1 - STEP 7: Process each project
     for project in projects:
-        project_dir = project.local_saved_path
-        file_paths = collector.collect_files(project_dir)
-
-        project_tokens = []
-        for rel_file in file_paths:
-            full_path = f"{project_dir}/{rel_file}" if not project_dir.endswith("/") else f"{project_dir}{rel_file}"
-            file_tokens = parser.parse_file(full_path, rel_file)
-            project_tokens.extend(file_tokens)
-
-        # Generate Winnowing fingerprints
-        fingerprints = winnowing.generate_fingerprints(project_tokens)
+        project_dir = getattr(project, "local_saved_path", None)
+        fingerprints = engine.extract_project_fingerprints(
+            project_dir=project_dir,
+            k=k,
+            w=w,
+            allowed_extensions=allowed_extensions,
+        )
         project_fingerprints_map[project.id] = fingerprints
 
-    # STEP 8: Store fingerprints in DB
-    project_ids = [p.id for p in projects]
-
-    db_fingerprints = []
+    # STEP 8: Store fingerprints via repository
     for proj_id, fp_list in project_fingerprints_map.items():
-        for fp in fp_list:
-            db_fingerprints.append(
-                ProjectFingerprintModel(
-                    project_id=proj_id,
-                    hash_value=fp.hash_value,
-                    file_path=fp.file_path,
-                    line_number=fp.line_number,
-                )
-            )
-
-    # Clear existing fingerprints for these projects, then persist fresh ones as a
-    # single transaction: roll back and re-raise on any failure so the session is
-    # never left dirty for the caller.
-    try:
-        db.query(ProjectFingerprintModel).filter(
-            ProjectFingerprintModel.project_id.in_(project_ids)
-        ).delete(synchronize_session=False)
-        if db_fingerprints:
-            db.bulk_save_objects(db_fingerprints)
-        db.commit()
-    except Exception:
-        db.rollback()
-        logger.exception("Failed to persist fingerprints for course %s", course_id)
-        raise
+        repo.save_project_fingerprints(proj_id, fp_list)
 
     # STEP 9 & STEP 10: Inverted index pairwise similarity comparison & reporting
-    comparator = SimilarityComparator(file_match_threshold=similarity_threshold)
-    raw_reports = comparator.compute_pairwise_similarity(project_fingerprints_map)
-
-    # Capture existing status map before clear
-    existing_reports = db.query(SimilarityReportModel).filter(SimilarityReportModel.course_id == course_id).all()
-    status_map = {(r.project_a_id, r.project_b_id): getattr(r, "status", "Needs Review") for r in existing_reports if getattr(r, "status", None)}
-
-    # Clear existing similarity reports for this course
-    db.query(SimilarityReportModel).filter(SimilarityReportModel.course_id == course_id).delete(
-        synchronize_session=False
+    raw_reports = engine.compute_pairwise_similarity(
+        project_fingerprints_map,
+        similarity_threshold=similarity_threshold,
+        k=k,
     )
 
-    db_reports = []
-    response_reports = []
-
-    # Map project IDs to names for clean response
+    # Replace similarity reports for course via repository
+    saved_reports = repo.save_similarity_reports(course_id, raw_reports)
     project_name_map = {p.id: p.name for p in projects}
 
-    # Replace this course's similarity reports as a single transaction: clear the old
-    # rows, insert the freshly computed ones, and commit together. Roll back and
-    # re-raise on any failure so a partial rewrite is never left committed.
-    try:
-        # Clear existing similarity reports for this course
-        db.query(SimilarityReportModel).filter(SimilarityReportModel.course_id == course_id).delete(
-            synchronize_session=False
-        )
-
-        for r in raw_reports:
-            matched_blocks_json = json.dumps(r["matched_blocks"])
-            pair_key = (r["project_a_id"], r["project_b_id"])
-            prev_status = status_map.get(pair_key, "Needs Review")
-
-            report_obj = SimilarityReportModel(
-                course_id=course_id,
-                project_a_id=r["project_a_id"],
-                project_b_id=r["project_b_id"],
-                similarity_score=r["similarity_score"],
-                matched_hashes_count=r["matched_hashes_count"],
-                matched_blocks_json=matched_blocks_json,
-                status=prev_status,
-            )
-            db.add(report_obj)
-            db.flush() # Populates report_obj.id
-
-            response_reports.append({
-                "report_id": report_obj.id,
-                "project_a_id": r["project_a_id"],
-                "project_a_name": project_name_map.get(r["project_a_id"], "Unknown"),
-                "project_b_id": r["project_b_id"],
-                "project_b_name": project_name_map.get(r["project_b_id"], "Unknown"),
-                "similarity_score": r["similarity_score"],
-                "file_match_percentage": r.get("file_match_percentage", r["similarity_score"]),
-                "identifier_overlap_percentage": r.get("identifier_overlap_percentage", 100.0),
-                "matched_hashes_count": r["matched_hashes_count"],
-                "total_match_runs": r.get("total_match_runs", len(r["matched_blocks"])),
-                "max_contiguous_run_tokens": r.get("max_contiguous_run_tokens", 0),
-                "confidence_level": r["confidence_level"],
-                "matched_blocks": r["matched_blocks"],
-                "status": prev_status,
-            })
-
-        db.commit()
-    except Exception:
-        db.rollback()
-        logger.exception("Failed to persist similarity reports for course %s", course_id)
-        raise
+    response_reports = []
+    for r in raw_reports:
+        response_reports.append({
+            "report_id": r.get("id"),
+            "project_a_id": r["project_a_id"],
+            "project_a_name": project_name_map.get(r["project_a_id"], "Unknown"),
+            "project_b_id": r["project_b_id"],
+            "project_b_name": project_name_map.get(r["project_b_id"], "Unknown"),
+            "similarity_score": r["similarity_score"],
+            "file_match_percentage": r.get("file_match_percentage", r["similarity_score"]),
+            "identifier_overlap_percentage": r.get("identifier_overlap_percentage", 100.0),
+            "matched_hashes_count": r["matched_hashes_count"],
+            "total_matched_tokens": r.get("total_matched_tokens", r["matched_hashes_count"] * k),
+            "total_match_runs": r.get("total_match_runs", len(r["matched_blocks"])),
+            "max_contiguous_run_tokens": r.get("max_contiguous_run_tokens", 0),
+            "confidence_level": r["confidence_level"],
+            "matched_blocks": r["matched_blocks"],
+            "status": r.get("status", "Needs Review"),
+        })
 
     clusters, additional_reports = detect_similarity_clusters(
-        response_reports, project_name_map, project_fingerprints_map, comparator
+        response_reports, project_name_map, project_fingerprints_map, engine
     )
 
     if additional_reports:
@@ -223,8 +141,8 @@ class DisjointSetUnion:
 def detect_similarity_clusters(
     reports: List[Dict],
     project_name_map: Dict[int, str],
-    project_fingerprints: Optional[Dict[int, List[Fingerprint]]] = None,
-    comparator: Optional[SimilarityComparator] = None,
+    project_fingerprints: Optional[Dict[int, List[Any]]] = None,
+    comparator: Optional[Any] = None,
     project_time_map: Optional[Dict[int, datetime]] = None,
 ) -> Tuple[List[Dict], List[Dict]]:
     """
@@ -319,118 +237,74 @@ def detect_similarity_clusters(
     return clusters, additional_reports
 
 
-def sync_project_comparison_coverage(db: Session, course_id: int):
+def sync_project_comparison_coverage(repo: ISimilarityRepository, course_id: int):
     """
     Ensures complete pairwise comparison coverage for all projects in a course.
     Updates the comparison_coverage table to reflect required vs completed comparisons.
     """
-    projects = db.query(ProjectModel).filter(ProjectModel.course_id == course_id).all()
-    total_projects = len(projects)
-    required_per_proj = max(0, total_projects - 1)
-
-    reports = db.query(SimilarityReportModel).filter(SimilarityReportModel.course_id == course_id).all()
-    completed_pairs = set()
-    for r in reports:
-        completed_pairs.add((min(r.project_a_id, r.project_b_id), max(r.project_a_id, r.project_b_id)))
-
-    # Upsert coverage rows for every project and commit as one unit; roll back and
-    # re-raise on failure so the coverage table is never left partially updated.
-    try:
-        for p in projects:
-            comp_count = sum(1 for other in projects if other.id != p.id and (min(p.id, other.id), max(p.id, other.id)) in completed_pairs)
-            cov = db.query(ComparisonCoverageModel).filter(ComparisonCoverageModel.project_id == p.id).first()
-            status_str = "completed" if comp_count >= required_per_proj else ("in_progress" if comp_count > 0 else "pending")
-
-            if not cov:
-                cov = ComparisonCoverageModel(
-                    course_id=course_id,
-                    project_id=p.id,
-                    total_required_comparisons=required_per_proj,
-                    completed_comparisons=comp_count,
-                    status=status_str,
-                )
-                db.add(cov)
-            else:
-                cov.total_required_comparisons = required_per_proj
-                cov.completed_comparisons = comp_count
-                cov.status = status_str
-
-        db.commit()
-    except Exception:
-        db.rollback()
-        logger.exception("Failed to sync comparison coverage for course %s", course_id)
-        raise
+    projects = repo.get_course_projects(course_id)
+    reports = repo.get_existing_reports(course_id)
+    repo.update_comparison_coverage(course_id, projects, reports)
 
 
-def get_course_comparison_coverage(db: Session, course_id: int) -> Dict:
+def get_course_comparison_coverage(repo: ISimilarityRepository, course_id: int) -> Dict:
     """Retrieves pairwise comparison coverage metrics for administrative visibility."""
-    sync_project_comparison_coverage(db, course_id)
+    sync_project_comparison_coverage(repo, course_id)
 
-    projects = db.query(ProjectModel).filter(ProjectModel.course_id == course_id).all()
-    proj_map = {p.id: p.name for p in projects}
-
-    coverage_rows = db.query(ComparisonCoverageModel).filter(ComparisonCoverageModel.course_id == course_id).all()
-
-    incomplete_count = sum(1 for r in coverage_rows if r.completed_comparisons < r.total_required_comparisons)
-
-    output_rows = []
-    for r in coverage_rows:
-        output_rows.append({
-            "project_id": r.project_id,
-            "project_name": proj_map.get(r.project_id, f"Project #{r.project_id}"),
-            "total_required": r.total_required_comparisons,
-            "completed": r.completed_comparisons,
-            "status": r.status,
-            "last_updated": r.last_updated.isoformat() if r.last_updated else None,
-        })
+    coverage_rows = repo.get_comparison_coverage(course_id)
+    incomplete_count = sum(1 for r in coverage_rows if r.get("status") not in ("complete", "completed"))
 
     return {
         "course_id": course_id,
-        "total_projects": len(projects),
+        "total_projects": len(coverage_rows),
         "incomplete_count": incomplete_count,
         "is_complete_coverage": (incomplete_count == 0),
-        "coverage_details": output_rows,
+        "coverage_details": coverage_rows,
     }
 
 
-def get_course_similarity_reports(db: Session, course_id: int) -> Dict:
+def get_course_similarity_reports(repo: ISimilarityRepository, course_id: int) -> Dict:
     """Retrieves stored similarity reports and multi-project clusters for a course."""
-    projects = db.query(ProjectModel).filter(ProjectModel.course_id == course_id).all()
+    projects = repo.get_course_projects(course_id)
     project_name_map = {p.id: p.name for p in projects}
-    project_time_map = {p.id: p.created_at for p in projects}
+    project_time_map = {p.id: getattr(p, "created_at", None) for p in projects}
 
-    reports = db.query(SimilarityReportModel).filter(SimilarityReportModel.course_id == course_id).order_by(
-        SimilarityReportModel.similarity_score.desc()
-    ).all()
+    reports = repo.get_course_reports(course_id)
 
     output = []
     for r in reports:
-        blocks = json.loads(r.matched_blocks_json) if r.matched_blocks_json else []
+        blocks_raw = getattr(r, "matched_blocks", None) or getattr(r, "matched_blocks_json", None)
+        blocks = json.loads(blocks_raw) if isinstance(blocks_raw, str) else (blocks_raw or [])
         max_run_tokens = max([b.get("token_span", 0) for b in blocks], default=0)
         ident_overlaps = [b.get("ident_overlap", 100.0) for b in blocks if "ident_overlap" in b]
         avg_ident_overlap = round(sum(ident_overlaps) / len(ident_overlaps), 1) if ident_overlaps else 100.0
+
+        p_a = getattr(r, "project_a", None)
+        p_b = getattr(r, "project_b", None)
+        p_a_name = p_a.name if p_a else project_name_map.get(r.project_a_id, f"Project #{r.project_a_id}")
+        p_b_name = p_b.name if p_b else project_name_map.get(r.project_b_id, f"Project #{r.project_b_id}")
 
         output.append({
             "report_id": r.id,
             "course_id": r.course_id,
             "project_a_id": r.project_a_id,
-            "project_a_name": r.project_a.name if r.project_a else project_name_map.get(r.project_a_id, f"Project #{r.project_a_id}"),
+            "project_a_name": p_a_name,
             "project_b_id": r.project_b_id,
-            "project_b_name": r.project_b.name if r.project_b else project_name_map.get(r.project_b_id, f"Project #{r.project_b_id}"),
+            "project_b_name": p_b_name,
             "similarity_score": r.similarity_score,
-            "file_match_percentage": r.similarity_score,
+            "file_match_percentage": getattr(r, "file_match_percentage", r.similarity_score),
             "identifier_overlap_percentage": avg_ident_overlap,
             "matched_hashes_count": r.matched_hashes_count,
             "total_match_runs": len(blocks),
             "max_contiguous_run_tokens": max_run_tokens,
-            "confidence_level": "HIGH" if r.similarity_score >= 70.0 else "MEDIUM",
+            "confidence_level": "HIGH" if r.similarity_score >= HIGH_CONFIDENCE_THRESHOLD else "MEDIUM",
             "matched_blocks": blocks,
-            "status": r.status or "Needs Review",
-            "created_at": r.created_at.isoformat() if r.created_at else None,
+            "status": getattr(r, "status", "Needs Review"),
+            "created_at": r.created_at.isoformat() if getattr(r, "created_at", None) else None,
         })
 
     clusters, _ = detect_similarity_clusters(output, project_name_map, project_time_map=project_time_map)
-    sync_project_comparison_coverage(db, course_id)
+    sync_project_comparison_coverage(repo, course_id)
 
     return {
         "status": "success",
@@ -440,3 +314,18 @@ def get_course_similarity_reports(db: Session, course_id: int) -> Dict:
         "reports": output,
         "clusters": clusters,
     }
+
+
+def get_project_plagiarism_detail(repo: ISimilarityRepository, project_id: int, max_blocks_per_match: int = 5) -> Dict:
+    """Build a detailed, decision-support plagiarism view for a SINGLE project."""
+    if hasattr(repo, "get_project_plagiarism_detail"):
+        return repo.get_project_plagiarism_detail(project_id)
+    return {
+        "scanned": False,
+        "has_findings": False,
+        "max_similarity_score": 0.0,
+        "total_matches": 0,
+        "matches": [],
+        "cluster": None,
+    }
+

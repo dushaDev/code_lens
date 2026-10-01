@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { AlertCircleIcon, CheckCircle2, XCircle, Play, RefreshCw, FileCode, Eye, AlertCircle } from 'lucide-react';
+import { AlertCircleIcon, CheckCircle2, XCircle, Play, RefreshCw, Eye, ChevronDown, ChevronUp, ChevronRight } from 'lucide-react';
 import { useNotification } from '../../contexts/NotificationContext';
+import { apiFetch } from '../../api/client';
 import PlagiarismCodeCompareModal from '../../components/PlagiarismCodeCompareModal';
 import './Plagiarism.css';
 
@@ -12,6 +13,15 @@ export default function Plagiarism({ alerts = [], currentCourseId }) {
   const [scanMessage, setScanMessage] = useState('');
   const [localAlerts, setLocalAlerts] = useState(alerts);
   const [inspectingAlert, setInspectingAlert] = useState(null);
+  const [inspectingBlockIdx, setInspectingBlockIdx] = useState(0);
+  const [expandedAlertFiles, setExpandedAlertFiles] = useState({});
+
+  const toggleExpandFiles = (alertId) => {
+    setExpandedAlertFiles(prev => ({
+      ...prev,
+      [alertId]: !prev[alertId]
+    }));
+  };
 
   const displayAlerts = localAlerts.length > 0 ? localAlerts : alerts;
 
@@ -45,11 +55,10 @@ export default function Plagiarism({ alerts = [], currentCourseId }) {
     }, 250);
 
     try {
-      // TODO: migrate to apiFetch
-      const res = await fetch(`/api/v1/courses/${currentCourseId}/similarity/analyze`, {
+      const res = await apiFetch(`/api/v1/courses/${currentCourseId}/similarity/analyze`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ k: 5, w: 4, similarity_threshold: 30.0 })
+        body: JSON.stringify({ k: 5, w: 4, similarity_threshold: 25.0 })
       });
 
       clearInterval(progressTimer);
@@ -94,13 +103,10 @@ export default function Plagiarism({ alerts = [], currentCourseId }) {
   };
 
   const handleUpdateReportStatus = async (reportId, newStatus) => {
-    // 1. Instant local state update
     setLocalAlerts(prev => prev.map(a => a.id === reportId ? { ...a, status: newStatus } : a));
 
-    // 2. Persist status in database
     try {
-      // TODO: migrate to apiFetch
-      await fetch(`/api/v1/similarity/reports/${reportId}/status`, {
+      await apiFetch(`/api/v1/similarity/reports/${reportId}/status`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status: newStatus })
@@ -112,55 +118,51 @@ export default function Plagiarism({ alerts = [], currentCourseId }) {
 
   return (
     <div className="plagiarism-view">
-      <div className="view-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border-color)', paddingBottom: '16px', marginBottom: '16px' }}>
+      <div className="view-header">
         <div>
-          <h1 style={{ display: 'flex', alignItems: 'center', gap: '8px', margin: 0, textAlign: 'left', flexWrap: 'wrap' }}>
-            <span>Plagiarism Alerts</span>
-            <span style={{ width: '1px', height: '18px', backgroundColor: 'var(--border-color)', display: 'inline-block', margin: '0 4px', alignSelf: 'center' }} />
-            <span style={{ fontSize: '0.82rem', fontWeight: '400', color: 'var(--text-muted)', letterSpacing: 'normal' }}>Cross-repository AST Winnowing similarity flags and duplication logs.</span>
-          </h1>
+          <h1>Plagiarism Alerts</h1>
+          <p className="subtitle">Cross-repository AST Winnowing similarity flags and duplication logs.</p>
         </div>
-
         <button 
-          className="btn btn-primary" 
+          className="btn btn-primary"
           onClick={handleRunAnalysis}
           disabled={isScanning}
-          style={{ display: 'flex', alignItems: 'center', gap: '8px' }}
+          style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}
         >
-          {isScanning ? <RefreshCw size={16} className="spin" /> : <Play size={16} />}
-          <span>{isScanning ? 'Running Scan...' : 'Run Similarity Scan'}</span>
+          {isScanning ? (
+            <>
+              <RefreshCw size={16} className="spinning" />
+              <span>Scanning Course Repositories...</span>
+            </>
+          ) : (
+            <>
+              <Play size={16} />
+              <span>Run Similarity Scan</span>
+            </>
+          )}
         </button>
       </div>
 
-      {/* Scanning Progress Bar */}
       {isScanning && (
-        <div style={{ padding: '8px 0', marginBottom: '16px' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px', fontSize: '0.82rem' }}>
-            <span style={{ color: 'var(--text-muted)', fontWeight: '400' }}>{scanMessage}</span>
-            <span style={{ fontWeight: '600', color: 'var(--text-secondary)' }}>{scanProgressPct}%</span>
+        <div className="card scan-progress-card" style={{ marginBottom: '20px', padding: '16px 20px', borderLeft: '4px solid var(--accent-primary)' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px', fontSize: '0.88rem', fontWeight: '600' }}>
+            <span>{scanMessage}</span>
+            <span>{scanProgressPct}%</span>
           </div>
-          <div style={{ background: 'rgba(255,255,255,0.06)', borderRadius: '4px', height: '4px', width: '100%', overflow: 'hidden' }}>
-            <div 
-              style={{ 
-                height: '100%', 
-                width: `${scanProgressPct}%`, 
-                background: 'var(--text-muted, #94a3b8)', 
-                transition: 'width 0.3s ease-in-out',
-                borderRadius: '4px'
-              }} 
-            />
+          <div style={{ height: '6px', background: 'rgba(255,255,255,0.1)', borderRadius: '3px', overflow: 'hidden' }}>
+            <div style={{ width: `${scanProgressPct}%`, height: '100%', background: 'var(--accent-primary)', transition: 'width 0.3s ease' }} />
           </div>
         </div>
       )}
 
-      {scanMessage && !isScanning && (
-        <div style={{ padding: '6px 0', marginBottom: '16px' }}>
-          <p style={{ margin: 0, fontSize: '0.88rem', color: 'var(--text-muted)' }}>{scanMessage}</p>
+      {!isScanning && scanMessage && (
+        <div className="card scan-summary-card" style={{ marginBottom: '20px', padding: '12px 18px', background: 'rgba(59, 130, 246, 0.1)', border: '1px solid rgba(59, 130, 246, 0.2)', borderRadius: '8px', display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <AlertCircleIcon size={18} style={{ color: '#60a5fa', flexShrink: 0 }} />
+          <span style={{ fontSize: '0.88rem', color: '#93c5fd' }}>{scanMessage}</span>
         </div>
       )}
 
-      {/* Toggle Tabs */}
-      <div className="plag-tabs" style={{ marginBottom: '16px' }}>
+      <div className="plagiarism-tabs">
         <button 
           className={`tab-btn ${activeTab === 'active' ? 'active' : ''}`}
           onClick={() => setActiveTab('active')}
@@ -175,76 +177,233 @@ export default function Plagiarism({ alerts = [], currentCourseId }) {
         </button>
       </div>
 
-      {/* Alerts List */}
-      <div className="alerts-list" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-        {filteredAlerts.map((alert) => (
-          <div key={alert.id} className="alert-itemcard card" style={{ padding: '18px 20px', borderRadius: '10px' }}>
-            <div className="alert-itemcard-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-              <div className="risk-level-badge" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <AlertCircle size={18} style={{ color: alert.severity === 'High' ? '#ef4444' : '#f59e0b' }} />
-                <span style={{ fontWeight: '300', fontSize: '0.95rem' }}><strong>{alert.percentage}% File Overlap</strong></span>
-              
-              </div>
-              <span className="alert-timestamp" style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Flagged {alert.timestamp}</span>
-            </div>
+      <div className="alerts-list">
+        {filteredAlerts.map(alert => {
+          const filePairs = (() => {
+            const seen = new Set();
+            const pairs = [];
+            const blocks = alert.matchedBlocks || [];
+            blocks.forEach((block, bIdx) => {
+              const fA = block.file_a || 'unknown';
+              const fB = block.file_b || 'unknown';
+              const key = `${fA}::${fB}`;
+              if (!seen.has(key)) {
+                seen.add(key);
+                pairs.push({
+                  blockIdx: bIdx,
+                  fileA: fA,
+                  fileB: fB,
+                  lineStartA: block.line_a,
+                  lineEndA: block.end_line_a,
+                  lineStartB: block.line_b,
+                  lineEndB: block.end_line_b,
+                  tokens: block.token_span
+                });
+              }
+            });
+            return pairs;
+          })();
 
-            {/* Matched Projects Small Section */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', background: 'rgba(255,255,255,0.03)', padding: '10px 14px', borderRadius: '8px', border: '1px solid var(--border-color)', marginBottom: '12px' }}>
-              <div style={{ flex: 1 }}>
-                <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: '600' }}>Repository A</span>
-                <div style={{ fontWeight: '600', fontSize: '0.9rem', color: 'var(--text-primary)', marginTop: '2px' }}>{alert.projectA}</div>
-              </div>
-              <div style={{ fontSize: '0.75rem', fontWeight: '700', color: 'var(--text-muted)', background: 'rgba(255,255,255,0.08)', padding: '4px 10px', borderRadius: '4px' }}>VS</div>
-              <div style={{ flex: 1 }}>
-                <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: '600' }}>Repository B</span>
-                <div style={{ fontWeight: '600', fontSize: '0.9rem', color: 'var(--text-primary)', marginTop: '2px' }}>{alert.projectB}</div>
-              </div>
-            </div>
+          const isExpanded = !!expandedAlertFiles[alert.id];
+          const visibleFiles = isExpanded ? filePairs : filePairs.slice(0, 1);
+          const hiddenCount = filePairs.length - 1;
+          const severityColor = alert.severity === 'High' ? '#ef4444' : '#f59e0b';
 
-            <div className="matched-files-box" style={{ marginBottom: '14px' }}>
-              <p style={{ display: 'flex', alignItems: 'center', gap: '6px', margin: 0, fontSize: '0.88rem' }}>
-                <FileCode size={16} style={{ color: '#60a5fa' }} />
-                <strong>Matched Structural File:</strong> <code style={{ background: 'rgba(255,255,255,0.08)', padding: '2px 6px', borderRadius: '4px', fontSize: '0.82rem' }}>{alert.matchedFile}</code>
-              </p>
-            </div>
+          return (
+            <div
+              key={alert.id}
+              className="alert-itemcard card"
+              style={{
+                padding: '12px 16px',
+                marginBottom: '10px'
+              }}
+            >
+              {/* Header: Single Consolidated Stat + Timestamp */}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <span
+                    style={{
+                      width: '7px',
+                      height: '7px',
+                      borderRadius: '50%',
+                      backgroundColor: severityColor,
+                      display: 'inline-block'
+                    }}
+                  />
+                  <span style={{ fontSize: '0.85rem', fontWeight: '700', color: severityColor }}>
+                    {alert.percentage}% overlap &middot; {filePairs.length} {filePairs.length === 1 ? 'file' : 'files'}
+                  </span>
+                </div>
+                <span style={{ fontSize: '0.74rem', color: 'var(--text-muted)' }}>
+                  Flagged {alert.timestamp}
+                </span>
+              </div>
 
-            <div className="alert-actions-row" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <button
-                className="btn btn-secondary btn-sm"
-                onClick={() => setInspectingAlert(alert)}
-                style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '0.85rem' }}
+              {/* Simplified Repo Comparison Header */}
+              <div
+                style={{
+                  fontSize: '0.9rem',
+                  fontWeight: '600',
+                  color: 'var(--text-main)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  marginBottom: '8px'
+                }}
               >
-                <Eye size={14} />
-                <span>View Code</span>
-              </button>
+                <span>{alert.projectA}</span>
+                <span style={{ color: 'var(--text-muted)', fontWeight: '400', fontSize: '0.82rem' }}>↔</span>
+                <span>{alert.projectB}</span>
+              </div>
 
-              {(!alert.status || alert.status === 'Needs Review') ? (
-                <div style={{ display: 'flex', gap: '8px' }}>
-                  <button 
-                    className="btn btn-primary btn-sm success-btn"
-                    onClick={() => handleUpdateReportStatus(alert.id, 'Dismissed')}
-                    style={{ background: 'rgba(16,185,129,0.15)', color: '#34d399', border: '1px solid #10b981', display: 'inline-flex', alignItems: 'center', gap: '6px', cursor: 'pointer', padding: '6px 12px', borderRadius: '6px', fontSize: '0.82rem', fontWeight: '600' }}
-                  >
-                    <CheckCircle2 size={14} />
-                    <span>Dismiss (Safe)</span>
-                  </button>
-                  <button 
-                    className="btn btn-outline btn-sm danger-btn"
-                    onClick={() => handleUpdateReportStatus(alert.id, 'Confirmed')}
-                    style={{ background: 'rgba(239,68,68,0.15)', color: '#f87171', border: '1px solid #ef4444', display: 'inline-flex', alignItems: 'center', gap: '6px', cursor: 'pointer', padding: '6px 12px', borderRadius: '6px', fontSize: '0.82rem', fontWeight: '600' }}
-                  >
-                    <XCircle size={14} />
-                    <span>Confirm Infraction</span>
-                  </button>
+              {/* Files Table (Clean Rows, No Pill Borders) */}
+              {filePairs.length > 0 ? (
+                <div
+                  style={{
+                    borderTop: '1px solid var(--border-color)',
+                    borderBottom: '1px solid var(--border-color)',
+                    paddingTop: '2px',
+                    paddingBottom: '2px',
+                    marginBottom: '10px'
+                  }}
+                >
+                  <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                    <tbody>
+                      {visibleFiles.map((p, pIdx) => (
+                        <tr
+                          key={pIdx}
+                          onClick={() => {
+                            setInspectingBlockIdx(p.blockIdx);
+                            setInspectingAlert(alert);
+                          }}
+                          title="Click to inspect side-by-side code diff"
+                          className="file-match-row"
+                          style={{ cursor: 'pointer' }}
+                        >
+                          <td style={{ padding: '4px 4px', color: 'var(--text-main)', fontFamily: 'Fira Code, Consolas, monospace', fontSize: '0.76rem' }}>
+                            <span>{p.fileA}</span>
+                            <span style={{ color: 'var(--text-muted)', margin: '0 6px' }}>↔</span>
+                            <span>{p.fileB}</span>
+                          </td>
+                          <td style={{ padding: '4px 6px', textAlign: 'right', color: 'var(--text-muted)', whiteSpace: 'nowrap', fontSize: '0.72rem' }}>
+                            {p.tokens ? `${p.tokens.toLocaleString()} tokens` : ''}
+                          </td>
+                          <td style={{ padding: '4px 2px', textAlign: 'right', width: '18px', color: 'var(--text-muted)' }}>
+                            <ChevronRight size={13} />
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+
+                  {hiddenCount > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => toggleExpandFiles(alert.id)}
+                      style={{
+                        background: 'none',
+                        border: 'none',
+                        color: 'var(--text-muted)',
+                        fontSize: '0.74rem',
+                        cursor: 'pointer',
+                        padding: '2px 4px 4px 4px',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '4px',
+                        textDecoration: 'none'
+                      }}
+                      onMouseEnter={e => e.currentTarget.style.color = 'var(--text-main)'}
+                      onMouseLeave={e => e.currentTarget.style.color = 'var(--text-muted)'}
+                    >
+                      {isExpanded ? (
+                        <>Show fewer files <ChevronUp size={11} /></>
+                      ) : (
+                        <>+ See {hiddenCount} more {hiddenCount === 1 ? 'file' : 'files'} <ChevronDown size={11} /></>
+                      )}
+                    </button>
+                  )}
                 </div>
               ) : (
-                <span style={{ fontSize: '0.8rem', padding: '4px 10px', borderRadius: '4px', fontWeight: '600', background: alert.status === 'Dismissed' ? 'rgba(16,185,129,0.15)' : 'rgba(239,68,68,0.15)', color: alert.status === 'Dismissed' ? '#34d399' : '#f87171', border: alert.status === 'Dismissed' ? '1px solid #10b981' : '1px solid #ef4444' }}>
-                  Status: {alert.status}
-                </span>
+                <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: '10px' }}>
+                  {alert.matchedFile || 'AST Structure Overlap'}
+                </div>
               )}
+
+              {/* Action Buttons: Clear Visual Weight Hierarchy */}
+              <div
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  flexWrap: 'wrap',
+                  gap: '8px'
+                }}
+              >
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => {
+                    setInspectingBlockIdx(0);
+                    setInspectingAlert(alert);
+                  }}
+                  style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', fontSize: '0.76rem', padding: '4px 10px' }}
+                >
+                  <Eye size={12} />
+                  <span>Side-by-Side Diff</span>
+                </button>
+
+                {(!alert.status || alert.status === 'Needs Review') ? (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    {/* Primary / Safe Decision: Filled secondary button */}
+                    <button 
+                      type="button"
+                      className="btn btn-secondary btn-sm"
+                      onClick={() => handleUpdateReportStatus(alert.id, 'Dismissed')}
+                      style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '0.76rem', padding: '4px 10px' }}
+                    >
+                      <CheckCircle2 size={12} />
+                      <span>Dismiss</span>
+                    </button>
+                    {/* Destructive Action: Outlined/Ghost button with red accent */}
+                    <button 
+                      type="button"
+                      className="btn btn-sm"
+                      onClick={() => handleUpdateReportStatus(alert.id, 'Confirmed')}
+                      style={{
+                        background: 'transparent',
+                        border: '1px solid rgba(239, 68, 68, 0.35)',
+                        color: '#f87171',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '4px',
+                        fontSize: '0.76rem',
+                        padding: '4px 10px',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      <XCircle size={12} />
+                      <span>Confirm Infraction</span>
+                    </button>
+                  </div>
+                ) : (
+                  <span
+                    style={{
+                      fontSize: '0.75rem',
+                      padding: '3px 8px',
+                      borderRadius: '4px',
+                      fontWeight: '600',
+                      background: alert.status === 'Dismissed' ? 'rgba(16,185,129,0.12)' : 'rgba(239,68,68,0.12)',
+                      color: alert.status === 'Dismissed' ? '#34d399' : '#f87171',
+                      border: alert.status === 'Dismissed' ? '1px solid #10b981' : '1px solid #ef4444'
+                    }}
+                  >
+                    Status: {alert.status}
+                  </span>
+                )}
+              </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
 
         {filteredAlerts.length === 0 && (
           <div className="empty-alerts card" style={{ padding: '40px', textAlign: 'center' }}>
@@ -259,10 +418,10 @@ export default function Plagiarism({ alerts = [], currentCourseId }) {
         )}
       </div>
 
-      {/* Side-by-Side Comparative Code Inspection Modal */}
       {inspectingAlert && (
         <PlagiarismCodeCompareModal
           alert={inspectingAlert}
+          initialBlockIdx={inspectingBlockIdx}
           onClose={() => setInspectingAlert(null)}
         />
       )}

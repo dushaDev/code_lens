@@ -99,6 +99,29 @@
   font-weight: 600;
 }
 
+.sort-select {
+  background-color: var(--bg-card);
+  color: var(--text-main);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  padding: 7px 12px;
+  font-size: 0.82rem;
+  font-weight: 500;
+  font-family: inherit;
+  cursor: pointer;
+  outline: none;
+  transition: var(--transition);
+}
+
+.sort-select:focus {
+  border-color: var(--primary);
+}
+
+.sort-select option {
+  background-color: var(--bg-card);
+  color: var(--text-main);
+}
+
 /* Projects Table */
 .projects-list-card {
   padding: 8px 0;

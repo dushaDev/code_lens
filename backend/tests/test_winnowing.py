@@ -101,7 +101,12 @@ class DataLogger:
         fps2 = winnowing.generate_fingerprints(parser.parse_file(p2_path, "p2.py"))
         fps3 = winnowing.generate_fingerprints(parser.parse_file(p3_path, "p3.py"))
 
-        comparator = SimilarityComparator(review_threshold=10.0)
+        comparator = SimilarityComparator(
+            file_match_threshold=10.0,
+            min_run_hashes=1,
+            min_single_run_tokens=5,
+            min_total_matched_tokens=5
+        )
         fingerprints_map = {
             1: fps1,
             2: fps2,

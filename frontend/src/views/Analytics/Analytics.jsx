@@ -8,6 +8,7 @@ import {
   AlertCircle, 
   BarChart4, 
   User,
+  Users,
   Info,
   MessageSquare,
   Bot,
@@ -30,7 +31,8 @@ import {
   Zap,
   Sparkles,
   ChevronRight,
-  Check
+  Check,
+  GitMerge
 } from 'lucide-react';
 import Tag from '../../components/Tag';
 import Tooltip from '../../components/Tooltip';
@@ -41,9 +43,10 @@ import { formatDeadline } from '../../utils/courseMeta';
 import { useNavigation } from '../../contexts/NavigationContext';
 import './Analytics.css';
 
-export default function Analytics({ project, course, onBack, qualAnalysisState, onStartQualitative, onStopQualitative }) {
+export default function Analytics({ project, course, onBack, qualAnalysisState, onStartQualitative, onStopQualitative, onMergeAuthors }) {
   const { navigate } = useNavigation();
   const [analytics, setAnalytics] = useState(null);
+  const [mergingIdentity, setMergingIdentity] = useState(false);
   const courseDeadline = course?.deadline || project?.course?.deadline || project?.deadline;
   const [commits, setCommits] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -56,6 +59,35 @@ export default function Analytics({ project, course, onBack, qualAnalysisState, 
   const [selectedCommitHash, setSelectedCommitHash] = useState(null);
   const [samplingMode, setSamplingMode] = useState('sample'); // 'sample' | 'full' | 'random'
   const [expandedQualContributor, setExpandedQualContributor] = useState(null);
+  const [showMergeModal, setShowMergeModal] = useState(false);
+  const [mergeSource, setMergeSource] = useState(null);
+  const [mergeTargetId, setMergeTargetId] = useState('');
+
+  const handleOpenMergeModal = (source, targetId = '') => {
+    setMergeSource(source);
+    setMergeTargetId(targetId ? String(targetId) : '');
+    setShowMergeModal(true);
+  };
+
+  const handleMergeSubmit = async (e) => {
+    e.preventDefault();
+    if (!mergeSource || !mergeTargetId || !onMergeAuthors) return;
+
+    setMergingIdentity(true);
+    try {
+      await onMergeAuthors(mergeSource.id, parseInt(mergeTargetId));
+      setShowMergeModal(false);
+      setMergeSource(null);
+      setMergeTargetId('');
+      if (onStartQualitative) {
+        onStartQualitative(true, samplingMode);
+      }
+    } catch (err) {
+      console.error('Merge error:', err);
+    } finally {
+      setMergingIdentity(false);
+    }
+  };
 
   const [cloudReport, setCloudReport] = useState(null);
   const [isCloudGenerating, setIsCloudGenerating] = useState(false);
@@ -265,16 +297,20 @@ export default function Analytics({ project, course, onBack, qualAnalysisState, 
 
   const getVerdictBadgeStyle = (verdict) => {
     const v = (verdict || "").toLowerCase();
-    if (v.startsWith("low risk")) {
-      return { backgroundColor: 'rgba(16,185,129,0.12)', color: '#10b981', padding: '3px 8px', borderRadius: '4px', border: '1px solid rgba(16,185,129,0.2)', fontWeight: '600', fontSize: '0.8rem' };
-    }
-    if (v.startsWith("moderate risk") || v.startsWith("medium risk")) {
-      return { backgroundColor: 'rgba(245,158,11,0.12)', color: '#f59e0b', padding: '3px 8px', borderRadius: '4px', border: '1px solid rgba(245,158,11,0.2)', fontWeight: '600', fontSize: '0.8rem' };
-    }
-    if (v.startsWith("high risk")) {
-      return { backgroundColor: 'rgba(239,68,68,0.12)', color: '#ef4444', padding: '3px 8px', borderRadius: '4px', border: '1px solid rgba(239,68,68,0.2)', fontWeight: '600', fontSize: '0.8rem' };
-    }
-    return { backgroundColor: 'var(--bg-app)', color: 'var(--text-muted)', padding: '3px 8px', borderRadius: '4px', border: '1px solid var(--border-color)', fontWeight: '600', fontSize: '0.8rem' };
+    const green = { backgroundColor: 'rgba(16,185,129,0.12)', color: '#10b981', padding: '3px 8px', borderRadius: '4px', border: '1px solid rgba(16,185,129,0.2)', fontWeight: '600', fontSize: '0.8rem' };
+    const amber = { backgroundColor: 'rgba(245,158,11,0.12)', color: '#f59e0b', padding: '3px 8px', borderRadius: '4px', border: '1px solid rgba(245,158,11,0.2)', fontWeight: '600', fontSize: '0.8rem' };
+    const red = { backgroundColor: 'rgba(239,68,68,0.12)', color: '#ef4444', padding: '3px 8px', borderRadius: '4px', border: '1px solid rgba(239,68,68,0.2)', fontWeight: '600', fontSize: '0.8rem' };
+    const gray = { backgroundColor: 'var(--bg-app)', color: 'var(--text-muted)', padding: '3px 8px', borderRadius: '4px', border: '1px solid var(--border-color)', fontWeight: '600', fontSize: '0.8rem' };
+    // Quality wording (current, higher = better).
+    if (v.startsWith("high quality")) return green;
+    if (v.startsWith("moderate quality")) return amber;
+    if (v.startsWith("poor quality")) return red;
+    if (v.startsWith("unverified") || v.startsWith("n/a")) return gray;
+    // Legacy Risk wording (older cached reports, opposite polarity): Low Risk = good.
+    if (v.startsWith("low risk")) return green;
+    if (v.startsWith("moderate risk") || v.startsWith("medium risk")) return amber;
+    if (v.startsWith("high risk")) return red;
+    return gray;
   };
 
   const getRiskScoreBadgeStyle = (score) => {
@@ -509,7 +545,7 @@ export default function Analytics({ project, course, onBack, qualAnalysisState, 
   return (
     <div className="analytics-view">
       {/* Switcher Tab Row */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px', position: 'relative', minHeight: '40px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px', position: 'relative', minHeight: '42px' }}>
         {/* Left Side: Back Button */}
         <button 
           type="button"
@@ -521,43 +557,34 @@ export default function Analytics({ project, course, onBack, qualAnalysisState, 
           <span>Back</span>
         </button>
 
-        {/* Center: Switcher Pill */}
-        <div style={{ position: 'absolute', left: '50%', transform: 'translateX(-50%)', display: 'flex', gap: '4px', backgroundColor: 'var(--bg-app)', padding: '4px', borderRadius: '30px', border: '1px solid var(--border-color)', boxShadow: 'var(--shadow-sm)', zIndex: 5 }}>
+        {/* Center: Page-Level Mode Switcher */}
+        <div 
+          className="analytics-mode-switcher"
+          role="tablist" 
+          aria-label="Analysis Mode"
+        >
           <button
             type="button"
+            role="tab"
+            aria-selected={activeTab === 'quantitative'}
+            className={`analytics-mode-tab ${activeTab === 'quantitative' ? 'active' : ''}`}
             onClick={() => setActiveTab('quantitative')}
-            style={{
-              padding: '8px 24px',
-              background: activeTab === 'quantitative' ? 'var(--bg-card)' : 'transparent',
-              border: 'none',
-              borderRadius: '20px',
-              color: activeTab === 'quantitative' ? 'var(--primary)' : 'var(--text-muted)',
-              fontWeight: activeTab === 'quantitative' ? '600' : '500',
-              fontSize: '0.9rem',
-              cursor: 'pointer',
-              transition: 'all 0.2s ease',
-              boxShadow: activeTab === 'quantitative' ? 'var(--shadow-sm)' : 'none'
-            }}
           >
-            Quantitative Analysis
+            <BarChart4 size={15} className="mode-tab-icon" />
+            <span style={{ whiteSpace: 'nowrap' }}>Quantitative Analysis</span>
           </button>
           <button
             type="button"
+            role="tab"
+            aria-selected={activeTab === 'qualitative'}
+            className={`analytics-mode-tab ${activeTab === 'qualitative' ? 'active' : ''}`}
             onClick={() => setActiveTab('qualitative')}
-            style={{
-              padding: '8px 24px',
-              background: activeTab === 'qualitative' ? 'var(--bg-card)' : 'transparent',
-              border: 'none',
-              borderRadius: '20px',
-              color: activeTab === 'qualitative' ? 'var(--primary)' : 'var(--text-muted)',
-              fontWeight: activeTab === 'qualitative' ? '600' : '500',
-              fontSize: '0.9rem',
-              cursor: 'pointer',
-              transition: 'all 0.2s ease',
-              boxShadow: activeTab === 'qualitative' ? 'var(--shadow-sm)' : 'none'
-            }}
           >
-            Qualitative Analysis
+            <Bot size={15} className="mode-tab-icon" />
+            <span style={{ whiteSpace: 'nowrap' }}>Qualitative Analysis</span>
+            {qualData && (
+              <span className="mode-tab-ready-dot" title="Qualitative Analysis Ready" />
+            )}
           </button>
         </div>
 
@@ -588,39 +615,75 @@ export default function Analytics({ project, course, onBack, qualAnalysisState, 
             }}>{project.group_no || project.groupNo || 'G-00'}</span>
             <span>{project.name}</span>
             <span style={{ width: '1px', height: '18px', backgroundColor: 'var(--border-color)', display: 'inline-block', margin: '0 4px', alignSelf: 'center' }} />
-            <span style={{ fontSize: '0.82rem', fontWeight: '400', color: 'var(--text-muted)', letterSpacing: 'normal' }}>Repository metadata, contribution inequality, and git log history metrics.</span>
+            <span style={{ fontSize: '0.82rem', fontWeight: '400', color: 'var(--text-muted)', letterSpacing: 'normal' }}>
+              {activeTab === 'quantitative'
+                ? 'Repository metadata, contribution inequality, and git log history metrics.'
+                : 'Architectural evaluation, AST similarity detection, and qualitative code inspection.'}
+            </span>
           </h1>
       </div>
 
       {analytics && activeTab === 'quantitative' && (
-        <div className="analytics-content-grid">
+        <div className="analytics-content-grid analytics-tab-content">
           {/* Summary metrics */}
           <div className="analytics-summary-cards">
-            <div className="stat-card card" style={{ position: 'relative' }}>
-              <div className="stat-card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                  <div className="stat-icon-wrapper blue-icon">
-                    <Scale size={22} />
+            {(() => {
+              const isSolo = qualData?.project_summary?.is_solo_project ?? (qualData?.project_summary?.identity_analysis?.is_solo_project ?? (analytics.contributions?.length === 1));
+              return (
+                <div className="stat-card card" style={{ position: 'relative' }}>
+                  <div className="stat-card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                      <div className="stat-icon-wrapper blue-icon">
+                        <Scale size={22} />
+                      </div>
+                      <span className="stat-label">Workload Distribution</span>
+                    </div>
+                    <Tooltip 
+                      title="Workload Distribution (Gini)" 
+                      content={
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
+                          <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+                            Team inequality score (0.00 = equal, 1.00 = unequal):
+                          </span>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '3px', fontSize: '0.78rem' }}>
+                            <div><strong style={{ color: '#10b981' }}>Low (&lt;0.30):</strong> Balanced teamwork</div>
+                            <div><strong style={{ color: '#f59e0b' }}>Medium (0.30–0.49):</strong> Moderate imbalance</div>
+                            <div><strong style={{ color: '#ef4444' }}>High (≥0.50):</strong> Severe imbalance (free-riding risk)</div>
+                          </div>
+                        </div>
+                      } 
+                    />
                   </div>
-                  <span className="stat-label">Gini Coefficient (Inequality)</span>
+                  <div className="stat-card-body">
+                    {isSolo ? (
+                      <div>
+                        <h2 className="stat-value" style={{ fontSize: '1.4rem' }}>N/A</h2>
+                        <span className="badge" style={{ backgroundColor: 'rgba(2, 132, 199, 0.12)', color: '#0284c7', fontWeight: '700' }}>
+                          Single Contributor
+                        </span>
+                      </div>
+                    ) : (
+                      <div>
+                        <h2 className="stat-value">{analytics.gini_coefficient?.toFixed(2)}</h2>
+                        <span className={`badge ${getGiniStatusClass(analytics.gini_coefficient)}`}>
+                          {analytics.distribution_status}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                  {qualData?.project_summary?.excluded_bots?.length > 0 && (
+                    <div style={{ padding: '0 24px 16px', fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '-8px' }}>
+                      * {qualData.project_summary.excluded_bots.length} automated contributor(s) excluded
+                    </div>
+                  )}
                 </div>
-                <Tooltip 
-                  title="Gini Coefficient" 
-                  content="Measures workload division: 0.0 is perfectly equal, 1.0 is single-member dominant. A value above 0.6 indicates others may not be contributing significantly." 
-                />
-              </div>
-              <div className="stat-card-body">
-                <h2 className="stat-value">{analytics.gini_coefficient?.toFixed(2)}</h2>
-                <span className={`badge ${getGiniStatusClass(analytics.gini_coefficient)}`}>
-                  {analytics.distribution_status}
-                </span>
-              </div>
-            </div>
+              );
+            })()}
 
             <div className="stat-card card">
               <div className="stat-card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                  <div className="stat-icon-wrapper purple-icon">
+                  <div className="stat-icon-wrapper blue-icon">
                     <GitCommit size={22} />
                   </div>
                   <span className="stat-label">Total Commits Analyzed</span>
@@ -639,7 +702,7 @@ export default function Analytics({ project, course, onBack, qualAnalysisState, 
             <div className="stat-card card">
               <div className="stat-card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                  <div className="stat-icon-wrapper red-icon">
+                  <div className="stat-icon-wrapper blue-icon">
                     <Percent size={22} />
                   </div>
                   <span className="stat-label">Total Insertions</span>
@@ -657,7 +720,7 @@ export default function Analytics({ project, course, onBack, qualAnalysisState, 
             <div className="stat-card card" style={{ position: 'relative' }}>
               <div className="stat-card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                  <div className="stat-icon-wrapper purple-icon">
+                  <div className="stat-icon-wrapper blue-icon">
                     <User size={22} />
                   </div>
                   <span className="stat-label">Contributors</span>
@@ -796,7 +859,7 @@ export default function Analytics({ project, course, onBack, qualAnalysisState, 
                           ) : (
                             <>
                               <CheckCircle2 size={18} color="#10b981" />
-                              <span>0</span>
+                              <span>No Late Commits</span>
                             </>
                           )}
                         </strong>
@@ -843,12 +906,13 @@ export default function Analytics({ project, course, onBack, qualAnalysisState, 
             <div className="table-container">
               <table className="custom-table" style={{ tableLayout: 'fixed', width: '100%' }}>
                 <colgroup>
-                  <col style={{ width: '17%' }} />
-                  <col style={{ width: '22%' }} />
-                  <col style={{ width: '11%' }} />
-                  <col style={{ width: '11%' }} />
-                  <col style={{ width: '17%' }} />
-                  <col style={{ width: '22%' }} />
+                  <col style={{ width: '16%' }} />
+                  <col style={{ width: '20%' }} />
+                  <col style={{ width: '9%' }} />
+                  <col style={{ width: '10%' }} />
+                  <col style={{ width: '15%' }} />
+                  <col style={{ width: '18%' }} />
+                  <col style={{ width: '12%' }} />
                 </colgroup>
                 <thead>
                   <tr>
@@ -858,6 +922,7 @@ export default function Analytics({ project, course, onBack, qualAnalysisState, 
                     <th>Lines Added</th>
                     <th>Lines Removed (Refactoring)</th>
                     <th>Overall Share</th>
+                    <th>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -914,6 +979,26 @@ export default function Analytics({ project, course, onBack, qualAnalysisState, 
                               ></div>
                             </div>
                           </div>
+                        </td>
+                        <td onClick={e => e.stopPropagation()}>
+                          {onMergeAuthors && analytics.contributions?.length > 1 && (
+                            <button
+                              type="button"
+                              className="btn btn-outline btn-sm"
+                              style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '4px',
+                                fontSize: '0.75rem',
+                                padding: '3px 8px'
+                              }}
+                              onClick={() => handleOpenMergeModal({ id: contrib.author_id, name: contrib.name, email: contrib.email })}
+                              title="Merge aliases/duplicate profiles for this contributor"
+                            >
+                              <GitMerge size={12} />
+                              <span>Merge</span>
+                            </button>
+                          )}
                         </td>
                       </tr>
                     );
@@ -1220,133 +1305,266 @@ export default function Analytics({ project, course, onBack, qualAnalysisState, 
         };
 
         return (
-          <div style={{ marginTop: '20px', display: 'flex', flexDirection: 'column', gap: '20px' }}>
+          <div className="analytics-tab-content" style={{ marginTop: '20px', display: 'flex', flexDirection: 'column', gap: '20px' }}>
             <style>{`
               @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
             `}</style>
 
             {/* ── Row 1: Controls + Progress ─────────────────────────────── */}
             <div className="card" style={{ padding: '20px 24px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '12px', marginBottom: isRunning ? '16px' : '0' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                  <Bot size={20} style={{ color: 'var(--primary)' }} />
-                  <h2 style={{ margin: 0, fontSize: '1.05rem', fontWeight: '700', color: 'var(--text-main)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '16px', marginBottom: (isRunning || isCancelling) ? '14px' : '0' }}>
+                {/* Left: Title & Status Badge */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <Bot size={20} style={{ color: 'var(--primary)', flexShrink: 0 }} />
+                  <h2 style={{ margin: 0, fontSize: '1.02rem', fontWeight: '700', color: 'var(--text-main)' }}>
                     Local AI Qualitative Analysis
                   </h2>
                   {statusBadge()}
                 </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-                  {/* Sampling mode selector — locked while analysis is running */}
-                  <div style={{
-                    display: 'flex', alignItems: 'center', gap: '4px',
-                    border: '1px solid var(--border-color)', borderRadius: '6px', padding: '2px',
-                    backgroundColor: 'var(--bg-app)',
-                    opacity: (isRunning || isCancelling) ? 0.6 : 1,
-                    pointerEvents: (isRunning || isCancelling) ? 'none' : 'auto'
-                  }}>
-                    {[['sample', 'Smart'], ['full', 'Full'], ['random', 'Random']].map(([m, label]) => (
+
+                {/* Right: Controls & Actions */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+                  {/* Actions Group */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    {/* Start button — only when idle */}
+                    {isIdle && (
                       <button
-                        key={m}
                         type="button"
-                        onClick={() => handleSamplingModeChange(m)}
-                        disabled={isRunning || isCancelling}
+                        className="btn btn-secondary btn-sm"
+                        onClick={() => onStartQualitative(false, samplingMode)}
                         style={{
-                          padding: '3px 9px', borderRadius: '4px', fontSize: '0.73rem', fontWeight: '600',
-                          border: 'none',
-                          cursor: (isRunning || isCancelling) ? 'not-allowed' : 'pointer',
-                          transition: 'all 0.15s',
-                          backgroundColor: samplingMode === m ? 'var(--primary)' : 'transparent',
-                          color: samplingMode === m ? '#fff' : 'var(--text-muted)',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '6px',
+                          color: 'var(--primary)',
+                          borderColor: 'var(--primary)',
+                          fontWeight: '600'
                         }}
-                        title={(isRunning || isCancelling) ? 'Mode selection is locked while analysis is in progress' : (m === 'sample' ? 'Stratified Smart-Sampling: always-include high-signal commits + 20% per contributor' : m === 'full' ? 'Process every commit (slow on large repos)' : 'Pure random 20% of all commits')}
                       >
-                        {label}
+                        <Play size={13} />
+                        <span>Start Analysis</span>
                       </button>
-                    ))}
+                    )}
+
+                    {/* Stop button (destructive action) — only when running */}
+                    {(isRunning || isCancelling) && (
+                      <button
+                        type="button"
+                        className="btn btn-sm"
+                        onClick={onStopQualitative}
+                        disabled={isCancelling}
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '6px',
+                          borderColor: '#ef4444',
+                          color: '#ef4444',
+                          backgroundColor: 'rgba(239, 68, 68, 0.08)',
+                          border: '1px solid #ef4444',
+                          cursor: isCancelling ? 'not-allowed' : 'pointer',
+                          fontWeight: '600'
+                        }}
+                      >
+                        <Square size={13} />
+                        <span>{isCancelling ? 'Cancelling...' : 'Stop'}</span>
+                      </button>
+                    )}
+
+                    {/* Re-analyze — when not running */}
+                    {!isRunning && !isCancelling && (
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-sm"
+                        onClick={() => onStartQualitative(true, samplingMode)}
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '6px'
+                        }}
+                        title="Clear DB cache and re-run from scratch with selected mode"
+                      >
+                        <RefreshCw size={13} />
+                        <span>Re-analyze</span>
+                      </button>
+                    )}
+
+                    {/* View / Hide JSON inspector */}
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-sm"
+                      onClick={() => setShowRawDataInspector(!showRawDataInspector)}
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '6px'
+                      }}
+                    >
+                      <Code size={13} />
+                      <span>{showRawDataInspector ? 'Hide JSON' : 'View Output JSON'}</span>
+                    </button>
                   </div>
 
-                  {/* Start button — only when idle/cancelled */}
-                  {isIdle && (
-                    <button type="button" className="btn btn-secondary"
-                      onClick={() => onStartQualitative(false, samplingMode)}
-                      style={{ display:'inline-flex', alignItems:'center', gap:'6px', fontSize:'0.85rem', color:'var(--primary)', borderColor:'var(--primary)' }}
-                    >
-                      <Play size={14} /><span>Start Analysis</span>
-                    </button>
-                  )}
-                  {/* Stop button — only when running */}
-                  {(isRunning || isCancelling) && (
-                    <button type="button" className="btn btn-secondary"
-                      onClick={onStopQualitative}
-                      disabled={isCancelling}
-                      style={{ display:'inline-flex', alignItems:'center', gap:'6px', fontSize:'0.85rem', borderColor:'#ef4444', color:'#ef4444', backgroundColor:'rgba(239,68,68,0.08)' }}
-                    >
-                      <Square size={14} /><span>{isCancelling ? 'Cancelling...' : 'Stop'}</span>
-                    </button>
-                  )}
-                  {/* Re-analyze — always available */}
-                  <button type="button" className="btn btn-secondary"
-                    onClick={() => onStartQualitative(true, samplingMode)}
-                    disabled={isRunning || isCancelling}
-                    style={{ display:'inline-flex', alignItems:'center', gap:'6px', fontSize:'0.85rem' }}
-                    title="Clear DB cache and re-run from scratch with selected mode"
+                  {/* Segmented Mode Selector — Moved to the Right Corner */}
+                  <div
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'stretch',
+                      height: '32px',
+                      border: '1px solid var(--border-color)',
+                      borderRadius: 'var(--radius-sm)',
+                      padding: '2px',
+                      backgroundColor: 'var(--bg-app)',
+                      boxSizing: 'border-box',
+                      opacity: (isRunning || isCancelling) ? 0.6 : 1,
+                      pointerEvents: (isRunning || isCancelling) ? 'none' : 'auto'
+                    }}
+                    role="group"
+                    aria-label="Sampling mode selector"
                   >
-                    <RefreshCw size={14} /><span>Re-analyze</span>
-                  </button>
-                  {/* View raw JSON */}
-                  <button type="button" className="btn btn-secondary"
-                    onClick={() => setShowRawDataInspector(!showRawDataInspector)}
-                    style={{ display:'inline-flex', alignItems:'center', gap:'6px', fontSize:'0.85rem' }}
-                  >
-                    <Code size={14} /><span>{showRawDataInspector ? 'Hide JSON' : 'View Output JSON'}</span>
-                  </button>
+                    {[
+                      ['sample', 'Smart'],
+                      ['full', 'Full'],
+                      ['random', 'Random']
+                    ].map(([m, label]) => {
+                      const isActive = samplingMode === m;
+                      return (
+                        <button
+                          key={m}
+                          type="button"
+                          onClick={() => handleSamplingModeChange(m)}
+                          disabled={isRunning || isCancelling}
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            height: '100%',
+                            padding: '0 12px',
+                            borderRadius: '4px',
+                            fontSize: '0.82rem',
+                            fontWeight: isActive ? '600' : '500',
+                            border: 'none',
+                            cursor: (isRunning || isCancelling) ? 'not-allowed' : 'pointer',
+                            transition: 'all 0.15s ease',
+                            backgroundColor: isActive ? 'var(--primary)' : 'transparent',
+                            color: isActive ? '#ffffff' : 'var(--text-main)',
+                            boxShadow: isActive ? '0 1px 2px rgba(0, 0, 0, 0.1)' : 'none',
+                            whiteSpace: 'nowrap'
+                          }}
+                          title={
+                            (isRunning || isCancelling)
+                              ? 'Mode selection is locked while analysis is in progress'
+                              : (m === 'sample'
+                                ? 'Stratified Smart-Sampling: always-include high-signal commits + 20% per contributor'
+                                : m === 'full'
+                                ? 'Process every commit (slow on large repos)'
+                                : 'Pure random 20% of all commits')
+                          }
+                        >
+                          {label}
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
               </div>
 
-              {/* Progress bar with Live Timer & Estimated Time Remaining */}
+              {/* Progress bar with plain status & dominant percentage */}
               {(isRunning || isCancelling) && (
-                <div style={{ marginTop: '12px' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px', flexWrap: 'wrap', gap: '8px' }}>
-                    <p style={{ margin: 0, fontSize: '0.82rem', color: 'var(--text-muted)', fontWeight: '500' }}>
-                      {qualMessage || 'Processing...'}
-                    </p>
-                    {/* Live Timer & ETA Badge */}
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.78rem' }}>
-                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', color: 'var(--text-muted)' }}>
-                        <Clock size={13} style={{ color: 'var(--primary)' }} />
-                        <span>Elapsed: <strong>{formatSeconds(elapsedSec)}</strong></span>
-                      </span>
-                      {etaSec !== null ? (
+                <div style={{ marginTop: '14px' }}>
+                  <div style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'baseline',
+                    marginBottom: '6px',
+                    gap: '12px'
+                  }}>
+                    <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px', minWidth: 0, overflow: 'hidden' }}>
+                      <p style={{
+                        margin: 0,
+                        fontSize: '0.82rem',
+                        color: 'var(--text-muted)',
+                        fontWeight: '500',
+                        whiteSpace: 'nowrap',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis'
+                      }}>
+                        {qualMessage || 'Processing qualitative analysis...'}
+                      </p>
+                      {elapsedSec > 0 && (
                         <span style={{
-                          fontWeight: '600', color: 'var(--primary)',
-                          backgroundColor: 'rgba(99,102,241,0.1)',
-                          padding: '2px 8px', borderRadius: '4px',
-                          border: '1px solid rgba(99,102,241,0.2)'
+                          fontSize: '0.76rem',
+                          color: 'var(--text-muted)',
+                          fontVariantNumeric: 'tabular-nums',
+                          flexShrink: 0
                         }}>
-                          Est. remaining: ~{formatSeconds(etaSec)}
+                          &middot; {formatSeconds(elapsedSec)}
                         </span>
-                      ) : qualProgress <= 3 ? (
-                        <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontStyle: 'italic' }}>
-                          Calculating ETA...
-                        </span>
-                      ) : null}
+                      )}
                     </div>
+
+                    <span style={{
+                      fontSize: '0.92rem',
+                      fontWeight: '700',
+                      color: 'var(--primary)',
+                      fontVariantNumeric: 'tabular-nums',
+                      flexShrink: 0
+                    }}>
+                      {qualProgress}%
+                    </span>
                   </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                    <div style={{ flex: 1, height: '8px', backgroundColor: 'var(--bg-app)', borderRadius: '5px', overflow: 'hidden', border: '1px solid var(--border-color)' }}>
-                      <div style={{ height: '100%', width: `${qualProgress}%`, background: 'linear-gradient(90deg, var(--primary), #818cf8)', borderRadius: '5px', transition: 'width 0.4s ease-out' }} />
-                    </div>
-                    <span style={{ fontSize: '0.9rem', fontWeight: '700', color: 'var(--primary)', minWidth: '42px', textAlign: 'right' }}>{qualProgress}%</span>
+
+                  <div style={{
+                    width: '100%',
+                    height: '6px',
+                    backgroundColor: 'var(--bg-app)',
+                    borderRadius: '3px',
+                    overflow: 'hidden',
+                    border: '1px solid var(--border-color)'
+                  }}>
+                    <div
+                      style={{
+                        height: '100%',
+                        width: `${qualProgress}%`,
+                        background: 'linear-gradient(90deg, var(--primary), #818cf8)',
+                        borderRadius: '3px',
+                        transition: 'width 0.4s ease-out'
+                      }}
+                    />
                   </div>
+
                   {/* Stuck-initializing warning */}
                   {isStuckInitializing && (
-                    <div style={{ marginTop: '10px', padding: '10px 14px', borderRadius: '8px', backgroundColor: 'rgba(245,158,11,0.1)', border: '1px solid rgba(245,158,11,0.3)', display: 'flex', alignItems: 'flex-start', gap: '10px' }}>
+                    <div style={{
+                      marginTop: '10px',
+                      padding: '10px 14px',
+                      borderRadius: '6px',
+                      backgroundColor: 'rgba(245,158,11,0.08)',
+                      border: '1px solid rgba(245,158,11,0.25)',
+                      display: 'flex',
+                      alignItems: 'flex-start',
+                      gap: '10px'
+                    }}>
                       <AlertCircle size={16} style={{ color: '#f59e0b', flexShrink: 0, marginTop: '1px' }} />
                       <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', lineHeight: '1.5' }}>
                         <strong style={{ color: '#f59e0b' }}>Taking longer than expected.</strong>{' '}
-                        The local AI model (Ollama) may not be running, or the model is still loading.
-                        Make sure Ollama is started and the model is pulled.{' '}
-                        You can <button type="button" onClick={onStopQualitative} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#ef4444', fontWeight: '600', padding: 0, fontSize: '0.8rem' }}>stop the analysis</button> and retry once Ollama is ready.
+                        The local AI model (Ollama) may still be loading into memory.{' '}
+                        You can{' '}
+                        <button
+                          type="button"
+                          onClick={onStopQualitative}
+                          style={{
+                            background: 'none',
+                            border: 'none',
+                            cursor: 'pointer',
+                            color: '#ef4444',
+                            fontWeight: '600',
+                            padding: 0,
+                            fontSize: '0.8rem'
+                          }}
+                        >
+                          stop the analysis
+                        </button>{' '}
+                        and retry once Ollama is ready.
                       </div>
                     </div>
                   )}
@@ -1401,8 +1619,8 @@ export default function Analytics({ project, course, onBack, qualAnalysisState, 
               const isHigh = plag.max_similarity_score > 50;
               const isMed = plag.max_similarity_score > 25;
               const alertColor = isHigh ? '#ef4444' : isMed ? '#f59e0b' : '#10b981';
-              const alertBg = isHigh ? 'rgba(239,68,68,0.08)' : isMed ? 'rgba(245,158,11,0.08)' : 'rgba(16,185,129,0.08)';
-              const alertBorder = isHigh ? 'rgba(239,68,68,0.25)' : isMed ? 'rgba(245,158,11,0.25)' : 'rgba(16,185,129,0.25)';
+              const alertBg = isHigh ? 'rgba(239, 68, 68, 0.04)' : isMed ? 'rgba(245, 158, 11, 0.04)' : 'rgba(16, 185, 129, 0.04)';
+              const alertBorder = isHigh ? 'rgba(239, 68, 68, 0.2)' : isMed ? 'rgba(245, 158, 11, 0.2)' : 'rgba(16, 185, 129, 0.2)';
 
               return (
                 <div style={{
@@ -1414,29 +1632,188 @@ export default function Analytics({ project, course, onBack, qualAnalysisState, 
                   alignItems: 'center',
                   justifyContent: 'space-between',
                   flexWrap: 'wrap',
-                  gap: '12px'
+                  gap: '14px'
                 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                    <ShieldAlert size={20} style={{ color: alertColor, flexShrink: 0 }} />
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+                    <ShieldAlert size={22} style={{ color: alertColor, flexShrink: 0 }} />
                     <div>
-                      <div style={{ fontWeight: '700', color: alertColor, fontSize: '0.92rem' }}>
-                        AST Winnowing Code Similarity Scan: {plag.max_similarity_score}% Similarity
+                      <div style={{ fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.6px', fontWeight: '700', color: 'var(--text-muted)' }}>
+                        AST Winnowing Scan
                       </div>
-                      <div style={{ fontSize: '0.82rem', color: 'var(--text-muted)', marginTop: '2px' }}>
-                        Matched with <strong>{plag.matched_project_name || 'Another Project'}</strong> ({plag.matched_blocks_count || 0} shared AST token blocks)
+                      <div style={{ fontSize: '0.94rem', fontWeight: '700', color: 'var(--text-main)', marginTop: '2px' }}>
+                        <span style={{ color: alertColor }}>{plag.max_similarity_score}% Similarity</span>
+                        <span style={{ fontWeight: '400', color: 'var(--text-muted)', fontSize: '0.82rem', marginLeft: '8px' }}>
+                          with <strong style={{ color: 'var(--text-main)', fontWeight: '600' }}>{plag.matched_project_name || 'Another Project'}</strong> ({plag.matched_blocks_count || 0} shared AST token blocks)
+                        </span>
                       </div>
                     </div>
                   </div>
+
                   <span style={{
                     padding: '3px 10px',
-                    borderRadius: '12px',
+                    borderRadius: '4px',
                     fontSize: '0.78rem',
                     fontWeight: '700',
-                    backgroundColor: alertColor,
-                    color: '#fff'
+                    backgroundColor: alertBg,
+                    color: alertColor,
+                    border: `1px solid ${alertBorder}`,
+                    letterSpacing: '0.2px',
+                    flexShrink: 0
                   }}>
                     {plag.status || (isHigh ? 'High Similarity' : isMed ? 'Needs Review' : 'Clean')}
                   </span>
+                </div>
+              );
+            })()}
+
+            {/* ── Row 3b: Contributor Identity & Authenticity Signals ───────── */}
+            {qualData?.project_summary?.identity_analysis && (() => {
+              const ia = qualData.project_summary.identity_analysis;
+              
+              const isMergedIssue = (issue) => {
+                if (!issue.author_ids || issue.author_ids.length < 2) return false;
+                const canonicalIds = issue.author_ids.map(id => {
+                  const author = analytics.authors?.find(a => a.id === id);
+                  return author ? (author.canonical_author_id || author.id) : null;
+                }).filter(Boolean);
+                return canonicalIds.length > 1 && new Set(canonicalIds).size === 1;
+              };
+
+              const suspected = (ia.suspected_same_person || []).filter(issue => !isMergedIssue(issue));
+              const shared = (ia.shared_accounts || []).filter(issue => !isMergedIssue(issue));
+              const pushed = (ia.pushed_by_other || []).filter(issue => !isMergedIssue(issue));
+              const isSolo = ia.is_solo_project;
+              const hasSignals = suspected.length > 0 || shared.length > 0 || pushed.length > 0;
+
+              if (!hasSignals && !isSolo) return null;
+
+              const isHigh = suspected.some(s => s.confidence === 'HIGH');
+              const alertColor = isHigh ? '#ef4444' : hasSignals ? '#f59e0b' : '#0284c7';
+              const alertBg = isHigh ? 'rgba(239, 68, 68, 0.04)' : hasSignals ? 'rgba(245, 158, 11, 0.04)' : 'rgba(2, 132, 199, 0.04)';
+              const alertBorder = isHigh ? 'rgba(239, 68, 68, 0.2)' : hasSignals ? 'rgba(245, 158, 11, 0.2)' : 'rgba(2, 132, 199, 0.2)';
+
+              const parseMember = (memberStr) => {
+                if (!memberStr) return { name: 'Unknown', email: '' };
+                const match = memberStr.match(/^(.*?)\s*<([^>]+)>$/);
+                if (match) {
+                  return { name: match[1].trim(), email: match[2].trim() };
+                }
+                return { name: memberStr.trim(), email: '' };
+              };
+
+              return (
+                <div style={{
+                  backgroundColor: alertBg,
+                  border: `1px solid ${alertBorder}`,
+                  borderRadius: '8px',
+                  padding: '14px 18px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '12px'
+                }}>
+                  {/* If Suspected Same-Person pairs exist */}
+                  {suspected.length > 0 && suspected.map((issue, idx) => {
+                    const memA = parseMember(issue.members?.[0]);
+                    const memB = parseMember(issue.members?.[1]);
+                    const tokens = issue.matched_tokens || [];
+                    const tokenSnippet = tokens.length > 0 ? ` (matches "${tokens.join('", "')}")` : '';
+
+                    return (
+                      <div
+                        key={idx}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          flexWrap: 'wrap',
+                          gap: '12px',
+                          paddingTop: idx > 0 ? '10px' : '0',
+                          borderTop: idx > 0 ? '1px solid var(--border-color)' : 'none'
+                        }}
+                      >
+                        {/* Left side: Icon + Category + Pair + Short Evidence */}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '14px', minWidth: 0 }}>
+                          <User size={22} style={{ color: alertColor, flexShrink: 0 }} />
+                          <div>
+                            <div style={{ fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.6px', fontWeight: '700', color: 'var(--text-muted)' }}>
+                              Suspected Split Git Identity
+                            </div>
+                            {/* Names grouped closely together without being pushed to corners */}
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', marginTop: '2px', fontSize: '0.9rem' }}>
+                              <span style={{ fontWeight: '700', color: 'var(--text-main)' }}>
+                                {memA.name} {memA.email && <span style={{ fontSize: '0.75rem', fontWeight: 'normal', color: 'var(--text-muted)', fontFamily: 'Fira Code, monospace' }}>&lt;{memA.email}&gt;</span>}
+                              </span>
+                              <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>↔</span>
+                              <span style={{ fontWeight: '700', color: 'var(--text-main)' }}>
+                                {memB.name} {memB.email && <span style={{ fontSize: '0.75rem', fontWeight: 'normal', color: 'var(--text-muted)', fontFamily: 'Fira Code, monospace' }}>&lt;{memB.email}&gt;</span>}
+                              </span>
+                            </div>
+                            <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: '2px' }}>
+                              Likely the same contributor using multiple Git identities{tokenSnippet}.
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Right side: Review & Merge Action Button */}
+                        {issue.author_ids && issue.author_ids.length === 2 && onMergeAuthors && (
+                          <button
+                            type="button"
+                            className="btn btn-secondary btn-sm"
+                            style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '6px',
+                              borderColor: 'var(--primary)',
+                              color: 'var(--primary)',
+                              fontWeight: '600',
+                              fontSize: '0.8rem',
+                              padding: '5px 12px',
+                              flexShrink: 0
+                            }}
+                            disabled={mergingIdentity}
+                            onClick={() => {
+                              handleOpenMergeModal(
+                                { id: issue.author_ids[1], name: memB.name, email: memB.email },
+                                issue.author_ids[0]
+                              );
+                            }}
+                          >
+                            <GitMerge size={14} />
+                            <span>Review & Merge</span>
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })}
+
+                  {/* If Solo project and no split identities */}
+                  {isSolo && suspected.length === 0 && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+                      <User size={22} style={{ color: '#0284c7', flexShrink: 0 }} />
+                      <div>
+                        <div style={{ fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.6px', fontWeight: '700', color: 'var(--text-muted)' }}>
+                          Solo Project Verified
+                        </div>
+                        <div style={{ fontSize: '0.9rem', fontWeight: '600', color: 'var(--text-main)', marginTop: '2px' }}>
+                          All commits authored by 1 primary contributor.
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Shared Account Notices */}
+                  {shared.length > 0 && (
+                    <div style={{ borderTop: suspected.length > 0 ? '1px solid var(--border-color)' : 'none', paddingTop: suspected.length > 0 ? '8px' : '0', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                      <strong style={{ color: 'var(--text-main)' }}>Shared Account:</strong> {shared.map(s => s.members?.join(', ')).join('; ')} ({shared[0]?.evidence?.[0] || 'Multiple students committing via one account'})
+                    </div>
+                  )}
+
+                  {/* Proxy Push Divergence */}
+                  {pushed.length > 0 && (
+                    <div style={{ borderTop: (suspected.length > 0 || shared.length > 0) ? '1px solid var(--border-color)' : 'none', paddingTop: (suspected.length > 0 || shared.length > 0) ? '8px' : '0', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                      <strong style={{ color: 'var(--text-main)' }}>Proxy Push:</strong> {pushed.map(p => p.members?.join(', ')).join('; ')} ({pushed[0]?.evidence?.[0] || 'Committer email differs from author'})
+                    </div>
+                  )}
                 </div>
               );
             })()}
@@ -1458,12 +1835,19 @@ export default function Analytics({ project, course, onBack, qualAnalysisState, 
                   gridTemplateColumns: 'repeat(auto-fit, minmax(310px, 1fr))',
                   gap: '20px'
                 }}>
-                  {/* Card 1: AST Complexity & Functions */}
-                  <div className="card" style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                  {/* ── Card 1: AST Code Complexity ── */}
+                  <div className="card" style={{
+                    padding: '20px',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '14px',
+                    backgroundColor: 'var(--card-bg)'
+                  }}>
+                    {/* Header: Icon + Title + Tooltip */}
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <div className="stat-icon-wrapper blue-icon" style={{ width: '32px', height: '32px' }}>
-                          <Code size={18} />
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                        <div className="stat-icon-wrapper blue-icon" style={{ width: '32px', height: '32px', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '6px' }}>
+                          <Code size={17} />
                         </div>
                         <span style={{ fontWeight: '700', fontSize: '0.92rem', color: 'var(--text-main)' }}>AST Code Complexity</span>
                       </div>
@@ -1472,13 +1856,15 @@ export default function Analytics({ project, course, onBack, qualAnalysisState, 
                         content="Evaluates code branching (if, for, while, switch) parsed via language AST. Low (1-5), Moderate (6-10), High (11-20), Very High (>20)."
                       />
                     </div>
+
+                    {/* Primary Stat & Badge */}
                     <div>
-                      <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px' }}>
-                        <span style={{ fontSize: '1.75rem', fontWeight: '800', color: 'var(--text-main)' }}>
+                      <div style={{ display: 'flex', alignItems: 'baseline', gap: '10px' }}>
+                        <span style={{ fontSize: '1.65rem', fontWeight: '800', color: 'var(--text-main)', fontVariantNumeric: 'tabular-nums', lineHeight: 1.1 }}>
                           {ast.avg_complexity_score ?? 0}
                         </span>
                         <span style={{
-                          fontSize: '0.75rem',
+                          fontSize: '0.74rem',
                           fontWeight: '700',
                           padding: '2px 8px',
                           borderRadius: '4px',
@@ -1493,26 +1879,48 @@ export default function Analytics({ project, course, onBack, qualAnalysisState, 
                         {cxBadge.label}
                       </p>
                     </div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px solid var(--border-color)', paddingTop: '10px', fontSize: '0.8rem' }}>
-                      <div>
-                        <span style={{ color: 'var(--text-muted)' }}>Parsed Functions: </span>
-                        <strong>{ast.total_functions ?? 0}</strong>
+
+                    {/* Supporting Details (Aligned 2-Column Layout) */}
+                    <div style={{
+                      borderTop: '1px solid var(--border-color)',
+                      paddingTop: '12px',
+                      marginTop: 'auto',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '6px',
+                      fontSize: '0.8rem'
+                    }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+                        <span style={{ color: 'var(--text-muted)' }}>Parsed Functions:</span>
+                        <strong style={{ color: 'var(--text-main)', fontVariantNumeric: 'tabular-nums' }}>
+                          {(ast.total_functions ?? 0).toLocaleString()}
+                        </strong>
                       </div>
-                      <div>
-                        <span style={{ color: 'var(--text-muted)' }}>Squash Commits: </span>
-                        <strong style={{ color: (ast.squash_suspected_commits > 0) ? '#ef4444' : '#10b981' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+                        <span style={{ color: 'var(--text-muted)' }}>Squash Commits:</span>
+                        <strong style={{
+                          color: (ast.squash_suspected_commits > 0) ? '#ef4444' : 'var(--text-main)',
+                          fontVariantNumeric: 'tabular-nums'
+                        }}>
                           {ast.squash_suspected_commits ?? 0}
                         </strong>
                       </div>
                     </div>
                   </div>
 
-                  {/* Card 2: Repository Modularity & Structure */}
-                  <div className="card" style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                  {/* ── Card 2: Repository Structure ── */}
+                  <div className="card" style={{
+                    padding: '20px',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '14px',
+                    backgroundColor: 'var(--card-bg)'
+                  }}>
+                    {/* Header: Icon + Title + Tooltip */}
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <div className="stat-icon-wrapper purple-icon" style={{ width: '32px', height: '32px' }}>
-                          <FolderTree size={18} />
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                        <div className="stat-icon-wrapper blue-icon" style={{ width: '32px', height: '32px', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '6px' }}>
+                          <FolderTree size={17} />
                         </div>
                         <span style={{ fontWeight: '700', fontSize: '0.92rem', color: 'var(--text-main)' }}>Repository Structure</span>
                       </div>
@@ -1521,66 +1929,112 @@ export default function Analytics({ project, course, onBack, qualAnalysisState, 
                         content="Analyzes project file layout, directories, modular separation, and presence of automated test suites."
                       />
                     </div>
+
+                    {/* Primary Stat & Badge */}
                     <div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                      <div style={{ display: 'flex', alignItems: 'baseline', gap: '10px' }}>
+                        <span style={{ fontSize: '1.65rem', fontWeight: '800', color: 'var(--text-main)', fontVariantNumeric: 'tabular-nums', lineHeight: 1.1 }}>
+                          {(fs.total_files ?? 0).toLocaleString()}
+                        </span>
                         <span style={{
-                          fontSize: '0.82rem',
+                          fontSize: '0.74rem',
                           fontWeight: '700',
-                          padding: '3px 8px',
+                          padding: '2px 8px',
                           borderRadius: '4px',
                           backgroundColor: modBadge.bg,
-                          color: modBadge.color
+                          color: modBadge.color,
+                          border: `1px solid ${modBadge.color}33`
                         }}>
                           {modBadge.label}
                         </span>
-                        <span style={{
-                          fontSize: '0.75rem',
-                          fontWeight: '600',
-                          padding: '2px 7px',
-                          borderRadius: '4px',
-                          backgroundColor: fs.has_tests_dir ? 'rgba(16,185,129,0.12)' : 'var(--bg-app)',
-                          color: fs.has_tests_dir ? '#10b981' : 'var(--text-muted)',
-                          border: '1px solid var(--border-color)'
-                        }}>
-                          {fs.has_tests_dir ? '✓ Tests Directory Present' : 'No Tests Directory'}
-                        </span>
                       </div>
-                      <p style={{ margin: '6px 0 0 0', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-                        <strong>{fs.total_files ?? 0}</strong> files across <strong>{fs.total_directories ?? 0}</strong> directories
-                      </p>
+                      <div style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '5px',
+                        marginTop: '4px',
+                        fontSize: '0.78rem',
+                        color: fs.has_tests_dir ? '#10b981' : 'var(--text-muted)'
+                      }}>
+                        <span>{fs.has_tests_dir ? '✓ Tests Directory Present' : '— No Tests Directory'}</span>
+                      </div>
                     </div>
-                    {/* Folders Overview Tags */}
+
+                    {/* Folders Overview (Fixed Grid) */}
                     {(fs.filtered_ai_folders || fs.top_level_directories) && (
-                      <div style={{ borderTop: '1px solid var(--border-color)', paddingTop: '10px' }}>
-                        <span style={{ fontSize: '0.74rem', fontWeight: '700', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                      <div style={{ marginTop: '2px' }}>
+                        <div style={{ fontSize: '0.72rem', fontWeight: '700', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: '6px' }}>
                           Key Architectural Folders:
-                        </span>
-                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '5px', marginTop: '6px' }}>
+                        </div>
+                        <div style={{
+                          display: 'grid',
+                          gridTemplateColumns: 'repeat(auto-fill, minmax(76px, 1fr))',
+                          gap: '5px'
+                        }}>
                           {(fs.filtered_ai_folders || fs.top_level_directories).slice(0, 8).map((f, i) => (
-                            <span key={i} style={{
-                              fontSize: '0.72rem',
-                              fontFamily: 'monospace',
-                              fontWeight: '600',
-                              backgroundColor: 'var(--bg-app)',
-                              border: '1px solid var(--border-color)',
-                              padding: '1px 6px',
-                              borderRadius: '4px',
-                              color: 'var(--primary)'
-                            }}>
-                              📁 {f}/
+                            <span
+                              key={i}
+                              title={`${f}/`}
+                              style={{
+                                fontSize: '0.72rem',
+                                fontFamily: 'Fira Code, monospace',
+                                fontWeight: '600',
+                                backgroundColor: 'var(--bg-app)',
+                                border: '1px solid var(--border-color)',
+                                padding: '2px 6px',
+                                borderRadius: '4px',
+                                color: 'var(--primary)',
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis',
+                                whiteSpace: 'nowrap',
+                                textAlign: 'center'
+                              }}
+                            >
+                              {f}/
                             </span>
                           ))}
                         </div>
                       </div>
                     )}
+
+                    {/* Supporting Details (Aligned 2-Column Layout) */}
+                    <div style={{
+                      borderTop: '1px solid var(--border-color)',
+                      paddingTop: '12px',
+                      marginTop: 'auto',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '6px',
+                      fontSize: '0.8rem'
+                    }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+                        <span style={{ color: 'var(--text-muted)' }}>Total Directories:</span>
+                        <strong style={{ color: 'var(--text-main)', fontVariantNumeric: 'tabular-nums' }}>
+                          {fs.total_directories ?? 0}
+                        </strong>
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+                        <span style={{ color: 'var(--text-muted)' }}>Test Suite:</span>
+                        <strong style={{ color: fs.has_tests_dir ? '#10b981' : 'var(--text-muted)' }}>
+                          {fs.has_tests_dir ? 'Present' : 'None'}
+                        </strong>
+                      </div>
+                    </div>
                   </div>
 
-                  {/* Card 3: Documentation & Velocity */}
-                  <div className="card" style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                  {/* ── Card 3: Documentation & Velocity ── */}
+                  <div className="card" style={{
+                    padding: '20px',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '14px',
+                    backgroundColor: 'var(--card-bg)'
+                  }}>
+                    {/* Header: Icon + Title + Tooltip */}
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <div className="stat-icon-wrapper red-icon" style={{ width: '32px', height: '32px' }}>
-                          <FileText size={18} />
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                        <div className="stat-icon-wrapper blue-icon" style={{ width: '32px', height: '32px', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '6px' }}>
+                          <FileText size={17} />
                         </div>
                         <span style={{ fontWeight: '700', fontSize: '0.92rem', color: 'var(--text-main)' }}>Docs & Velocity</span>
                       </div>
@@ -1589,38 +2043,58 @@ export default function Analytics({ project, course, onBack, qualAnalysisState, 
                         content="Measures documentation presence and commit velocity trends across active days."
                       />
                     </div>
+
+                    {/* Primary Stat & Badge */}
                     <div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <div style={{ display: 'flex', alignItems: 'baseline', gap: '10px' }}>
+                        <span style={{ fontSize: '1.65rem', fontWeight: '800', color: 'var(--text-main)', fontVariantNumeric: 'tabular-nums', lineHeight: 1.1 }}>
+                          {readme.readme_size_kb ? `${readme.readme_size_kb} KB` : '0 KB'}
+                        </span>
                         <span style={{
-                          fontSize: '0.82rem',
+                          fontSize: '0.74rem',
                           fontWeight: '700',
-                          padding: '3px 8px',
+                          padding: '2px 8px',
                           borderRadius: '4px',
                           backgroundColor: docBadge.bg,
-                          color: docBadge.color
+                          color: docBadge.color,
+                          border: `1px solid ${docBadge.color}33`
                         }}>
                           Doc: {readme.documentation_score || 'Not Found'}
                         </span>
-                        {readme.has_setup_guide && (
-                          <span style={{ fontSize: '0.72rem', fontWeight: '600', color: '#10b981', backgroundColor: 'rgba(16,185,129,0.1)', padding: '2px 6px', borderRadius: '4px' }}>
-                            Setup Guide ✓
-                          </span>
-                        )}
                       </div>
-                      {readme.has_readme && (
-                        <p style={{ margin: '4px 0 0 0', fontSize: '0.78rem', color: 'var(--text-muted)' }}>
-                          README Size: <strong>{readme.readme_size_kb || 0} KB</strong>
-                        </p>
-                      )}
+                      <div style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '5px',
+                        marginTop: '4px',
+                        fontSize: '0.78rem',
+                        color: readme.has_setup_guide ? '#10b981' : 'var(--text-muted)'
+                      }}>
+                        <span>{readme.has_setup_guide ? '✓ Setup Guide Included' : '— No Setup Guide'}</span>
+                      </div>
                     </div>
-                    <div style={{ borderTop: '1px solid var(--border-color)', paddingTop: '10px', fontSize: '0.8rem', display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                        <span style={{ color: 'var(--text-muted)' }}>Peak Activity:</span>
-                        <strong>{pacing.peak_commit_date || 'N/A'} ({pacing.peak_commit_count || 0} commits)</strong>
-                      </div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+
+                    {/* Supporting Details (Aligned 2-Column Layout) */}
+                    <div style={{
+                      borderTop: '1px solid var(--border-color)',
+                      paddingTop: '12px',
+                      marginTop: 'auto',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '6px',
+                      fontSize: '0.8rem'
+                    }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
                         <span style={{ color: 'var(--text-muted)' }}>Avg Velocity:</span>
-                        <strong>{pacing.avg_commits_per_active_day || 0} commits / active day</strong>
+                        <strong style={{ color: 'var(--text-main)', fontVariantNumeric: 'tabular-nums' }}>
+                          {pacing.avg_commits_per_active_day || 0} commits / active day
+                        </strong>
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+                        <span style={{ color: 'var(--text-muted)' }}>Peak Activity:</span>
+                        <strong style={{ color: 'var(--text-main)', fontVariantNumeric: 'tabular-nums' }}>
+                          {pacing.peak_commit_date || 'N/A'} ({pacing.peak_commit_count || 0} commits)
+                        </strong>
                       </div>
                     </div>
                   </div>
@@ -1634,12 +2108,31 @@ export default function Analytics({ project, course, onBack, qualAnalysisState, 
               const smells = ps.code_smell_distribution || {};
               const archs = ps.architecture_issue_distribution || {};
               const substance = ps.substance_distribution || {};
-              const hasSmells = Object.keys(smells).length > 0;
-              const hasArchs = Object.keys(archs).length > 0;
+              const smellEntries = Object.entries(smells);
+              const archEntries = Object.entries(archs);
+              const hasSmells = smellEntries.length > 0;
+              const hasArchs = archEntries.length > 0;
+
+              const smellDescriptions = {
+                dead_code: 'Unused functions, variables, or unreachable code paths.',
+                large_function: 'Functions with high line counts reducing readability.',
+                deep_nesting: 'Excessive nesting increasing cognitive complexity.',
+                duplicate_code: 'Redundant logic repeated across files.',
+                magic_numbers: 'Hardcoded literal values without named constants.',
+                god_class: 'Classes or modules taking on too many responsibilities.',
+              };
+
+              const archDescriptions = {
+                tight_coupling: 'Direct interdependent modules hindering modularity and testing.',
+                poor_separation_of_concerns: 'Mixing UI, business logic, or data access in single files.',
+                circular_dependency: 'Modules depending on each other in cycles.',
+                leaky_abstraction: 'Implementation details exposed across boundaries.',
+                monolithic_module: 'Overly centralized single-file modules.'
+              };
 
               return (
                 <div className="card" style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '20px' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border-color)', paddingBottom: '14px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border-color)', paddingBottom: '14px', flexWrap: 'wrap', gap: '10px' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                       <Layers size={20} style={{ color: 'var(--primary)' }} />
                       <h2 style={{ fontSize: '1.1rem', fontWeight: '700', color: 'var(--text-main)', margin: 0 }}>
@@ -1663,110 +2156,120 @@ export default function Analytics({ project, course, onBack, qualAnalysisState, 
                     </div>
                   </div>
 
-                  {/* 2-Column Grid: Smells vs Architecture */}
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '20px' }}>
-                    {/* Left: Code Smells */}
-                    <div style={{ backgroundColor: 'var(--bg-app)', padding: '16px', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '8px' }}>
-                        <AlertCircle size={16} style={{ color: '#f59e0b' }} />
-                        <h3 style={{ fontSize: '0.9rem', fontWeight: '700', color: 'var(--text-main)', margin: 0 }}>
-                          Detected Code Smells
-                        </h3>
+                  {/* 2-Column Grid: Smells vs Architecture (Separated by Vertical Divider, No Nested Boxes) */}
+                  <div style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))',
+                    gap: '32px'
+                  }}>
+                    {/* Left Column: Code Smells */}
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                      <div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px' }}>
+                          <AlertCircle size={16} style={{ color: '#f59e0b' }} />
+                          <h3 style={{ fontSize: '0.92rem', fontWeight: '700', color: 'var(--text-main)', margin: 0 }}>
+                            Detected Code Smells
+                          </h3>
+                        </div>
+                        <p style={{ margin: 0, fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+                          Patterns indicating quality issues or maintenance friction across commits:
+                        </p>
                       </div>
-                      <p style={{ margin: '0 0 12px 0', fontSize: '0.78rem', color: 'var(--text-muted)' }}>
-                        Patterns indicating quality issues or maintenance friction across commits:
-                      </p>
 
                       {hasSmells ? (
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                          {Object.entries(smells).map(([smell, count]) => (
-                            <div key={smell} style={{
-                              display: 'flex',
-                              alignItems: 'flex-start',
-                              gap: '10px',
-                              padding: '8px 10px',
-                              backgroundColor: 'var(--bg-card)',
-                              borderRadius: '6px',
-                              border: '1px solid var(--border-color)'
-                            }}>
-                              <span style={{
-                                backgroundColor: 'rgba(245,158,11,0.15)',
-                                color: '#f59e0b',
-                                fontWeight: '700',
-                                fontSize: '0.75rem',
-                                padding: '2px 6px',
-                                borderRadius: '4px',
-                                flexShrink: 0
-                              }}>
-                                {count}×
-                              </span>
-                              <div style={{ fontSize: '0.8rem', lineHeight: '1.4' }}>
-                                <strong style={{ color: '#f59e0b', textTransform: 'capitalize' }}>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginTop: '4px' }}>
+                          {smellEntries.map(([smell, count], idx) => (
+                            <div 
+                              key={smell} 
+                              style={{ 
+                                paddingBottom: idx < smellEntries.length - 1 ? '12px' : '0', 
+                                borderBottom: idx < smellEntries.length - 1 ? '1px solid var(--border-color)' : 'none' 
+                              }}
+                            >
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '3px' }}>
+                                <strong style={{ color: '#f59e0b', textTransform: 'capitalize', fontSize: '0.84rem' }}>
                                   {smell.replace(/_/g, ' ')}
                                 </strong>
-                                <div style={{ color: 'var(--text-muted)', fontSize: '0.75rem', marginTop: '2px' }}>
-                                  {smellDescriptions[smell] || 'Identified recurring code pattern that may reduce maintainability.'}
-                                </div>
+                                <span style={{
+                                  backgroundColor: 'rgba(245,158,11,0.12)',
+                                  color: '#f59e0b',
+                                  fontWeight: '700',
+                                  fontSize: '0.72rem',
+                                  padding: '1px 6px',
+                                  borderRadius: '4px'
+                                }}>
+                                  {count}×
+                                </span>
+                              </div>
+                              <div style={{ color: 'var(--text-muted)', fontSize: '0.76rem', lineHeight: '1.4' }}>
+                                {smellDescriptions[smell] || 'Identified recurring code pattern that may reduce maintainability.'}
                               </div>
                             </div>
                           ))}
                         </div>
                       ) : (
-                        <div style={{ padding: '12px', textAlign: 'center', color: '#10b981', fontSize: '0.82rem', fontWeight: '600' }}>
-                          ✓ Clean code quality — no significant code smells detected.
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#10b981', fontSize: '0.82rem', fontWeight: '500', padding: '8px 0' }}>
+                          <CheckCircle2 size={16} style={{ color: '#10b981', flexShrink: 0 }} />
+                          <span>Clean code quality — no significant code smells detected.</span>
                         </div>
                       )}
                     </div>
 
-                    {/* Right: Architecture Issues */}
-                    <div style={{ backgroundColor: 'var(--bg-app)', padding: '16px', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '8px' }}>
-                        <Layers size={16} style={{ color: '#ef4444' }} />
-                        <h3 style={{ fontSize: '0.9rem', fontWeight: '700', color: 'var(--text-main)', margin: 0 }}>
-                          Detected Architecture Issues
-                        </h3>
+                    {/* Right Column: Architecture Issues (Separated by subtle border on larger screens or gap) */}
+                    <div style={{ 
+                      display: 'flex', 
+                      flexDirection: 'column', 
+                      gap: '12px',
+                      borderLeft: '1px solid var(--border-color)',
+                      paddingLeft: '32px'
+                    }}>
+                      <div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px' }}>
+                          <Layers size={16} style={{ color: '#ef4444' }} />
+                          <h3 style={{ fontSize: '0.92rem', fontWeight: '700', color: 'var(--text-main)', margin: 0 }}>
+                            Detected Architecture Issues
+                          </h3>
+                        </div>
+                        <p style={{ margin: 0, fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+                          Structural design concerns identified across repository modules:
+                        </p>
                       </div>
-                      <p style={{ margin: '0 0 12px 0', fontSize: '0.78rem', color: 'var(--text-muted)' }}>
-                        Structural design concerns identified across repository modules:
-                      </p>
 
                       {hasArchs ? (
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                          {Object.entries(archs).map(([issue, count]) => (
-                            <div key={issue} style={{
-                              display: 'flex',
-                              alignItems: 'flex-start',
-                              gap: '10px',
-                              padding: '8px 10px',
-                              backgroundColor: 'var(--bg-card)',
-                              borderRadius: '6px',
-                              border: '1px solid var(--border-color)'
-                            }}>
-                              <span style={{
-                                backgroundColor: 'rgba(239,68,68,0.15)',
-                                color: '#ef4444',
-                                fontWeight: '700',
-                                fontSize: '0.75rem',
-                                padding: '2px 6px',
-                                borderRadius: '4px',
-                                flexShrink: 0
-                              }}>
-                                {count}×
-                              </span>
-                              <div style={{ fontSize: '0.8rem', lineHeight: '1.4' }}>
-                                <strong style={{ color: '#ef4444', textTransform: 'capitalize' }}>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginTop: '4px' }}>
+                          {archEntries.map(([issue, count], idx) => (
+                            <div 
+                              key={issue} 
+                              style={{ 
+                                paddingBottom: idx < archEntries.length - 1 ? '12px' : '0', 
+                                borderBottom: idx < archEntries.length - 1 ? '1px solid var(--border-color)' : 'none' 
+                              }}
+                            >
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '3px' }}>
+                                <strong style={{ color: '#ef4444', textTransform: 'capitalize', fontSize: '0.84rem' }}>
                                   {issue.replace(/_/g, ' ')}
                                 </strong>
-                                <div style={{ color: 'var(--text-muted)', fontSize: '0.75rem', marginTop: '2px' }}>
-                                  {archDescriptions[issue] || 'Structural modularity concern identified across components.'}
-                                </div>
+                                <span style={{
+                                  backgroundColor: 'rgba(239,68,68,0.12)',
+                                  color: '#ef4444',
+                                  fontWeight: '700',
+                                  fontSize: '0.72rem',
+                                  padding: '1px 6px',
+                                  borderRadius: '4px'
+                                }}>
+                                  {count}×
+                                </span>
+                              </div>
+                              <div style={{ color: 'var(--text-muted)', fontSize: '0.76rem', lineHeight: '1.4' }}>
+                                {archDescriptions[issue] || 'Structural modularity concern identified across components.'}
                               </div>
                             </div>
                           ))}
                         </div>
                       ) : (
-                        <div style={{ padding: '12px', textAlign: 'center', color: '#10b981', fontSize: '0.82rem', fontWeight: '600' }}>
-                          ✓ Clean architectural boundaries — no major modularity issues detected.
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#10b981', fontSize: '0.82rem', fontWeight: '500', padding: '8px 0' }}>
+                          <CheckCircle2 size={16} style={{ color: '#10b981', flexShrink: 0 }} />
+                          <span>Clean architectural boundaries — no major modularity issues detected.</span>
                         </div>
                       )}
                     </div>
@@ -1828,7 +2331,7 @@ export default function Analytics({ project, course, onBack, qualAnalysisState, 
                         <th style={{ width: '13%' }}>LOC Share</th>
                         <th style={{ width: '14%' }}>Vague Msg %</th>
                         <th style={{ width: '14%' }}>Msg Mismatch %</th>
-                        <th style={{ width: '10%' }}>Risk Score</th>
+                        <th style={{ width: '10%' }}>Quality Score</th>
                         <th style={{ width: '14%' }}>Status</th>
                       </tr>
                     </thead>
@@ -1836,15 +2339,16 @@ export default function Analytics({ project, course, onBack, qualAnalysisState, 
                       {Object.entries(qualData.contributors).map(([name, info]) => {
                         const stats = info.stats || {};
                         const examples = info.examples || {};
-                        const riskScore = stats.ai_risk_score ?? 0;
+                        const qualityScore = stats.ai_quality_score ?? 0;
+                        const scoreUnverified = stats.score_unverified ?? false;
                         const isFreeRider = stats.free_rider_suspected ?? false;
                         const flags = stats.detected_red_flags || [];
                         const isExpanded = expandedQualContributor === name;
 
-                        // Risk Badge style helper
-                        const getRiskBadge = (score) => {
-                          const color = score >= 7 ? '#ef4444' : score >= 5 ? '#f59e0b' : '#10b981';
-                          const bg = score >= 7 ? 'rgba(239,68,68,0.1)' : score >= 5 ? 'rgba(245,158,11,0.1)' : 'rgba(16,185,129,0.1)';
+                        // Quality Badge style helper
+                        const getQualityBadge = (score) => {
+                          const color = score >= 8 ? '#10b981' : score >= 5 ? '#f59e0b' : '#ef4444';
+                          const bg = score >= 8 ? 'rgba(16,185,129,0.1)' : score >= 5 ? 'rgba(245,158,11,0.1)' : 'rgba(239,68,68,0.1)';
                           return (
                             <span style={{
                               display: 'inline-block',
@@ -1881,7 +2385,24 @@ export default function Analytics({ project, course, onBack, qualAnalysisState, 
                               <td style={{ color: stats.message_mismatch_percentage > 20 ? '#ef4444' : 'inherit' }}>
                                 {stats.message_mismatch_percentage ?? 0}%
                               </td>
-                              <td>{getRiskBadge(riskScore)}</td>
+                              <td>
+                                {scoreUnverified ? (
+                                  <span
+                                    title="No sampled commits could be analyzed by the local AI — risk not assessed"
+                                    style={{
+                                      display: 'inline-block',
+                                      padding: '3px 8px',
+                                      borderRadius: '4px',
+                                      backgroundColor: 'rgba(107,114,128,0.12)',
+                                      color: '#6b7280',
+                                      fontWeight: '700',
+                                      fontSize: '0.82rem'
+                                    }}
+                                  >
+                                    N/A
+                                  </span>
+                                ) : getQualityBadge(qualityScore)}
+                              </td>
                               <td>
                                 {isFreeRider ? (
                                   <Tag 
@@ -1890,6 +2411,8 @@ export default function Analytics({ project, course, onBack, qualAnalysisState, 
                                     style={{ fontSize: '10px', padding: '3px 6px', fontWeight: '700' }}
                                     title={flags.join(', ')}
                                   />
+                                ) : scoreUnverified ? (
+                                  <span style={{ color: 'var(--text-muted)', fontSize: '0.82rem', fontStyle: 'italic' }}>Unverified</span>
                                 ) : (
                                   <span style={{ color: 'var(--text-muted)', fontSize: '0.82rem' }}>Good Standing</span>
                                 )}
@@ -1989,32 +2512,31 @@ export default function Analytics({ project, course, onBack, qualAnalysisState, 
 
             {/* ── Row 4: Cloud AI Final Report ──────────────────────────── */}
             <div className="card" style={{ padding: '24px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap', gap: '12px', borderBottom: '1px solid var(--border-color)', paddingBottom: '16px' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                  <Bot size={22} style={{ color: 'var(--primary)' }} />
+              {/* Header Row: Title & Action Buttons */}
+              <div style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                marginBottom: '20px',
+                flexWrap: 'wrap',
+                gap: '12px',
+                borderBottom: '1px solid var(--border-color)',
+                paddingBottom: '16px'
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <Bot size={22} style={{ color: 'var(--primary)', flexShrink: 0 }} />
                   <h2 style={{ fontSize: '1.15rem', fontWeight: '700', color: 'var(--text-main)', margin: 0 }}>
                     Cloud AI Final Evaluation Report
                   </h2>
-                  {cloudReport && cloudReport.overall_project_risk_score && (
-                    <span style={{
-                      ...getRiskScoreBadgeStyle(cloudReport.overall_project_risk_score),
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: '4px'
-                    }}>
-                      <AlertCircle size={13} />
-                      Risk Score: {cloudReport.overall_project_risk_score}
-                    </span>
-                  )}
                 </div>
 
                 {cloudReport && (
-                  <div style={{ display: 'flex', gap: '8px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                     <button 
                       onClick={downloadCloudReportPDF}
                       disabled={isPdfDownloading || isCloudGenerating}
                       className="btn btn-secondary btn-sm"
-                      style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.82rem' }}
+                      style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '0.82rem' }}
                       title="Download PDF Report"
                     >
                       {isPdfDownloading ? (
@@ -2033,7 +2555,7 @@ export default function Analytics({ project, course, onBack, qualAnalysisState, 
                       onClick={generateCloudReportData}
                       disabled={isCloudGenerating}
                       className="btn btn-secondary btn-sm"
-                      style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.82rem' }}
+                      style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '0.82rem' }}
                       title="Regenerate Report"
                     >
                       <RefreshCw size={14} className={isCloudGenerating ? "spin" : ""} />
@@ -2095,19 +2617,118 @@ export default function Analytics({ project, course, onBack, qualAnalysisState, 
                   ) : typeof cloudReport === 'object' && cloudReport.executive_summary ? (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
                       
-                      {/* Grid for Executive Summary and Work Distribution */}
-                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '20px' }}>
-                        <div style={{ backgroundColor: 'var(--bg-app)', padding: '18px', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
-                          <h3 style={{ fontSize: '0.92rem', fontWeight: '600', color: 'var(--primary)', textTransform: 'uppercase', letterSpacing: '0.05em', margin: '0 0 10px 0' }}>
-                            Executive Summary
+                      {/* 1. Dedicated Project Risk Score Banner */}
+                      {cloudReport.overall_project_risk_score && (() => {
+                        const raw = String(cloudReport.overall_project_risk_score).trim();
+                        let scoreVal = raw;
+                        let scoreDesc = '';
+                        if (raw.includes(' - ')) {
+                          const parts = raw.split(' - ');
+                          scoreVal = parts[0].trim();
+                          scoreDesc = parts.slice(1).join(' - ').trim();
+                        } else if (raw.includes(': ')) {
+                          const parts = raw.split(': ');
+                          scoreVal = parts[0].trim();
+                          scoreDesc = parts.slice(1).join(': ').trim();
+                        } else if (raw.includes('(')) {
+                          const match = raw.match(/^(.*?)\s*\((.*?)\)$/);
+                          if (match) {
+                            scoreVal = match[1].trim();
+                            scoreDesc = match[2].trim();
+                          }
+                        }
+
+                        const lower = scoreVal.toLowerCase();
+                        const isHigh = lower.includes('high') || lower.includes('8/') || lower.includes('9/') || lower.includes('10/');
+                        const isMed = lower.includes('mod') || lower.includes('medium') || lower.includes('5/') || lower.includes('6/') || lower.includes('7/');
+                        const riskColor = isHigh ? '#10b981' : isMed ? '#f59e0b' : '#ef4444';
+                        const riskBg = isHigh ? 'rgba(16, 185, 129, 0.05)' : isMed ? 'rgba(245, 158, 11, 0.05)' : 'rgba(239, 68, 68, 0.05)';
+                        const riskBorder = isHigh ? 'rgba(16, 185, 129, 0.22)' : isMed ? 'rgba(245, 158, 11, 0.22)' : 'rgba(239, 68, 68, 0.22)';
+                        const riskBadge = isHigh ? 'High Quality' : isMed ? 'Moderate Quality' : 'Poor Quality';
+
+                        return (
+                          <div style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '20px',
+                            padding: '16px 20px',
+                            backgroundColor: riskBg,
+                            borderRadius: 'var(--radius-md)',
+                            border: `1px solid ${riskBorder}`,
+                            flexWrap: 'wrap'
+                          }}>
+                            <div style={{
+                              display: 'flex',
+                              flexDirection: 'column',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              minWidth: '85px',
+                              padding: '8px 14px',
+                              backgroundColor: 'var(--bg-card)',
+                              borderRadius: '8px',
+                              border: `1px solid ${riskBorder}`,
+                              boxShadow: '0 1px 3px rgba(0, 0, 0, 0.04)',
+                              flexShrink: 0
+                            }}>
+                              <span style={{ fontSize: '0.68rem', fontWeight: '700', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                                Quality Score
+                              </span>
+                              <span style={{ fontSize: '1.45rem', fontWeight: '800', color: riskColor, fontVariantNumeric: 'tabular-nums', lineHeight: '1.15', marginTop: '2px' }}>
+                                {scoreVal}
+                              </span>
+                            </div>
+
+                            <div style={{ flex: 1, minWidth: '240px' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: scoreDesc ? '4px' : 0 }}>
+                                <AlertCircle size={15} style={{ color: riskColor, flexShrink: 0 }} />
+                                <span style={{ fontSize: '0.88rem', fontWeight: '700', color: 'var(--text-main)' }}>
+                                  Overall Project Quality Evaluation
+                                </span>
+                                <span style={{
+                                  fontSize: '0.72rem',
+                                  fontWeight: '700',
+                                  padding: '1px 6px',
+                                  borderRadius: '4px',
+                                  backgroundColor: riskColor === '#ef4444' ? 'rgba(239,68,68,0.12)' : riskColor === '#f59e0b' ? 'rgba(245,158,11,0.12)' : 'rgba(16,185,129,0.12)',
+                                  color: riskColor
+                                }}>
+                                  {riskBadge}
+                                </span>
+                              </div>
+                              {scoreDesc && (
+                                <p style={{ margin: 0, fontSize: '0.84rem', color: 'var(--text-muted)', lineHeight: '1.45' }}>
+                                  {scoreDesc}
+                                </p>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })()}
+
+                      {/* 2. Executive Summary & Work Distribution (Clean Dividers without redundant card boxes) */}
+                      <div style={{
+                        display: 'grid',
+                        gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))',
+                        gap: '24px',
+                        borderTop: '1px solid var(--border-color)',
+                        borderBottom: '1px solid var(--border-color)',
+                        paddingTop: '20px',
+                        paddingBottom: '20px'
+                      }}>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                          <h3 style={{ fontSize: '0.88rem', fontWeight: '700', color: 'var(--primary)', textTransform: 'uppercase', letterSpacing: '0.04em', margin: 0, display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <FileText size={15} style={{ color: 'var(--primary)' }} />
+                            <span>Executive Summary</span>
                           </h3>
                           <p style={{ margin: 0, fontSize: '0.88rem', lineHeight: '1.6', color: 'var(--text-main)' }}>
                             {cloudReport.executive_summary}
                           </p>
                         </div>
-                        <div style={{ backgroundColor: 'var(--bg-app)', padding: '18px', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
-                          <h3 style={{ fontSize: '0.92rem', fontWeight: '600', color: 'var(--primary)', textTransform: 'uppercase', letterSpacing: '0.05em', margin: '0 0 10px 0' }}>
-                            Work Distribution & Collaboration
+
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                          <h3 style={{ fontSize: '0.88rem', fontWeight: '700', color: 'var(--primary)', textTransform: 'uppercase', letterSpacing: '0.04em', margin: 0, display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <Users size={15} style={{ color: 'var(--primary)' }} />
+                            <span>Work Distribution & Collaboration</span>
                           </h3>
                           <p style={{ margin: 0, fontSize: '0.88rem', lineHeight: '1.6', color: 'var(--text-main)' }}>
                             {cloudReport.work_distribution_and_fairness}
@@ -2115,70 +2736,172 @@ export default function Analytics({ project, course, onBack, qualAnalysisState, 
                         </div>
                       </div>
 
-                      {/* Integrity Anomalies (if any) */}
+                      {/* 3. Integrity Anomalies (Clean Alert banner) */}
                       {cloudReport.academic_integrity_anomalies && !cloudReport.academic_integrity_anomalies.includes("No anomalies") && !cloudReport.academic_integrity_anomalies.includes("none") && (
-                        <div style={{ backgroundColor: 'rgba(239,68,68,0.06)', padding: '18px', borderRadius: '8px', border: '1px solid rgba(239,68,68,0.2)', display: 'flex', gap: '12px' }}>
-                          <AlertCircle size={20} style={{ color: '#ef4444', flexShrink: 0, marginTop: '2px' }} />
+                        <div style={{
+                          backgroundColor: 'rgba(239, 68, 68, 0.04)',
+                          padding: '16px 18px',
+                          borderRadius: 'var(--radius-md)',
+                          border: '1px solid rgba(239, 68, 68, 0.2)',
+                          display: 'flex',
+                          gap: '12px',
+                          alignItems: 'flex-start'
+                        }}>
+                          <AlertCircle size={18} style={{ color: '#ef4444', flexShrink: 0, marginTop: '2px' }} />
                           <div>
-                            <h3 style={{ fontSize: '0.92rem', fontWeight: '700', color: '#ef4444', margin: '0 0 6px 0' }}>
+                            <h3 style={{ fontSize: '0.9rem', fontWeight: '700', color: '#ef4444', margin: '0 0 4px 0' }}>
                               Academic Integrity & Team Dynamics Anomalies
                             </h3>
-                            <p style={{ margin: 0, fontSize: '0.86rem', lineHeight: '1.5', color: 'var(--text-main)' }}>
+                            <p style={{ margin: 0, fontSize: '0.86rem', lineHeight: '1.55', color: 'var(--text-main)' }}>
                               {cloudReport.academic_integrity_anomalies}
                             </p>
                           </div>
                         </div>
                       )}
 
-                      {/* Individual Student Evaluations */}
+                      {/* 4. Individual Student Qualitative Evaluations (Compact Responsive Table) */}
                       {cloudReport.student_evaluations && cloudReport.student_evaluations.length > 0 && (
                         <div>
-                          <h3 style={{ fontSize: '0.95rem', fontWeight: '600', color: 'var(--text-main)', margin: '0 0 12px 0', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                            <User size={16} style={{ color: 'var(--primary)' }} />
-                            <span>Individual Student Qualitative Evaluations</span>
-                          </h3>
-                          <div className="table-container">
-                            <table className="custom-table" style={{ tableLayout: 'fixed', width: '100%' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' }}>
+                            <h3 style={{ fontSize: '0.92rem', fontWeight: '700', color: 'var(--text-main)', margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                              <User size={16} style={{ color: 'var(--primary)' }} />
+                              <span>Individual Student Qualitative Evaluations</span>
+                            </h3>
+                            <Tooltip 
+                              title="How Contribution Quality is Evaluated" 
+                              content={
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
+                                  <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+                                    Quality verdicts are scored by combining 4 key signals:
+                                  </span>
+                                  <div style={{ display: 'flex', flexDirection: 'column', gap: '3px', fontSize: '0.78rem' }}>
+                                    <div><strong>1. Substance:</strong> Ratio of substantial logic vs. trivial changes</div>
+                                    <div><strong>2. Pacing:</strong> Steady incremental commits vs. last-minute dumps</div>
+                                    <div><strong>3. Authenticity:</strong> Verified identity & proxy commit checks</div>
+                                    <div><strong>4. Code Quality:</strong> Message-diff mismatches & code smells</div>
+                                  </div>
+                                </div>
+                              } 
+                            />
+                          </div>
+                          <div style={{ border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)', overflow: 'hidden' }}>
+                            <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed', textAlign: 'left' }}>
                               <thead>
-                                <tr>
-                                  <th style={{ width: '18%' }}>Student</th>
-                                  <th style={{ width: '18%' }}>Verdict</th>
-                                  <th style={{ width: '16%' }}>Commits</th>
-                                  <th style={{ width: '16%' }}>Substance</th>
-                                  <th style={{ width: '16%' }}>Pacing</th>
-                                  <th style={{ width: '16%' }}>Quality Signals</th>
+                                <tr style={{ backgroundColor: 'var(--bg-app)', borderBottom: '1px solid var(--border-color)' }}>
+                                  <th style={{ width: '18%', padding: '10px 14px', fontSize: '0.74rem', textTransform: 'uppercase', color: 'var(--text-muted)', fontWeight: '700', letterSpacing: '0.04em' }}>Student</th>
+                                  <th style={{ width: '22%', padding: '10px 14px', fontSize: '0.74rem', textTransform: 'uppercase', color: 'var(--text-muted)', fontWeight: '700', letterSpacing: '0.04em' }}>Verdict</th>
+                                  <th style={{ width: '16%', padding: '10px 14px', fontSize: '0.74rem', textTransform: 'uppercase', color: 'var(--text-muted)', fontWeight: '700', letterSpacing: '0.04em' }}>Commits</th>
+                                  <th style={{ width: '16%', padding: '10px 14px', fontSize: '0.74rem', textTransform: 'uppercase', color: 'var(--text-muted)', fontWeight: '700', letterSpacing: '0.04em' }}>Substance</th>
+                                  <th style={{ width: '14%', padding: '10px 14px', fontSize: '0.74rem', textTransform: 'uppercase', color: 'var(--text-muted)', fontWeight: '700', letterSpacing: '0.04em' }}>Pacing</th>
+                                  <th style={{ width: '14%', padding: '10px 14px', fontSize: '0.74rem', textTransform: 'uppercase', color: 'var(--text-muted)', fontWeight: '700', letterSpacing: '0.04em' }}>Quality Signals</th>
                                 </tr>
                               </thead>
                               <tbody>
-                                {cloudReport.student_evaluations.map((student, idx) => (
-                                  <tr key={idx}>
-                                    <td style={{ fontWeight: '600' }}>{student.student_name}</td>
-                                    <td>
-                                      <span style={getVerdictBadgeStyle(student.verdict)}>
-                                        {student.verdict}
-                                      </span>
-                                    </td>
-                                    <td style={{ fontSize: '0.82rem' }}>{student.commits_summary}</td>
-                                    <td style={{ fontSize: '0.82rem' }}>{student.substance_breakdown}</td>
-                                    <td style={{ fontSize: '0.82rem' }}>{student.pacing_and_deadlines}</td>
-                                    <td style={{ fontSize: '0.82rem' }}>{student.quality_and_integrity_signals}</td>
-                                  </tr>
-                                ))}
+                                {cloudReport.student_evaluations.map((student, idx) => {
+                                  const rawVerdict = String(student.verdict || '').trim();
+                                  let vBadge = rawVerdict;
+                                  let vDetail = '';
+                                  if (rawVerdict.includes(' - ')) {
+                                    const parts = rawVerdict.split(' - ');
+                                    vBadge = parts[0].trim();
+                                    vDetail = parts.slice(1).join(' - ').trim();
+                                  } else if (rawVerdict.includes(': ')) {
+                                    const parts = rawVerdict.split(': ');
+                                    vBadge = parts[0].trim();
+                                    vDetail = parts.slice(1).join(': ').trim();
+                                  } else if (rawVerdict.includes('(')) {
+                                    const match = rawVerdict.match(/^(.*?)\s*\((.*?)\)$/);
+                                    if (match) {
+                                      vBadge = match[1].trim();
+                                      vDetail = match[2].trim();
+                                    }
+                                  }
+
+                                  const lowerV = vBadge.toLowerCase();
+                                  // Quality wording (current): High/strong/good = green, Moderate/fair = amber,
+                                  // Poor = red, Unverified = gray. Legacy Risk wording (older cached reports,
+                                  // opposite polarity): Low Risk = green, High Risk = red.
+                                  const isVUnverified = lowerV.includes('unverified') || lowerV.includes('n/a');
+                                  const isVBad = lowerV.includes('poor') || lowerV.includes('high risk');
+                                  const isVMed = !isVBad && (lowerV.includes('moderate') || lowerV.includes('medium') || lowerV.includes('fair') || lowerV.includes('minor'));
+                                  const isVGood = !isVBad && !isVMed && (lowerV.includes('high quality') || lowerV.includes('low risk') || lowerV.includes('strong') || lowerV.includes('solid') || lowerV.includes('good'));
+                                  const vColor = isVUnverified ? 'var(--text-muted)' : isVBad ? '#ef4444' : isVMed ? '#f59e0b' : isVGood ? '#10b981' : 'var(--text-muted)';
+                                  const vBg = isVUnverified ? 'var(--bg-app)' : isVBad ? 'rgba(239,68,68,0.1)' : isVMed ? 'rgba(245,158,11,0.1)' : isVGood ? 'rgba(16,185,129,0.1)' : 'var(--bg-app)';
+                                  const vBorder = isVUnverified ? 'var(--border-color)' : isVBad ? 'rgba(239,68,68,0.25)' : isVMed ? 'rgba(245,158,11,0.25)' : isVGood ? 'rgba(16,185,129,0.25)' : 'var(--border-color)';
+
+                                  const matchingContrib = analytics?.contributions?.find(c => c.name.toLowerCase() === student.student_name.toLowerCase());
+                                  const ghUsername = student.github_username || matchingContrib?.github_username;
+
+                                  return (
+                                    <tr key={idx} style={{ borderBottom: idx < cloudReport.student_evaluations.length - 1 ? '1px solid var(--border-color)' : 'none', backgroundColor: 'var(--bg-card)' }}>
+                                      <td style={{ fontWeight: '600', color: 'var(--text-main)', verticalAlign: 'top', padding: '10px 14px', wordBreak: 'break-word', overflowWrap: 'break-word', whiteSpace: 'normal' }}>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                          {ghUsername ? (
+                                            <img 
+                                              src={`https://github.com/${ghUsername}.png`} 
+                                              alt={ghUsername}
+                                              style={{ width: '22px', height: '22px', borderRadius: '50%', objectFit: 'cover', flexShrink: 0 }}
+                                              onError={(e) => { e.target.style.display = 'none'; }}
+                                            />
+                                          ) : (
+                                            <div style={{ width: '22px', height: '22px', borderRadius: '50%', backgroundColor: 'var(--primary-alpha)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '10px', fontWeight: '700', color: 'var(--primary)', flexShrink: 0 }}>
+                                              {student.student_name.charAt(0).toUpperCase()}
+                                            </div>
+                                          )}
+                                          <span style={{ fontSize: '0.86rem', lineHeight: '1.3' }}>{student.student_name}</span>
+                                        </div>
+                                      </td>
+                                      <td style={{ verticalAlign: 'top', padding: '10px 14px', wordBreak: 'break-word', overflowWrap: 'break-word', whiteSpace: 'normal' }}>
+                                        <div style={{ display: 'flex', flexDirection: 'column', gap: '3px', alignItems: 'flex-start' }}>
+                                          <span style={{
+                                            padding: '1.5px 7px',
+                                            borderRadius: '4px',
+                                            fontSize: '0.72rem',
+                                            fontWeight: '700',
+                                            color: vColor,
+                                            backgroundColor: vBg,
+                                            border: `1px solid ${vBorder}`,
+                                            display: 'inline-block'
+                                          }}>
+                                            {vBadge}
+                                          </span>
+                                          {vDetail && (
+                                            <span style={{ fontSize: '0.74rem', color: 'var(--text-muted)', lineHeight: '1.3' }}>
+                                              {vDetail}
+                                            </span>
+                                          )}
+                                        </div>
+                                      </td>
+                                      <td style={{ fontSize: '0.80rem', color: 'var(--text-main)', verticalAlign: 'top', padding: '10px 14px', lineHeight: '1.4', wordBreak: 'break-word', overflowWrap: 'break-word', whiteSpace: 'normal' }}>
+                                        {student.commits_summary}
+                                      </td>
+                                      <td style={{ fontSize: '0.80rem', color: 'var(--text-main)', verticalAlign: 'top', padding: '10px 14px', lineHeight: '1.4', wordBreak: 'break-word', overflowWrap: 'break-word', whiteSpace: 'normal' }}>
+                                        {student.substance_breakdown}
+                                      </td>
+                                      <td style={{ fontSize: '0.80rem', color: 'var(--text-main)', verticalAlign: 'top', padding: '10px 14px', lineHeight: '1.4', wordBreak: 'break-word', overflowWrap: 'break-word', whiteSpace: 'normal' }}>
+                                        {student.pacing_and_deadlines}
+                                      </td>
+                                      <td style={{ fontSize: '0.80rem', color: 'var(--text-main)', verticalAlign: 'top', padding: '10px 14px', lineHeight: '1.4', wordBreak: 'break-word', overflowWrap: 'break-word', whiteSpace: 'normal' }}>
+                                        {student.quality_and_integrity_signals}
+                                      </td>
+                                    </tr>
+                                  );
+                                })}
                               </tbody>
                             </table>
                           </div>
                         </div>
                       )}
 
-                      {/* Actionable Recommendations */}
+                      {/* 5. Actionable Recommendations */}
                       {cloudReport.actionable_recommendations && cloudReport.actionable_recommendations.length > 0 && (
                         <div style={{ borderTop: '1px solid var(--border-color)', paddingTop: '16px' }}>
-                          <h3 style={{ fontSize: '0.95rem', fontWeight: '600', color: 'var(--text-main)', margin: '0 0 10px 0' }}>
+                          <h3 style={{ fontSize: '0.95rem', fontWeight: '700', color: 'var(--text-main)', margin: '0 0 10px 0' }}>
                             Actionable Recommendations
                           </h3>
                           <ul style={{ margin: 0, paddingLeft: '20px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
                             {cloudReport.actionable_recommendations.map((rec, idx) => (
-                              <li key={idx} style={{ fontSize: '0.88rem', color: 'var(--text-main)', lineHeight: '1.5' }}>
+                              <li key={idx} style={{ fontSize: '0.88rem', color: 'var(--text-main)', lineHeight: '1.55' }}>
                                 {rec}
                               </li>
                             ))}
@@ -2233,6 +2956,119 @@ export default function Analytics({ project, course, onBack, qualAnalysisState, 
           project={project}
           onClose={() => setShowFileBrowserModal(false)}
         />
+      )}
+
+      {showMergeModal && mergeSource && (
+        <div className="modal-overlay" onClick={() => { setShowMergeModal(false); setMergeSource(null); }}>
+          <div className="modal-card card" onClick={e => e.stopPropagation()} style={{ maxWidth: '540px', width: '90%' }}>
+            <div className="modal-header">
+              <div className="modal-title-box">
+                <GitMerge size={20} className="primary-text" />
+                <h2>Merge Contributor Profile</h2>
+              </div>
+              <button 
+                className="close-btn" 
+                onClick={() => { setShowMergeModal(false); setMergeSource(null); }}
+              >
+                <X size={18} />
+              </button>
+            </div>
+            
+            <form onSubmit={handleMergeSubmit} className="modal-form" style={{ textAlign: 'left' }}>
+              
+              {/* Step 1: Source */}
+              <div style={{ marginBottom: '12px', padding: '12px', backgroundColor: 'var(--bg-app)', borderRadius: '6px', border: '1px solid var(--border-color)' }}>
+                <div style={{ fontSize: '0.75rem', fontWeight: 'bold', color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: '4px' }}>
+                  1. Profile to Merge (Will be Hidden / Merged)
+                </div>
+                <div style={{ fontSize: '0.9rem', fontWeight: '600', color: 'var(--text-main)' }}>
+                  {mergeSource.name}
+                </div>
+                <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', fontFamily: 'Fira Code, monospace' }}>
+                  {mergeSource.email || 'No email provided'}
+                </div>
+              </div>
+
+              {/* Direction Indicator + Swap affordance */}
+              <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', margin: '8px 0', gap: '8px', color: 'var(--primary)' }}>
+                <span style={{ fontSize: '0.85rem', fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Merge Into ↓</span>
+                {mergeTargetId && (
+                  <button
+                    type="button"
+                    className="btn btn-outline btn-sm"
+                    style={{ fontSize: '0.72rem', padding: '2px 8px', gap: '4px' }}
+                    onClick={() => {
+                      const targetContrib = analytics?.contributions?.find(c => String(c.author_id) === String(mergeTargetId));
+                      if (targetContrib) {
+                        const oldSource = { ...mergeSource };
+                        setMergeSource({ id: targetContrib.author_id, name: targetContrib.name, email: targetContrib.email });
+                        setMergeTargetId(String(oldSource.id));
+                      }
+                    }}
+                    title="Swap merge source and destination"
+                  >
+                    ⇄ Swap Direction
+                  </button>
+                )}
+              </div>
+
+              {/* Step 2: Target */}
+              <div style={{ marginBottom: '16px', padding: '12px', backgroundColor: 'var(--bg-app)', borderRadius: '6px', border: '1px solid var(--border-color)' }}>
+                <div style={{ fontSize: '0.75rem', fontWeight: 'bold', color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: '6px' }}>
+                  2. Destination Profile (Will Receive Data & Remain Active)
+                </div>
+                <select
+                  className="select-field"
+                  value={mergeTargetId}
+                  onChange={(e) => setMergeTargetId(e.target.value)}
+                  required
+                  style={{ width: '100%', padding: '8px' }}
+                >
+                  <option value="">Select target contributor profile...</option>
+                  {analytics?.contributions
+                    ?.filter(c => c.author_id !== mergeSource.id)
+                    ?.map(c => (
+                      <option key={c.author_id} value={c.author_id}>
+                        {c.name} ({c.email})
+                      </option>
+                    ))
+                  }
+                </select>
+                {(!analytics?.contributions || analytics.contributions.filter(c => c.author_id !== mergeSource.id).length === 0) && (
+                  <p style={{ marginTop: '8px', color: 'var(--color-danger)', fontSize: '0.8rem', margin: 0 }}>
+                    No other contributor profiles found in this project.
+                  </p>
+                )}
+              </div>
+
+              {/* Explanation Note */}
+              <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', backgroundColor: 'var(--bg-app)', border: '1px solid var(--border-color)', padding: '10px 12px', borderRadius: 'var(--radius-sm)', display: 'flex', gap: '8px', alignItems: 'flex-start', marginBottom: '16px' }}>
+                <span>💡</span>
+                <div>
+                  All commits, lines of code, and git activities from <strong>{mergeSource.name}</strong> will be consolidated under the destination profile. Workload distribution and qualitative analysis will be automatically recalculated.
+                </div>
+              </div>
+              
+              <div className="form-actions" style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px', marginTop: '20px' }}>
+                <button 
+                  type="button" 
+                  className="btn btn-secondary" 
+                  disabled={mergingIdentity}
+                  onClick={() => { setShowMergeModal(false); setMergeSource(null); }}
+                >
+                  Cancel
+                </button>
+                <button 
+                  type="submit" 
+                  className="btn btn-primary"
+                  disabled={!mergeTargetId || mergingIdentity}
+                >
+                  {mergingIdentity ? 'Merging...' : 'Confirm & Merge Profiles'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
       )}
 
     </div>

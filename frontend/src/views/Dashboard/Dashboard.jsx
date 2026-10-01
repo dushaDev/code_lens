@@ -122,7 +122,7 @@ export default function Dashboard({
 
         <div className="stat-card card">
           <div className="stat-card-header">
-            <div className="stat-icon-wrapper purple-icon">
+            <div className="stat-icon-wrapper blue-icon">
               <Users size={18} />
             </div>
             <span className="stat-label">Total Students Evaluated</span>

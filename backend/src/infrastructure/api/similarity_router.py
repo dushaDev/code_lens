@@ -18,7 +18,8 @@ from src.use_cases.detect_similarity import (
 )
 from src.infrastructure.auth.dependencies import get_current_user
 from src.infrastructure.database.models import UserModel, CourseModel, SimilarityReportModel
-from src.infrastructure.database.repositories import CourseRepository
+from src.infrastructure.database.repositories import CourseRepository, SimilarityRepository
+from src.infrastructure.services.winnowing_engine import WinnowingSimilarityEngine
 
 similarity_router = APIRouter(prefix="/api/v1", tags=["Similarity Detection"])
 
@@ -30,8 +31,8 @@ class SimilarityAnalyzeRequest(BaseModel):
         default=40.0, description="Flagging similarity percentage threshold (default: 40.0%)"
     )
     allowed_extensions: Optional[List[str]] = Field(
-        default=[".py", ".js", ".ts", ".jsx", ".tsx"],
-        description="Source file extensions to inspect",
+        default=None,
+        description="Source file extensions to inspect (default: all supported languages)",
     )
 
 
@@ -55,8 +56,10 @@ def run_similarity_analysis(
             detail=f"Course with ID {course_id} not found."
         )
     try:
+        similarity_repo = SimilarityRepository(db)
         result = analyze_course_similarity(
-            db=db,
+            repo=similarity_repo,
+            engine=WinnowingSimilarityEngine(),
             course_id=course_id,
             k=req.k,
             w=req.w,
@@ -93,15 +96,16 @@ def force_full_rescan(
             detail=f"Course with ID {course_id} not found."
         )
     try:
+        similarity_repo = SimilarityRepository(db)
         result = analyze_course_similarity(
-            db=db,
+            repo=similarity_repo,
             course_id=course_id,
             k=req.k,
             w=req.w,
             similarity_threshold=req.similarity_threshold,
             allowed_extensions=req.allowed_extensions,
         )
-        coverage = get_course_comparison_coverage(db=db, course_id=course_id)
+        coverage = get_course_comparison_coverage(repo=similarity_repo, course_id=course_id)
         result["coverage"] = coverage
         return result
     except ValueError as ve:
@@ -128,7 +132,8 @@ def get_similarity_coverage(
             detail=f"Course with ID {course_id} not found."
         )
     try:
-        return get_course_comparison_coverage(db=db, course_id=course_id)
+        similarity_repo = SimilarityRepository(db)
+        return get_course_comparison_coverage(repo=similarity_repo, course_id=course_id)
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -151,7 +156,8 @@ def list_similarity_reports(
             detail=f"Course with ID {course_id} not found."
         )
     try:
-        data = get_course_similarity_reports(db=db, course_id=course_id)
+        similarity_repo = SimilarityRepository(db)
+        data = get_course_similarity_reports(repo=similarity_repo, course_id=course_id)
         if isinstance(data, dict):
             return data
         return {"course_id": course_id, "total_reports": len(data), "reports": data, "clusters": []}

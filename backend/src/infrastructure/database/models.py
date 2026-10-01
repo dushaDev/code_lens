@@ -129,6 +129,7 @@ class AuthorModel(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     name: Mapped[str] = mapped_column(String, nullable=False)
     email: Mapped[str] = mapped_column(String, unique=True, nullable=False)
+    name_variants: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON-encoded list of distinct raw author names
 
     commits: Mapped[List["CommitModel"]] = relationship("CommitModel", back_populates="author")
 
@@ -161,6 +162,8 @@ class CommitModel(Base):
     insertions: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     deletions: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     is_squash_suspected: Mapped[bool] = mapped_column(Boolean, default=False)
+    committer_email: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    committer_name: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     branches: Mapped[List["BranchModel"]] = relationship(
         "BranchModel", secondary=commit_branches, back_populates="commits"
     )

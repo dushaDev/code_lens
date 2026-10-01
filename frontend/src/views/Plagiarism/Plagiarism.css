@@ -193,3 +193,15 @@
 .empty-alerts p {
   color: var(--text-muted);
 }
+
+.file-match-row {
+  border-radius: 4px;
+}
+
+.file-match-row:hover {
+  background-color: var(--bg-hover);
+}
+
+.file-match-row:hover td {
+  color: var(--text-main);
+}

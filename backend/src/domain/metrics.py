@@ -26,8 +26,8 @@ def get_gini_status(gini_val: float) -> str:
     Returns the standardized risk classification string for a given Gini coefficient value.
     """
     if gini_val < 0.3:
-        return "Low Risk (Well Distributed)"
+        return "Low Risk"
     elif gini_val < 0.5:
-        return "Medium Risk (Slightly Unequal)"
+        return "Medium Risk"
     else:
-        return "High Risk (Inequal / Free-rider Risk)"
+        return "High Risk"
