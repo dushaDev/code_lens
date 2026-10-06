@@ -25,6 +25,9 @@ share/python-wheels/
 .installed.cfg
 *.egg
 
+#
+.claude/
+
 # Virtual environments
 venv/
 .venv/
@@ -32,11 +35,15 @@ ENV/
 env/
 .env
 .env.example
+!backend/.env.example
 .env.local
 .env.*.local
 
 # Temp and test directories
+saved_repos/
+backend/saved_repos/
 temp_repos/
+backend/temp_repos/
 temp_test_clone/
 *.db
 *.sqlite3

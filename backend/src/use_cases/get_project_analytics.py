@@ -1,18 +1,9 @@
-from typing import List, Dict, Any
+import re
+from typing import List, Dict, Any, Set
 from src.use_cases.interfaces import IProjectRepository, IAuthorRepository, ICommitRepository
-
-def calculate_gini(contributions: List[int]) -> float:
-    if not contributions or sum(contributions) == 0:
-        return 0.0
-    n = len(contributions)
-    if n == 1:
-        return 0.0
-    
-    sorted_contribs = sorted(contributions)
-    height_sum = sum((i + 1) * val for i, val in enumerate(sorted_contribs))
-    total_sum = sum(sorted_contribs)
-    
-    return (2.0 * height_sum) / (n * total_sum) - (n + 1.0) / n
+from src.use_cases.author_utils import build_canonical_map
+from src.domain.identity_signals import is_bot_identity
+from src.domain.metrics import calculate_gini, get_gini_status
 
 class GetProjectAnalyticsUseCase:
     def __init__(
@@ -32,25 +23,15 @@ class GetProjectAnalyticsUseCase:
 
         # 1. Fetch all authors and commits for the project
         authors = self.author_repo.get_by_project_id(project_id)
+        # Exclude GitHub bot accounts — they are not students and skew Gini/percentages
+        authors = [a for a in authors if not is_bot_identity(a.name, a.email)]
         commits = self.commit_repo.get_by_project_id(project_id)
 
         total_commits = len(commits)
         total_insertions = sum(c.insertions for c in commits)
 
-        # Resolve each commit's author_id to its canonical root id (caching results)
-        canonical_id_map = {}
-        for c in commits:
-            author_id = c.author_id
-            if author_id not in canonical_id_map:
-                curr_id = author_id
-                visited = set()
-                while curr_id is not None and curr_id not in visited:
-                    visited.add(curr_id)
-                    author = self.author_repo.get_by_id(curr_id)
-                    if not author or author.canonical_author_id is None:
-                        break
-                    curr_id = author.canonical_author_id
-                canonical_id_map[author_id] = curr_id or author_id
+        # Resolve each author_id to its canonical root id
+        canonical_id_map = build_canonical_map(self.author_repo, authors)
 
         # Initialize tracking maps for authors
         contributions_map = {
@@ -60,10 +41,17 @@ class GetProjectAnalyticsUseCase:
                 "email": a.email,
                 "commit_count": 0,
                 "lines_added": 0,
+                "lines_removed": 0,
                 "contribution_percentage": 0.0
             }
             for a in authors
         }
+
+        direct_commit_emails: Set[str] = set()
+        co_author_emails: Set[str] = set()
+        
+        # Regex to match Co-authored-by: Name <email>
+        co_author_pattern = re.compile(r"Co-authored-by:\s*(.*?)\s*<(.*?)>", re.IGNORECASE)
 
         # 2. Aggregate commits and lines added per author (resolved to canonical)
         for c in commits:
@@ -71,6 +59,19 @@ class GetProjectAnalyticsUseCase:
             if canonical_author_id in contributions_map:
                 contributions_map[canonical_author_id]["commit_count"] += 1
                 contributions_map[canonical_author_id]["lines_added"] += c.insertions
+                contributions_map[canonical_author_id]["lines_removed"] += c.deletions or 0
+                
+                # Track direct committers
+                direct_commit_emails.add(contributions_map[canonical_author_id]["email"].lower())
+            
+            # Extract co-authors from commit message
+            if c.message:
+                matches = co_author_pattern.findall(c.message)
+                for name, email in matches:
+                    if not is_bot_identity(name, email):
+                        co_author_emails.add(email.lower().strip())
+
+        co_authors_only_count = len(co_author_emails - direct_commit_emails)
 
         # 3. Calculate percentages
         contributions_list = list(contributions_map.values())
@@ -85,18 +86,12 @@ class GetProjectAnalyticsUseCase:
         # Sort contributions descending by lines added
         contributions_list.sort(key=lambda x: x["lines_added"], reverse=True)
 
-        # 4. Calculate Gini Coefficient
-        # Extract lines added for each author as contribution values
-        lines_list = [contrib["lines_added"] for contrib in contributions_list]
-        gini = round(calculate_gini(lines_list), 4)
+        # 4. Calculate Gini Coefficient using lines added (consistent with qualitative analysis)
+        lines_added_list = [contrib["lines_added"] for contrib in contributions_list]
+        gini = calculate_gini(lines_added_list)
 
         # 5. Determine distribution status / risk category
-        if gini < 0.3:
-            status = "Low Risk (Well Distributed)"
-        elif gini < 0.5:
-            status = "Medium Risk (Slightly Unequal)"
-        else:
-            status = "High Risk (Knowledge Siloed)"
+        status = get_gini_status(gini)
 
         return {
             "project_id": project_id,
@@ -104,5 +99,7 @@ class GetProjectAnalyticsUseCase:
             "total_commits": total_commits,
             "total_insertions": total_insertions,
             "distribution_status": status,
-            "contributions": contributions_list
+            "contributions": contributions_list,
+            "co_authors_only_count": co_authors_only_count,
+            "language_distribution": self.project_repo.get_language_distribution(project_id)
         }

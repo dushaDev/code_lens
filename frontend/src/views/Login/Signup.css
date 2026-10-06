@@ -1,0 +1,4 @@
+/* Custom styles for standalone Signup page, inheriting variables and defaults */
+.signup-card {
+  transition: var(--transition);
+}

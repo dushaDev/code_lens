@@ -1,0 +1,208 @@
+.dashboard-view {
+  display: flex;
+  flex-direction: column;
+  gap: 32px;
+  text-align: left;
+}
+
+.dashboard-greeting h1 {
+  font-size: 1.85rem;
+  font-weight: 700;
+  color: var(--text-main);
+  letter-spacing: -0.025em;
+}
+
+/* Stats Cards */
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 24px;
+}
+
+.stat-card {
+  padding: 16px 20px;
+  display: flex;
+  flex-direction: column;
+  height: 136px;
+  justify-content: space-between;
+}
+
+.stat-card-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.stat-icon-wrapper {
+  width: 34px;
+  height: 34px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.blue-icon {
+  background-color: var(--primary-alpha);
+  color: var(--primary);
+}
+
+.purple-icon {
+  background-color: hsla(262, 80%, 50%, 0.08);
+  color: hsl(262, 80%, 50%);
+}
+
+.red-icon {
+  background-color: var(--color-danger-bg);
+  color: var(--color-danger);
+}
+
+.stat-label {
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: var(--text-muted);
+}
+
+.stat-card-body {
+  display: flex;
+  flex-direction: column;
+  margin-top: 10px;
+}
+
+.stat-value {
+  font-size: 2.25rem;
+  font-weight: 700;
+  color: var(--text-main);
+  line-height: 1;
+  margin-bottom: 6px;
+}
+
+.red-value {
+  color: var(--color-danger);
+}
+
+.stat-subtext {
+  font-size: 0.8rem;
+  color: var(--text-light);
+}
+
+.text-success {
+  color: var(--color-success);
+  font-weight: 500;
+}
+
+.warning-card {
+  border-color: rgba(239, 68, 68, 0.15);
+}
+
+/* Recent Projects Table Section */
+.recent-projects-section {
+  padding: 24px;
+}
+
+.recent-projects-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+}
+
+.recent-projects-header h2 {
+  font-size: 1.15rem;
+  font-weight: 600;
+  color: var(--text-main);
+}
+
+.export-btn {
+  border-color: var(--border-color);
+  padding: 8px 16px;
+  font-size: 0.85rem;
+}
+
+
+
+.tech-go {
+  background-color: #f0f9ff;
+  color: #0284c7;
+}
+
+.tech-rust {
+  background-color: #fff5f5;
+  color: #e53e3e;
+}
+
+.tech-ruby {
+  background-color: #fff5f7;
+  color: #d53f8c;
+}
+
+.tech-php {
+  background-color: #f5f3ff;
+  color: #6d28d9;
+}
+
+.tech-config {
+  background-color: #f3f4f6;
+  color: #374151;
+}
+
+.tech-md {
+  background-color: #ecfdf5;
+  color: #059669;
+}
+
+
+/* View Analytics Button */
+.view-analytics-btn {
+  padding: 8px 14px;
+  font-size: 0.8rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.empty-table-cell {
+  text-align: center;
+  padding: 32px !important;
+  color: var(--text-muted);
+}
+
+/* Create Project CTA box */
+.create-project-cta {
+  border: 2px dashed var(--border-color);
+  background-color: var(--bg-card);
+  padding: 24px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  cursor: pointer;
+  transition: var(--transition);
+}
+
+.create-project-cta:hover {
+  border-color: var(--primary) !important;
+  background-color: var(--bg-hover) !important;
+}
+
+.cta-icon-box {
+  color: var(--primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.cta-text {
+  text-align: left;
+}
+
+.cta-text h3 {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--text-main);
+  margin-bottom: 2px;
+}
+
+.cta-text p {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}

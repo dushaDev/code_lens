@@ -3,8 +3,14 @@ uvicorn[standard]>=0.23.0
 sqlalchemy>=2.0.0
 psycopg2-binary>=2.9.0
 pydantic>=2.0.0
+pydantic[email]>=2.0.0
 pydriller>=2.5.0
 python-dotenv>=1.0.0
+# Authentication
+python-jose[cryptography]>=3.3.0
+passlib[bcrypt]>=1.7.4
+bcrypt>=4.0.0,<5.0.0
+python-multipart>=0.0.6
 # AST parsing — tree-sitter core
 tree-sitter>=0.25.0
 # Language grammars
@@ -26,4 +32,19 @@ tree-sitter-bash>=0.25.0
 tree-sitter-lua>=0.5.0
 tree-sitter-php>=0.24.0
 tree-sitter-html>=0.23.0
+
 tree-sitter-css>=0.25.0
+# Local AI Integration
+ollama>=0.2.1
+# Cloud AI Integration (Google Gemini)
+google-generativeai>=0.8.0
+
+# PDF Report Generation
+weasyprint>=61.0
+jinja2>=3.1.0
+markdown>=3.6
+xhtml2pdf>=0.2.15
+matplotlib>=3.8.0
+# Rate limiting
+slowapi>=0.1.9
+

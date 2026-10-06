@@ -1,0 +1,252 @@
+.analytics-view {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  text-align: left;
+}
+
+.analytics-header {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  border-bottom: 1px solid var(--border-color);
+  padding-bottom: 24px;
+}
+
+.back-btn {
+  align-self: flex-start;
+  font-size: 0.85rem;
+}
+
+/* Page-Level Mode Switcher (Top Center Navigation) */
+.analytics-mode-switcher {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  background-color: var(--bg-card);
+  padding: 0;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-color);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+  z-index: 5;
+  overflow: hidden;
+}
+
+.analytics-mode-tab {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  white-space: nowrap;
+  padding: 8px 20px;
+  background-color: var(--bg-card);
+  border: none;
+  border-radius: 0;
+  color: var(--text-muted);
+  font-size: 0.88rem;
+  font-weight: 500;
+  font-family: inherit;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  position: relative;
+  user-select: none;
+}
+
+.analytics-mode-tab:first-child {
+  border-right: 1px solid var(--border-color);
+}
+
+.analytics-mode-tab .mode-tab-icon {
+  color: var(--text-muted);
+  transition: color 0.2s ease, transform 0.2s ease;
+  flex-shrink: 0;
+}
+
+.analytics-mode-tab:hover:not(.active) {
+  color: var(--text-main);
+  background-color: var(--bg-hover);
+}
+
+.analytics-mode-tab:hover:not(.active) .mode-tab-icon {
+  color: var(--text-main);
+}
+
+.analytics-mode-tab.active {
+  background-color: var(--primary-alpha);
+  color: var(--primary);
+  font-weight: 600;
+}
+
+.analytics-mode-tab.active .mode-tab-icon {
+  color: var(--primary);
+}
+
+.mode-tab-ready-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background-color: var(--color-success);
+  margin-left: 2px;
+  box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.2);
+}
+
+/* Smooth Tab Transition Animations */
+@keyframes analyticsTabFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.analytics-tab-content {
+  animation: analyticsTabFadeIn 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.header-text-block h1 {
+  font-size: 1.85rem;
+  font-weight: 700;
+  color: var(--text-main);
+}
+
+.analytics-content-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.analytics-summary-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 24px;
+  align-items: stretch;
+}
+
+.analytics-summary-cards .stat-card {
+  height: auto;
+  min-height: 140px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+
+/* Card Tooltip hover hint styling */
+.card-tooltip-trigger {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.card-tooltip-content {
+  visibility: hidden;
+  width: 280px;
+  max-width: min(280px, 85vw);
+  background-color: var(--bg-card);
+  color: var(--text-main);
+  border: 1px solid var(--border-color);
+  box-shadow: var(--shadow-lg);
+  border-radius: var(--radius-md);
+  padding: 10px 12px;
+  position: absolute;
+  z-index: 100;
+  top: calc(100% + 6px);
+  right: 0;
+  left: auto;
+  font-size: 0.8rem;
+  opacity: 0;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+  transform: translateY(4px);
+  pointer-events: none;
+}
+
+.card-tooltip-trigger:hover .card-tooltip-content {
+  visibility: visible;
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* Table cell overflow protection for fixed-layout table */
+.custom-table td,
+.custom-table th {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Progress bar */
+.progress-bar-cell {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+}
+
+.progress-text {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-main);
+  min-width: 44px;
+}
+
+.progress-track {
+  flex: 1;
+  height: 5px;
+  background-color: var(--bg-hover);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  border-radius: 4px;
+  transition: width 0.4s ease-out;
+}
+
+.progress-fill-good {
+  background-color: var(--color-success);
+}
+
+.progress-fill-warning {
+  background-color: var(--color-warning);
+}
+
+.progress-fill-danger {
+  background-color: var(--color-danger);
+}
+
+/* View Project on GitHub button and badge */
+.btn-view-github {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.85rem;
+  text-decoration: none !important;
+  color: var(--text-main);
+  background-color: var(--bg-hover);
+  border: 1px solid var(--border-color);
+  padding: 8px 14px;
+  border-radius: var(--radius-md);
+  font-weight: 500;
+  transition: all 0.2s ease;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.btn-view-github:hover {
+  background-color: var(--border-color);
+  color: var(--text-main);
+  text-decoration: none !important;
+  transform: translateY(-1px);
+}
+
+.project-github-badge:hover {
+  border-color: var(--primary) !important;
+  color: var(--primary) !important;
+}
+
