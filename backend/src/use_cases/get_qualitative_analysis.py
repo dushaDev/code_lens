@@ -487,15 +487,6 @@ class GetQualitativeAnalysisUseCase:
         is_solo = identity_analysis["is_solo_project"]
         co_authors_no_commits = identity_analysis.get("co_authors_no_commits", [])
 
-        if is_solo:
-            gini_val = 0.0
-            gini_status = "N/A (Single Contributor)"
-        else:
-            # Factor in non-committing co-authors as 0-commit contributors for realistic inequality assessment
-            gini_commit_counts = list(contrib_commit_counts) + [0] * len(co_authors_no_commits)
-            gini_val = calculate_gini(gini_commit_counts)
-            gini_status = get_gini_status(gini_val)
-
         # Pre-calculate total lines of code changed (LOC) across the project
         total_project_loc = 0
         canonical_loc_map = {}
@@ -510,6 +501,16 @@ class GetQualitativeAnalysisUseCase:
             canonical_added_map[cid] = author_added
             canonical_removed_map[cid] = author_removed
             total_project_loc += author_loc
+
+        if is_solo:
+            gini_val = 0.0
+            gini_status = "N/A (Single Contributor)"
+        else:
+            # Factor in non-committing co-authors as 0-lines contributors for realistic inequality assessment
+            contrib_lines_added = [canonical_added_map.get(cid, 0) for cid in active_canonical_ids]
+            gini_lines_added = list(contrib_lines_added) + [0] * len(co_authors_no_commits)
+            gini_val = calculate_gini(gini_lines_added)
+            gini_status = get_gini_status(gini_val)
 
         # Human commits only — bot commits must not dilute contributor shares.
         total_commits_all = sum(len(commits_by_author.get(cid, [])) for cid in active_canonical_ids)

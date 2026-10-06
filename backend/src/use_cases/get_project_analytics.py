@@ -86,9 +86,9 @@ class GetProjectAnalyticsUseCase:
         # Sort contributions descending by lines added
         contributions_list.sort(key=lambda x: x["lines_added"], reverse=True)
 
-        # 4. Calculate Gini Coefficient using commit count (consistent with qualitative analysis)
-        commit_count_list = [contrib["commit_count"] for contrib in contributions_list]
-        gini = calculate_gini(commit_count_list)
+        # 4. Calculate Gini Coefficient using lines added (consistent with qualitative analysis)
+        lines_added_list = [contrib["lines_added"] for contrib in contributions_list]
+        gini = calculate_gini(lines_added_list)
 
         # 5. Determine distribution status / risk category
         status = get_gini_status(gini)

@@ -113,7 +113,7 @@ def assess_contribution_quality(
         expected_avg_share: Fair-share percentage, i.e. 100 / num_members.
         commit_share: This identity's % of total commits.
         loc_share: This identity's % of total lines changed.
-        gini_val: Project commit-count Gini (0 = equal, 1 = maximally skewed).
+        gini_val: Project lines-added Gini (0 = equal, 1 = maximally skewed).
         lowest_commit_count: Smallest per-member commit count on the project.
         total_sampled_ai: Number of this identity's commits the local AI analyzed.
         vague_count: Analyzed commits with a vague message.
